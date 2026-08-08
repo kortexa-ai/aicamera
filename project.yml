@@ -4,7 +4,8 @@ options:
   bundleIdPrefix: ai.kortexa
   deploymentTarget:
     macOS: "14.0"
-  xcodeVersion: "16.0"
+  xcodeVersion: "15.0"
+  projectFormat: xcode15_0
   createIntermediateGroups: true
 
 configs:
