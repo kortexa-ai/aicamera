@@ -1,0 +1,11 @@
+AI Camera
+Copyright (c) 2026 Kortexa
+
+Sources/AICameraAudioDriver and Resources/AudioDriver are derived in part from
+Apple Inc.'s NullAudio Audio Server Plug-in sample. Apple's copyright and
+permission notice is retained in those files and at:
+
+docs/legal/APPLE_NULLAUDIO_LICENSE.txt
+
+The project-level MIT License applies to original AI Camera project code. It
+does not replace third-party notices retained with derived files.

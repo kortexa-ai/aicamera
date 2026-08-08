@@ -1,0 +1,4 @@
+// Copy to Local.xcconfig and set your Apple Developer Team ID for installable builds.
+// scripts/bootstrap.sh creates the local file and detects a signing identity when possible.
+DEVELOPMENT_TEAM =
+CODE_SIGN_STYLE = Automatic

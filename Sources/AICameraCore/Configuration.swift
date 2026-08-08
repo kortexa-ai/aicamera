@@ -1,0 +1,315 @@
+import Foundation
+
+public struct AICameraConfiguration: Codable, Equatable, Sendable {
+    public static let currentSchemaVersion = 1
+
+    public var schemaVersion: Int
+    public var profileName: String
+    public var capture: CaptureConfiguration
+    public var endpoints: [EndpointConfiguration]
+    public var pipeline: PipelineConfiguration
+    public var overlays: OverlayConfiguration
+    public var privacy: PrivacyConfiguration
+
+    public init(
+        schemaVersion: Int = Self.currentSchemaVersion,
+        profileName: String = "Default",
+        capture: CaptureConfiguration = .init(),
+        endpoints: [EndpointConfiguration] = [],
+        pipeline: PipelineConfiguration = .init(),
+        overlays: OverlayConfiguration = .init(),
+        privacy: PrivacyConfiguration = .init()
+    ) {
+        self.schemaVersion = schemaVersion
+        self.profileName = profileName
+        self.capture = capture
+        self.endpoints = endpoints
+        self.pipeline = pipeline
+        self.overlays = overlays
+        self.privacy = privacy
+    }
+
+    public static let `default` = AICameraConfiguration()
+}
+
+public struct CaptureConfiguration: Codable, Equatable, Sendable {
+    public var videoDeviceID: String?
+    public var audioDeviceID: String?
+    public var width: Int
+    public var height: Int
+    public var framesPerSecond: Int
+    public var mirrorVideo: Bool
+    public var audioSampleRate: Double
+    public var audioChannels: Int
+    /// Core Audio device UID that receives the mixed mic and TTS signal.
+    public var virtualAudioOutputDeviceID: String?
+    public var microphoneGain: Double
+    public var speechGain: Double
+
+    public init(
+        videoDeviceID: String? = nil,
+        audioDeviceID: String? = nil,
+        width: Int = 1280,
+        height: Int = 720,
+        framesPerSecond: Int = 30,
+        mirrorVideo: Bool = true,
+        audioSampleRate: Double = 48_000,
+        audioChannels: Int = 1,
+        virtualAudioOutputDeviceID: String? = "ai.kortexa.aicamera.audio.device",
+        microphoneGain: Double = 1,
+        speechGain: Double = 1
+    ) {
+        self.videoDeviceID = videoDeviceID
+        self.audioDeviceID = audioDeviceID
+        self.width = width
+        self.height = height
+        self.framesPerSecond = framesPerSecond
+        self.mirrorVideo = mirrorVideo
+        self.audioSampleRate = audioSampleRate
+        self.audioChannels = audioChannels
+        self.virtualAudioOutputDeviceID = virtualAudioOutputDeviceID
+        self.microphoneGain = microphoneGain
+        self.speechGain = speechGain
+    }
+}
+
+public enum AdapterKind: String, Codable, CaseIterable, Sendable {
+    case openAIChat
+    case openAIVision
+    case openAITranscription
+    case openAISpeech
+    case kortexaDetection
+    case kortexaPCMTranscription
+}
+
+public enum EndpointAuthKind: String, Codable, CaseIterable, Sendable {
+    case none
+    case bearerEnvironment
+    case apiKeyEnvironment
+    case bearerKeychain
+    case apiKeyKeychain
+}
+
+public struct EndpointAuthConfiguration: Codable, Equatable, Sendable {
+    public var kind: EndpointAuthKind
+    /// Environment variable name or Keychain account name. Never a secret value.
+    public var reference: String?
+    public var header: String
+    public var prefix: String
+
+    public init(
+        kind: EndpointAuthKind = .none,
+        reference: String? = nil,
+        header: String = "Authorization",
+        prefix: String = "Bearer "
+    ) {
+        self.kind = kind
+        self.reference = reference
+        self.header = header
+        self.prefix = prefix
+    }
+}
+
+public struct EndpointConfiguration: Codable, Equatable, Sendable, Identifiable {
+    public var id: String
+    public var adapter: AdapterKind
+    public var baseURL: URL
+    /// Optional path override. The adapter's compatible default path is used when nil.
+    public var path: String?
+    public var model: String?
+    public var auth: EndpointAuthConfiguration
+    public var timeoutSeconds: Double
+    public var options: [String: JSONValue]
+
+    public init(
+        id: String,
+        adapter: AdapterKind,
+        baseURL: URL,
+        path: String? = nil,
+        model: String? = nil,
+        auth: EndpointAuthConfiguration = .init(),
+        timeoutSeconds: Double = 20,
+        options: [String: JSONValue] = [:]
+    ) {
+        self.id = id
+        self.adapter = adapter
+        self.baseURL = baseURL
+        self.path = path
+        self.model = model
+        self.auth = auth
+        self.timeoutSeconds = timeoutSeconds
+        self.options = options
+    }
+}
+
+public enum VideoStageKind: String, Codable, CaseIterable, Sendable {
+    case handGesture
+    case objectDetection
+    case visionLanguage
+}
+
+public struct VideoStageConfiguration: Codable, Equatable, Sendable, Identifiable {
+    public var id: String
+    public var kind: VideoStageKind
+    public var enabled: Bool
+    public var endpointID: String?
+    public var maximumRateHz: Double
+    public var maximumFrameAgeMilliseconds: Int
+    public var prompt: String?
+    public var options: [String: JSONValue]
+
+    public init(
+        id: String,
+        kind: VideoStageKind,
+        enabled: Bool = true,
+        endpointID: String? = nil,
+        maximumRateHz: Double = 2,
+        maximumFrameAgeMilliseconds: Int = 1_000,
+        prompt: String? = nil,
+        options: [String: JSONValue] = [:]
+    ) {
+        self.id = id
+        self.kind = kind
+        self.enabled = enabled
+        self.endpointID = endpointID
+        self.maximumRateHz = maximumRateHz
+        self.maximumFrameAgeMilliseconds = maximumFrameAgeMilliseconds
+        self.prompt = prompt
+        self.options = options
+    }
+}
+
+public struct ConversationConfiguration: Codable, Equatable, Sendable {
+    public var enabled: Bool
+    public var transcriptionEndpointID: String?
+    public var agentEndpointID: String?
+    public var speechEndpointID: String?
+    public var systemPrompt: String
+    public var respondToFinalTranscripts: Bool
+    public var includeSceneSummary: Bool
+    public var speechVoice: String
+    public var speechInstructions: String?
+    public var utteranceSeconds: Double
+    public var bargeIn: Bool
+    public var respondToGestures: Bool
+    public var gestureCooldownSeconds: Double
+
+    public init(
+        enabled: Bool = false,
+        transcriptionEndpointID: String? = nil,
+        agentEndpointID: String? = nil,
+        speechEndpointID: String? = nil,
+        systemPrompt: String = "You are an assistant present in a live camera conversation. Respond briefly and never claim to see facts that are not in the supplied scene context.",
+        respondToFinalTranscripts: Bool = true,
+        includeSceneSummary: Bool = true,
+        speechVoice: String = "aiden",
+        speechInstructions: String? = nil,
+        utteranceSeconds: Double = 3,
+        bargeIn: Bool = true,
+        respondToGestures: Bool = true,
+        gestureCooldownSeconds: Double = 2
+    ) {
+        self.enabled = enabled
+        self.transcriptionEndpointID = transcriptionEndpointID
+        self.agentEndpointID = agentEndpointID
+        self.speechEndpointID = speechEndpointID
+        self.systemPrompt = systemPrompt
+        self.respondToFinalTranscripts = respondToFinalTranscripts
+        self.includeSceneSummary = includeSceneSummary
+        self.speechVoice = speechVoice
+        self.speechInstructions = speechInstructions
+        self.utteranceSeconds = utteranceSeconds
+        self.bargeIn = bargeIn
+        self.respondToGestures = respondToGestures
+        self.gestureCooldownSeconds = gestureCooldownSeconds
+    }
+}
+
+public struct PipelineConfiguration: Codable, Equatable, Sendable {
+    public var videoStages: [VideoStageConfiguration]
+    public var conversation: ConversationConfiguration
+
+    public init(
+        videoStages: [VideoStageConfiguration] = [
+            .init(id: "hands", kind: .handGesture, maximumRateHz: 8)
+        ],
+        conversation: ConversationConfiguration = .init()
+    ) {
+        self.videoStages = videoStages
+        self.conversation = conversation
+    }
+}
+
+public struct OverlayConfiguration: Codable, Equatable, Sendable {
+    public var enabled: Bool
+    public var showDetectionBoxes: Bool
+    public var showGestureLabels: Bool
+    public var showTranscript: Bool
+    public var showAgentResponse: Bool
+    public var showStatus: Bool
+    public var resultTTLSeconds: Double
+    public var accentHex: String
+
+    public init(
+        enabled: Bool = true,
+        showDetectionBoxes: Bool = true,
+        showGestureLabels: Bool = true,
+        showTranscript: Bool = true,
+        showAgentResponse: Bool = true,
+        showStatus: Bool = true,
+        resultTTLSeconds: Double = 4,
+        accentHex: String = "#59F3C2"
+    ) {
+        self.enabled = enabled
+        self.showDetectionBoxes = showDetectionBoxes
+        self.showGestureLabels = showGestureLabels
+        self.showTranscript = showTranscript
+        self.showAgentResponse = showAgentResponse
+        self.showStatus = showStatus
+        self.resultTTLSeconds = resultTTLSeconds
+        self.accentHex = accentHex
+    }
+}
+
+public enum NetworkPrivacyMode: String, Codable, CaseIterable, Sendable {
+    case localOnly
+    case allowListed
+}
+
+public enum MediaDataClass: String, Codable, CaseIterable, Hashable, Sendable {
+    case rawAudio
+    case rawFrame
+    case transcript
+    case sceneMetadata
+    case promptText
+}
+
+public struct EndpointPrivacyGrant: Codable, Equatable, Sendable {
+    public var endpointID: String
+    public var allowedData: Set<MediaDataClass>
+
+    public init(endpointID: String, allowedData: Set<MediaDataClass>) {
+        self.endpointID = endpointID
+        self.allowedData = allowedData
+    }
+}
+
+public struct PrivacyConfiguration: Codable, Equatable, Sendable {
+    public var networkMode: NetworkPrivacyMode
+    /// Exact host names that may receive data when `networkMode` is `allowListed`.
+    public var allowedHosts: [String]
+    public var grants: [EndpointPrivacyGrant]
+    public var persistMedia: Bool
+
+    public init(
+        networkMode: NetworkPrivacyMode = .localOnly,
+        allowedHosts: [String] = [],
+        grants: [EndpointPrivacyGrant] = [],
+        persistMedia: Bool = false
+    ) {
+        self.networkMode = networkMode
+        self.allowedHosts = allowedHosts
+        self.grants = grants
+        self.persistMedia = persistMedia
+    }
+}

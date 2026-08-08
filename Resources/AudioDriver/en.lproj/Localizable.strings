@@ -1,0 +1,12 @@
+/*
+Derived from Apple’s “Creating an Audio Server Driver Plug-in” NullAudio sample.
+See docs/legal/APPLE_NULLAUDIO_LICENSE.txt for Apple’s copyright and license notice.
+*/
+
+"DeviceName" = "AI Camera Microphone";
+"InputStreamName" = "AI Camera Microphone Input";
+"OutputStreamName" = "AI Camera Microphone Output";
+"ManufacturerName" = "Kortexa";
+"MasterElementName" = "Master";
+"LeftElementName" = "Left";
+"RightElementName" = "Right";

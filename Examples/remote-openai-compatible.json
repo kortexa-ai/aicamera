@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "profileName": "Remote OpenAI-compatible example",
+  "capture": {
+    "width": 1280,
+    "height": 720,
+    "framesPerSecond": 30,
+    "mirrorVideo": true,
+    "audioSampleRate": 48000,
+    "audioChannels": 1,
+    "virtualAudioOutputDeviceID": "ai.kortexa.aicamera.audio.device",
+    "microphoneGain": 1,
+    "speechGain": 1
+  },
+  "endpoints": [
+    {
+      "id": "asr",
+      "adapter": "openAITranscription",
+      "baseURL": "https://models.example.com",
+      "model": "whisper-1",
+      "auth": {
+        "kind": "bearerEnvironment",
+        "reference": "AICAMERA_API_KEY",
+        "header": "Authorization",
+        "prefix": "Bearer "
+      },
+      "timeoutSeconds": 30,
+      "options": {}
+    },
+    {
+      "id": "agent",
+      "adapter": "openAIChat",
+      "baseURL": "https://models.example.com",
+      "model": "chat-model",
+      "auth": {
+        "kind": "bearerEnvironment",
+        "reference": "AICAMERA_API_KEY",
+        "header": "Authorization",
+        "prefix": "Bearer "
+      },
+      "timeoutSeconds": 30,
+      "options": {
+        "temperature": 0.3,
+        "max_tokens": 256
+      }
+    },
+    {
+      "id": "speech",
+      "adapter": "openAISpeech",
+      "baseURL": "https://models.example.com",
+      "model": "tts-model",
+      "auth": {
+        "kind": "bearerEnvironment",
+        "reference": "AICAMERA_API_KEY",
+        "header": "Authorization",
+        "prefix": "Bearer "
+      },
+      "timeoutSeconds": 60,
+      "options": {}
+    }
+  ],
+  "pipeline": {
+    "videoStages": [
+      {
+        "id": "hands",
+        "kind": "handGesture",
+        "enabled": true,
+        "maximumRateHz": 8,
+        "maximumFrameAgeMilliseconds": 250,
+        "options": {}
+      }
+    ],
+    "conversation": {
+      "enabled": true,
+      "transcriptionEndpointID": "asr",
+      "agentEndpointID": "agent",
+      "speechEndpointID": "speech",
+      "systemPrompt": "You are an assistant present in a live camera conversation. Respond briefly and never claim to see facts that are not in the supplied scene context.",
+      "respondToFinalTranscripts": true,
+      "includeSceneSummary": true,
+      "speechVoice": "aiden",
+      "utteranceSeconds": 3,
+      "bargeIn": true,
+      "respondToGestures": true,
+      "gestureCooldownSeconds": 2
+    }
+  },
+  "overlays": {
+    "enabled": true,
+    "showDetectionBoxes": true,
+    "showGestureLabels": true,
+    "showTranscript": true,
+    "showAgentResponse": true,
+    "showStatus": true,
+    "resultTTLSeconds": 4,
+    "accentHex": "#59F3C2"
+  },
+  "privacy": {
+    "networkMode": "allowListed",
+    "allowedHosts": [
+      "models.example.com"
+    ],
+    "grants": [
+      {
+        "endpointID": "asr",
+        "allowedData": [
+          "rawAudio"
+        ]
+      },
+      {
+        "endpointID": "agent",
+        "allowedData": [
+          "promptText",
+          "transcript",
+          "sceneMetadata"
+        ]
+      },
+      {
+        "endpointID": "speech",
+        "allowedData": [
+          "promptText"
+        ]
+      }
+    ],
+    "persistMedia": false
+  }
+}

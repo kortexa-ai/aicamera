@@ -1,0 +1,142 @@
+name: AICamera
+
+options:
+  bundleIdPrefix: ai.kortexa
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  createIntermediateGroups: true
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    CLANG_ENABLE_MODULES: true
+  configs:
+    Debug:
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+    Release:
+      SWIFT_COMPILATION_MODE: wholemodule
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+
+targets:
+  AICameraCore:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/AICameraCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.kortexa.aicamera.core
+        DEFINES_MODULE: true
+        SKIP_INSTALL: true
+        CODE_SIGNING_ALLOWED: false
+        GENERATE_INFOPLIST_FILE: true
+
+  AICamera:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/AICameraApp
+      - path: Sources/AICameraShared
+    configFiles:
+      Debug: Config/Local.xcconfig
+      Release: Config/Local.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.kortexa.aicamera
+        PRODUCT_NAME: AI Camera
+        INFOPLIST_FILE: Resources/App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Resources/App/AICamera.entitlements
+        ENABLE_HARDENED_RUNTIME: true
+        GENERATE_INFOPLIST_FILE: false
+    dependencies:
+      - target: AICameraCore
+      - target: AICameraCameraExtension
+        embed: true
+        codeSign: true
+      - target: AICameraAudio
+
+  AICameraCameraExtension:
+    type: system-extension
+    platform: macOS
+    sources:
+      - path: Sources/AICameraCameraExtension
+      - path: Sources/AICameraShared
+    configFiles:
+      Debug: Config/Local.xcconfig
+      Release: Config/Local.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.kortexa.aicamera.camera-extension
+        PRODUCT_NAME: ai.kortexa.aicamera.camera-extension
+        INFOPLIST_FILE: Resources/CameraExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Resources/CameraExtension/AICameraCameraExtension.entitlements
+        ENABLE_HARDENED_RUNTIME: true
+        GENERATE_INFOPLIST_FILE: false
+    dependencies:
+      - sdk: CoreMediaIO.framework
+      - sdk: CoreMedia.framework
+      - sdk: CoreVideo.framework
+
+  AICameraAudio:
+    type: bundle
+    platform: macOS
+    sources:
+      - path: Sources/AICameraAudioDriver
+      - path: Resources/AudioDriver/en.lproj
+        buildPhase: resources
+      - path: Resources/AudioDriver/APPLE_NULLAUDIO_LICENSE.txt
+        buildPhase: resources
+    configFiles:
+      Debug: Config/Local.xcconfig
+      Release: Config/Local.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.kortexa.aicamera.audio.driver
+        PRODUCT_NAME: AICameraAudioDriver
+        INFOPLIST_FILE: Resources/AudioDriver/Info.plist
+        GENERATE_INFOPLIST_FILE: false
+        WRAPPER_EXTENSION: driver
+        INSTALL_PATH: "$(LOCAL_LIBRARY_DIR)/Audio/Plug-Ins/HAL"
+        SKIP_INSTALL: true
+        CLANG_C_LANGUAGE_STANDARD: c11
+        GCC_SYMBOLS_PRIVATE_EXTERN: false
+        ENABLE_HARDENED_RUNTIME: true
+    dependencies:
+      - sdk: CoreAudio.framework
+      - sdk: CoreFoundation.framework
+
+  AICameraCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/AICameraCoreTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.kortexa.aicamera.core-tests
+        CODE_SIGNING_ALLOWED: false
+    dependencies:
+      - target: AICameraCore
+
+schemes:
+  AICamera:
+    build:
+      targets:
+        AICamera: all
+        AICameraCoreTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AICameraCoreTests
+    archive:
+      config: Release

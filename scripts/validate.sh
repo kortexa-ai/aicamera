@@ -1,0 +1,56 @@
+#!/bin/bash
+set -euo pipefail
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." >/dev/null 2>&1 && pwd -P)"
+cd "$ROOT"
+
+swift test
+"$ROOT/scripts/bootstrap.sh"
+
+find Resources \( -name '*.plist' -o -name '*.entitlements' \) -print0 \
+    | while IFS= read -r -d '' plist; do
+        plutil -lint "$plist"
+    done
+
+SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+xcrun --sdk macosx clang \
+    -std=c11 -fsyntax-only -Wall -Wextra -Wpedantic -Werror \
+    -isysroot "$SDKROOT" \
+    Sources/AICameraAudioDriver/AICameraAudioDriver.c
+
+xcodebuild \
+    -project AICamera.xcodeproj \
+    -scheme AICamera \
+    -configuration Debug \
+    -destination 'platform=macOS' \
+    -derivedDataPath "$ROOT/build/DerivedData-Validation" \
+    CODE_SIGNING_ALLOWED=NO \
+    build
+
+APP="$ROOT/build/DerivedData-Validation/Build/Products/Debug/AI Camera.app"
+DRIVER="$APP/Contents/Resources/AICameraAudioDriver.driver"
+CAMERA_EXTENSION="$APP/Contents/Library/SystemExtensions/ai.kortexa.aicamera.camera-extension.systemextension"
+test -d "${APP:?}"
+test -d "${DRIVER:?}"
+test -d "${CAMERA_EXTENSION:?}"
+test -f "$DRIVER/Contents/Resources/en.lproj/Localizable.strings"
+test -f "$DRIVER/Contents/Resources/APPLE_NULLAUDIO_LICENSE.txt"
+plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist" \
+    | grep -qx 'ai.kortexa.aicamera'
+plutil -extract CFBundleIdentifier raw "$DRIVER/Contents/Info.plist" \
+    | grep -qx 'ai.kortexa.aicamera.audio.driver'
+plutil -extract CFBundleIdentifier raw "$CAMERA_EXTENSION/Contents/Info.plist" \
+    | grep -qx 'ai.kortexa.aicamera.camera-extension'
+nm -gU "$DRIVER/Contents/MacOS/AICameraAudioDriver" \
+    | grep -q '_AICameraAudioDriver_Create'
+
+HARNESS="$ROOT/build/aicamera-audio-driver-harness"
+xcrun --sdk macosx clang \
+    -std=c11 -Wall -Wextra -Wpedantic -Werror \
+    -isysroot "$SDKROOT" \
+    Tests/AICameraAudioDriverTests/LoopbackHarness.c \
+    -framework CoreAudio -framework CoreFoundation \
+    -o "$HARNESS"
+"$HARNESS" "$DRIVER"
+
+echo "Validation passed. No driver or system extension was installed."

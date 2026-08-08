@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleDisplayName</key>
+    <string>AI Camera</string>
+    <key>CFBundleName</key>
+    <string>AI Camera</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(MARKETING_VERSION)</string>
+    <key>CFBundleVersion</key>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSCameraUsageDescription</key>
+    <string>AI Camera uses the selected camera to create the processed virtual camera stream.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>AI Camera uses the selected microphone for transcription and the mixed virtual microphone stream.</string>
+    <key>NSSystemExtensionUsageDescription</key>
+    <string>AI Camera installs a camera extension so other apps can select the processed video stream.</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © Kortexa.</string>
+</dict>
+</plist>
