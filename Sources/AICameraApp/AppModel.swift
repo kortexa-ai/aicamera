@@ -4,6 +4,11 @@ import AVFoundation
 import Combine
 import Foundation
 
+// The producer relinquishes the preview after invoking its callback; only the main actor uses it.
+private struct SendableImage: @unchecked Sendable {
+    let value: NSImage
+}
+
 private final class PipelineRunGate: @unchecked Sendable {
     private let lock = NSLock()
     private var active = true
@@ -186,24 +191,24 @@ final class AppModel: ObservableObject {
             secrets: AppSecretResolver(),
             onSnapshot: { [weak self] snapshot in
                 guard gate.isActive else { return }
-                Task { @MainActor in
+                Task { @MainActor [weak model = self] in
                     guard gate.isActive else { return }
-                    self?.currentSnapshot = snapshot
-                    self?.videoController?.update(snapshot: snapshot)
+                    model?.currentSnapshot = snapshot
+                    model?.videoController?.update(snapshot: snapshot)
                 }
             },
             onSpeech: { [weak self] data in
                 guard gate.isActive else { return }
-                Task { @MainActor in
+                Task { @MainActor [weak model = self] in
                     guard gate.isActive else { return }
-                    self?.audioController?.playSpeech(wavData: data)
+                    model?.audioController?.playSpeech(wavData: data)
                 }
             },
             onError: { [weak self] message in
                 guard gate.isActive else { return }
-                Task { @MainActor in
+                Task { @MainActor [weak model = self] in
                     guard gate.isActive else { return }
-                    self?.lastError = message
+                    model?.lastError = message
                 }
             }
         )
@@ -211,9 +216,10 @@ final class AppModel: ObservableObject {
             configuration: configuration,
             onPreview: { [weak self] image in
                 guard gate.isActive else { return }
-                Task { @MainActor in
+                let sendableImage = SendableImage(value: image)
+                Task { @MainActor [weak model = self, sendableImage] in
                     guard gate.isActive else { return }
-                    self?.previewImage = image
+                    model?.previewImage = sendableImage.value
                 }
             },
             onGestures: { observations, frameID in
@@ -232,9 +238,9 @@ final class AppModel: ObservableObject {
             },
             onError: { [weak self] message in
                 guard gate.isActive else { return }
-                Task { @MainActor in
+                Task { @MainActor [weak model = self] in
                     guard gate.isActive else { return }
-                    self?.lastError = message
+                    model?.lastError = message
                 }
             }
         )
