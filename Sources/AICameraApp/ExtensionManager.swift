@@ -6,6 +6,7 @@ enum CameraExtensionStatus: Equatable {
     case unknown
     case activating
     case active
+    case updateAvailable
     case deactivating
     case inactive
     case needsApproval
@@ -21,6 +22,7 @@ enum CameraExtensionStatus: Equatable {
         case .unknown: return "Unknown"
         case .activating: return "Activating…"
         case .active: return "Ready"
+        case .updateAvailable: return "Update available"
         case .deactivating: return "Deactivating…"
         case .inactive: return "Not installed"
         case .needsApproval: return "Approval required"
@@ -93,11 +95,24 @@ final class CameraExtensionManager: NSObject, ObservableObject {
         Bundle.main.bundleURL.standardizedFileURL.path.hasPrefix("/Applications/")
     }
 
-    private var bundledExtensionExists: Bool {
-        let url = Bundle.main.bundleURL
+    private var bundledExtensionURL: URL {
+        Bundle.main.bundleURL
             .appendingPathComponent("Contents/Library/SystemExtensions")
             .appendingPathComponent("\(Self.bundleIdentifier).systemextension")
-        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    private var bundledExtensionExists: Bool {
+        FileManager.default.fileExists(atPath: bundledExtensionURL.path)
+    }
+
+    private var bundledExtensionVersion: String? {
+        Bundle(url: bundledExtensionURL)?
+            .object(forInfoDictionaryKey: kCFBundleVersionKey as String) as? String
+    }
+
+    private func bundledExtensionIsNewer(than installedVersion: String) -> Bool {
+        guard let bundledExtensionVersion else { return false }
+        return installedVersion.compare(bundledExtensionVersion, options: .numeric) == .orderedAscending
     }
 }
 
@@ -147,15 +162,25 @@ extension CameraExtensionManager: OSSystemExtensionRequestDelegate {
     ) {
         Task { @MainActor in
             self.pendingAction = nil
-            guard let property = properties.first else {
+            guard !properties.isEmpty else {
                 self.status = .inactive
                 return
             }
-            if property.isAwaitingUserApproval {
+            if properties.contains(where: \.isAwaitingUserApproval) {
                 self.status = .needsApproval
-            } else {
-                self.status = property.isEnabled ? .active : .inactive
+                return
             }
+            guard let property = properties
+                .filter(\.isEnabled)
+                .max(by: {
+                    $0.bundleVersion.compare($1.bundleVersion, options: .numeric) == .orderedAscending
+                }) else {
+                self.status = .inactive
+                return
+            }
+            self.status = self.bundledExtensionIsNewer(than: property.bundleVersion)
+                ? .updateAvailable
+                : .active
         }
     }
 }

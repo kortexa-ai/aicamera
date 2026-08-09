@@ -37,12 +37,13 @@ Use a signed app installed in `/Applications`.
 
 ### Camera
 
-1. Activate and approve the extension.
-2. Start AI Camera with a hardware camera.
-3. In QuickTime Player, create a movie recording and select **AI Camera**.
-4. Confirm the processed picture, overlay alignment, frame continuity, and placeholder when the host stops.
-5. Repeat with a second client and the configured format.
-6. Deactivate the extension and confirm that the device disappears after the OS completes removal.
+1. Activate and approve the extension. If the installed build is older, use the explicit **Update** action first.
+2. Before starting the host, use a bounded AVFoundation client to confirm the animated placeholder, strictly increasing timestamps, and changing in-memory frame hashes. Do not record frames.
+3. Start AI Camera with a hardware camera.
+4. In QuickTime Player, create a movie recording and select **AI Camera**.
+5. Confirm the processed picture, overlay alignment, frame continuity, and return to the placeholder when the host stops.
+6. Repeat the bounded client after host stop/start and with a second simultaneous client at the configured format.
+7. Deactivate the extension and confirm that the device disappears after the OS completes removal.
 
 ### Audio
 

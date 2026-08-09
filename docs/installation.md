@@ -23,11 +23,12 @@ A plain `scripts/build.sh` is unsigned and cannot activate the extension.
 
 1. Install and open the signed host app from `/Applications`.
 2. Open the AI Camera menu-bar panel.
-3. Select **Activate Camera Extension**.
-4. If status is **Approval required**, select **Open Approval Settings** and approve it.
-5. If status is **Pending reboot**, restart macOS.
+3. Select **Install** for the virtual camera.
+4. If a newer extension is bundled later, the row reports **Update available**. Select **Update**; do not remove the active extension first.
+5. If status is **Approval required**, select **Open Extension Settings** and approve it.
+6. If status is **Pending reboot**, restart macOS.
 
-Use **Unregister Camera** before removing the app. Deactivation can also require approval or a reboot. The app submits `OSSystemExtensionRequest`; it never edits system-extension directories directly.
+Select **Remove** for the virtual camera before removing the app. Deactivation can also require approval or a reboot. The app submits `OSSystemExtensionRequest`; it never edits system-extension directories directly.
 
 ## Audio driver
 
@@ -52,7 +53,7 @@ The camera extension itself does not make network requests. It receives processe
 ## Removal order
 
 1. Stop the proxy.
-2. Select **Unregister Camera** and complete any approval/reboot step.
+2. Select **Remove** for the virtual camera and complete any approval/reboot step.
 3. Select **Remove Audio Driver**.
 4. Quit AI Camera.
 5. Remove `/Applications/AI Camera.app`.

@@ -174,9 +174,14 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
     }
 
     func authorizeSink(client: CMIOExtensionClient) -> Bool {
-        // Only the companion host may write processed frames. Source/capture clients remain open.
-        guard client.signingID == AICameraVirtualCamera.hostBundleIdentifier else {
-            logger.error("Rejected feeder client with signing ID \(client.signingID ?? "<none>", privacy: .public)")
+        // Only the same-team companion host may write processed frames. CoreMediaIO reports
+        // unsandboxed clients as `unknown`, so validate the live client PID's code signature too.
+        let decision = CompanionHostAuthorizer.evaluate(pid: client.pid)
+        guard decision.isAuthorized else {
+            let reportedIDMatches = client.signingID == AICameraVirtualCamera.hostBundleIdentifier
+            logger.error(
+                "Rejected feeder client pid \(client.pid, privacy: .public), reported ID matched: \(reportedIDMatches, privacy: .public): \(decision.reason, privacy: .public)"
+            )
             return false
         }
         stateLock.lock()
@@ -592,10 +597,11 @@ final class CameraExtensionStreamSource: NSObject, CMIOExtensionStreamSource {
 
     func authorizedToStartStream(for client: CMIOExtensionClient) -> Bool {
         guard direction == .sink else { return true }
-        guard deviceSource?.authorizeSink(client: client) == true else { return false }
         clientLock.lock()
+        defer { clientLock.unlock() }
+        approvedSinkClient = nil
+        guard deviceSource?.authorizeSink(client: client) == true else { return false }
         approvedSinkClient = client
-        clientLock.unlock()
         return true
     }
 

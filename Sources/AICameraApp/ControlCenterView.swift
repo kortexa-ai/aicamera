@@ -63,6 +63,7 @@ struct ControlCenterView: View {
                 status: model.cameraExtensionManager.status.label,
                 installed: model.cameraExtensionManager.status == .active,
                 busy: model.deviceOperationInProgress,
+                update: model.cameraExtensionManager.status == .updateAvailable,
                 install: model.activateCameraExtension,
                 uninstall: model.deactivateCameraExtension
             )
@@ -117,6 +118,7 @@ struct DeviceStatusRow: View {
     let status: String
     let installed: Bool
     let busy: Bool
+    var update = false
     let install: () -> Void
     let uninstall: () -> Void
 
@@ -130,7 +132,7 @@ struct DeviceStatusRow: View {
                 Text(status).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
-            Button(installed ? "Remove" : "Install", action: installed ? uninstall : install)
+            Button(update ? "Update" : (installed ? "Remove" : "Install"), action: installed ? uninstall : install)
                 .controlSize(.small)
                 .disabled(busy)
         }

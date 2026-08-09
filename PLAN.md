@@ -47,8 +47,8 @@ AICamera is a configurable macOS audio/video proxy. The host captures a physical
 - [x] Verify non-silent microphone loopback in independent audio clients and silence after proxy stop.
 - [x] Normalize ready-state wording, fix Settings navigation, and show identical install status on the main and Privacy pages.
 - [x] Correct nominal 29.97/30 fps matching and the host's reversed CoreMediaIO sink-stream selection.
-- [ ] Complete the pending camera-extension replacement after a user-approved reboot.
-- [ ] Run the bounded native frame canary for placeholder, live, stop/start, and multiple-client behavior.
+- [x] Reboot, activate the corrected camera extension, and verify its native animated placeholder with a bounded in-memory AVFoundation canary.
+- [ ] Install and activate build 2 with PID-bound code-requirement sink authorization, then run live, stop/start, and multiple-client frame acceptance.
 - [x] Complete silent ASR toggle, wake-phrase, agent, bounded streamed-TTS mixing, and barge-in acceptance with a development-signed build.
 - [ ] Install the latest accepted build and repeat the short Yeti/HyperX human audio check.
 

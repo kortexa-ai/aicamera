@@ -19,9 +19,10 @@ Safe validation does not request media access, start inference services, install
 
 ## Development-signed device acceptance
 
-- `/Applications/AI Camera.app` was installed and strict signature verification passed. It predates the final playback-lifetime fixes and must be replaced before the next human check.
+- The published build at commit `cfc08f2` was installed at `/Applications/AI Camera.app` after the approved reboot, and strict nested signature verification passed. It is build 1 and predates the build-2 sink-authorization correction described below.
 - The HAL driver is installed at `/Library/Audio/Plug-Ins/HAL/AICameraAudioDriver.driver`. It publishes the duplex **AI Camera Microphone** device with UID `ai.kortexa.aicamera.audio.device` at 48 kHz. Independent clients captured non-silent microphone loopback, concurrent reads, and silence after proxy stop.
-- The camera extension was activated during this pass. The corrected replacement is now `terminated waiting to uninstall on reboot`; no reboot was performed.
+- The camera extension is now `activated enabled`. A native AVFoundation canary discovered **AI Camera** by its stable UUID, captured 12 animated 1920×1080 placeholder frames, observed 12 distinct in-memory hashes and strictly increasing presentation timestamps, and wrote no media to disk. Repeated source start/stop capture also passed.
+- The first host-feeder attempt exposed one fail-closed compatibility defect: CoreMediaIO reported the valid unsandboxed host signing ID as `unknown`, so build 1 correctly rejected the sink but could not publish live frames. Build 2 now validates the live client PID against a cached Security requirement containing the Apple anchor, exact host identifier, and the extension's own signing-team OU. A sandboxed Apple Development-signed probe accepted the installed host and rejected an unrelated signed app and a missing PID. Build 2 has not yet replaced the active extension.
 - The local ASR, Qwen agent, and TTS routes each passed their changed request path. The ASR service used the pinned MLX 0.31.1 runtime and accepted both WAV and raw PCM requests.
 
 ## Silent end-to-end speech acceptance
@@ -39,8 +40,8 @@ After acceptance, AI Camera and the ASR/TTS/agent services were stopped. The def
 
 ## Remaining manual acceptance
 
-- Install the latest development-signed app build and run one short audible Yeti/HyperX check.
-- After explicit reboot approval, complete the pending camera-extension replacement and run the bounded native AVFoundation canary for placeholder, live frames, stop/start, increasing timestamps, and multiple clients.
+- Install build 2, select the explicit camera-extension **Update** action, and complete bounded native AVFoundation acceptance for live frames, host stop/start, and multiple clients. Placeholder and timestamp acceptance already pass.
+- Run one short audible Yeti/HyperX check with the latest development-signed app build.
 - Complete Developer ID signing, notarization, clean-machine upgrade/rollback, and uninstall checks.
 
 These checks can change system state, request authorization, interrupt audio, or require a reboot. They remain manual and approval-gated.

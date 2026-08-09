@@ -17,7 +17,7 @@ settings:
     SWIFT_VERSION: "5.10"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    CURRENT_PROJECT_VERSION: "2"
     CODE_SIGN_STYLE: Automatic
     CLANG_ENABLE_MODULES: true
   configs:
@@ -86,6 +86,7 @@ targets:
       - sdk: CoreMediaIO.framework
       - sdk: CoreMedia.framework
       - sdk: CoreVideo.framework
+      - sdk: Security.framework
 
   AICameraAudio:
     type: bundle

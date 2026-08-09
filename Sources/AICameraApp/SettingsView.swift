@@ -133,6 +133,7 @@ struct SettingsView: View {
                     status: model.cameraExtensionManager.status.label,
                     installed: model.cameraExtensionManager.status == .active,
                     busy: model.deviceOperationInProgress,
+                    update: model.cameraExtensionManager.status == .updateAvailable,
                     install: model.activateCameraExtension,
                     uninstall: model.deactivateCameraExtension
                 )

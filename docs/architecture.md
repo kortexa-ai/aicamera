@@ -52,6 +52,8 @@ The app stores only the current scene state. It does not write frames or audio t
 
 The host captures BGRA frames. `OverlayRenderer` aspect-fills and optionally mirrors them into the selected virtual output size. It draws the current `SceneSnapshot` and sends an IOSurface-backed sample to the extension sink. The extension forwards valid sink samples to its source clients. It publishes 640×480, 1280×720, and 1920×1080 at 15, 30, or 60 fps.
 
+The sink fails closed to other writers. CoreMediaIO can report an unsandboxed host signing ID as `unknown`, so authorization resolves the client PID during the start callback and validates its live code against one Security-framework requirement: Apple trust anchor, exact companion bundle identifier, and the extension's own nonempty signing-team certificate OU. The accepted `CMIOExtensionClient.clientID` remains bound for that sink stream and is cleared on stop; authorization is never cached by PID.
+
 Apple Vision hand pose processing runs locally. Network frame JPEGs have a maximum edge of 1024 pixels. Stage age and rate settings are part of the profile.
 
 ## Audio path

@@ -10,7 +10,7 @@ AI Camera processes camera and microphone data in memory. It does not record or 
 
 Real-time callbacks copy only bounded buffers needed for processing. Network stages hold at most one active request and one replaceable pending frame. Overlays keep normalized current state and expire it.
 
-The camera extension has no network client. The HAL driver has no network client and uses only a bounded in-memory ring.
+The camera extension has no network client. Its feeder sink rejects writers unless the CoreMediaIO client PID resolves to live code that satisfies an Apple-anchored requirement for the exact host bundle identifier and the extension's signing team. CoreMediaIO does not expose an audit token, so PID lookup is performed synchronously for every new client, never cached by PID, and the result is bound to that client's `clientID` only for the stream lifetime. Lookup, requirement, or team failures reject the stream. The HAL driver has no network client and uses only a bounded in-memory ring.
 
 ## Network egress
 

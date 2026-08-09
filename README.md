@@ -53,7 +53,7 @@ The app must be in `/Applications` before macOS can activate its camera system e
 ## First use
 
 1. Open **AI Camera** from `/Applications`.
-2. In the menu-bar panel, install the audio driver and activate the camera extension.
+2. In the menu-bar panel, install the audio driver and activate the camera extension. If the installed extension is older than the bundled build, the camera row offers **Update** instead of requiring removal first.
 3. Approve the extension in System Settings if macOS asks. A reboot can be necessary.
 4. Give AI Camera camera and microphone permission.
 5. Open Settings, select physical inputs, and choose **AI Camera Microphone** as the mixed output.
