@@ -78,7 +78,7 @@ final class VirtualCameraFeeder {
     }
 
     deinit {
-        stop()
+        _ = stop()
     }
 
     func start(configuration: Configuration = .defaultHD) throws {
@@ -92,7 +92,10 @@ final class VirtualCameraFeeder {
         defer { lock.unlock() }
         if sinkQueue != nil {
             if activeConfiguration == configuration { return }
-            stopLocked()
+            let stopStatus = stopLocked()
+            guard stopStatus == noErr else {
+                throw FeederError.propertyFailure("CMIODeviceStopStream", stopStatus)
+            }
         }
 
         guard let foundDevice = try Self.findDevice(withUID: AICameraVirtualCamera.deviceUID) else {
@@ -122,19 +125,7 @@ final class VirtualCameraFeeder {
         let startStatus = CMIODeviceStartStream(foundDevice, foundSink)
         guard startStatus == noErr else {
             Self.unregisterQueueCallback(for: foundSink)
-            Self.releaseQueuedSamples(in: queue)
             throw FeederError.streamStartFailed(startStatus)
-        }
-        do {
-            // A source client can negotiate between the initial property write and sink start.
-            // Reassert the feeder format once the extension has locked source changes.
-            try Self.setFormatDescription(description, on: foundSink)
-            try Self.setFrameRate(configuration.framesPerSecond, on: foundSink)
-        } catch {
-            _ = CMIODeviceStopStream(foundDevice, foundSink)
-            Self.unregisterQueueCallback(for: foundSink)
-            Self.releaseQueuedSamples(in: queue)
-            throw error
         }
 
         deviceID = foundDevice
@@ -144,13 +135,27 @@ final class VirtualCameraFeeder {
         pixelBufferPool = pool
         allocationAttributes = [kCVPixelBufferPoolAllocationThresholdKey: 3] as CFDictionary
         activeConfiguration = configuration
+
+        do {
+            // A source client can negotiate between the initial property write and sink start.
+            // Reassert the feeder format once the extension has locked source changes.
+            try Self.setFormatDescription(description, on: foundSink)
+            try Self.setFrameRate(configuration.framesPerSecond, on: foundSink)
+        } catch {
+            let stopStatus = stopLocked()
+            guard stopStatus == noErr else {
+                throw FeederError.propertyFailure("CMIODeviceStopStream", stopStatus)
+            }
+            throw error
+        }
     }
 
     /// Stops feeding without deactivating or uninstalling the system extension.
-    func stop() {
+    @discardableResult
+    func stop() -> OSStatus {
         lock.lock()
         defer { lock.unlock() }
-        stopLocked()
+        return stopLocked()
     }
 
     /// Enqueues one processed video frame. Returns false when the single-frame queue is full.
@@ -235,14 +240,19 @@ final class VirtualCameraFeeder {
         return true
     }
 
-    private func stopLocked() {
-        if let deviceID, let sinkStreamID {
-            _ = CMIODeviceStopStream(deviceID, sinkStreamID)
-            Self.unregisterQueueCallback(for: sinkStreamID)
+    private func stopLocked() -> OSStatus {
+        guard let deviceID, let sinkStreamID else {
+            clearStateLocked()
+            return noErr
         }
-        if let sinkQueue {
-            Self.releaseQueuedSamples(in: sinkQueue)
-        }
+        let status = CMIODeviceStopStream(deviceID, sinkStreamID)
+        guard status == noErr else { return status }
+        Self.unregisterQueueCallback(for: sinkStreamID)
+        clearStateLocked()
+        return noErr
+    }
+
+    private func clearStateLocked() {
         deviceID = nil
         sinkStreamID = nil
         sinkQueue = nil
@@ -349,9 +359,9 @@ final class VirtualCameraFeeder {
                 &direction
             )
             guard directionStatus == noErr else { continue }
-            // Legacy CMIO reports 0 for a device output/source and 1 for a
-            // device input/sink. The host must write to the extension's sink.
-            if direction == 1 {
+            // In the legacy CMIO API, direction 0 is a device output: the host
+            // writes to this queue, which maps to the extension's sink stream.
+            if direction == 0 {
                 return stream
             }
         }
@@ -504,16 +514,9 @@ final class VirtualCameraFeeder {
         }
     }
 
-    private static func releaseQueuedSamples(in queue: CMSimpleQueue) {
-        while let token = CMSimpleQueueDequeue(queue) {
-            Unmanaged<CMSampleBuffer>.fromOpaque(token).release()
-        }
-    }
 }
 
-/// The output-stream callback receives the exact retained token removed from the queue.
-/// It must release that token once CoreMediaIO has taken the sample.
-private let virtualCameraQueueAltered: CMIODeviceStreamQueueAlteredProc = { _, token, _ in
-    guard let token else { return }
-    Unmanaged<CMSampleBuffer>.fromOpaque(token).release()
-}
+/// CoreMediaIO requires a queue-altered callback for a sink queue. After a successful
+/// enqueue, CMIO owns and disposes the retained sample on consumption or stream stop; the
+/// notification token is borrowed and must not be released here.
+private let virtualCameraQueueAltered: CMIODeviceStreamQueueAlteredProc = { _, _, _ in }

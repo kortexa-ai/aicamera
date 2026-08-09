@@ -1,5 +1,6 @@
 import AICameraCore
 import AppKit
+import AudioToolbox
 import AVFoundation
 import Combine
 import Foundation
@@ -49,12 +50,6 @@ final class AppModel: ObservableObject {
 
     var deviceOperationInProgress: Bool {
         isStopping || cameraExtensionManager.hasPendingRequest || audioDriverManager.status.isBusy
-    }
-
-    var canAskAgent: Bool {
-        let conversation = configurationController.configuration.pipeline.conversation
-        guard conversation.enabled, let endpointID = conversation.agentEndpointID else { return false }
-        return configurationController.configuration.endpoints.contains { $0.id == endpointID && $0.adapter == .openAIChat }
     }
 
     init() {
@@ -150,28 +145,34 @@ final class AppModel: ObservableObject {
         // Cancel actor-owned inference tasks before tearing down capture. The synchronous run gate
         // above prevents capture callbacks from queuing new work while this await is pending.
         stopTask = Task { [weak self] in
-            if let coordinator { await coordinator.stop() }
-            video?.stop()
+            // Stop capture/playback before CMIO teardown. The run gate intentionally rejects the
+            // coordinator's stop event, and a failed camera stop must not leave speech audible.
             audio?.stop()
+            if let coordinator { await coordinator.stop() }
+            let videoStopStatus = video?.stop() ?? noErr
             guard let self else {
-                completion?()
+                if videoStopStatus == noErr { completion?() }
                 return
             }
-            if self.videoController === video { self.videoController = nil }
             if self.audioController === audio { self.audioController = nil }
             self.previewImage = nil
-            self.statusText = "Stopped"
             self.isStopping = false
             self.stopTask = nil
-            completion?()
-        }
-    }
 
-    func askAgentAboutScene() {
-        guard let pipeline, let gate = runGate, gate.isActive else { return }
-        Task {
-            guard gate.isActive else { return }
-            await pipeline.askAgentAboutScene()
+            guard videoStopStatus == noErr else {
+                // Keep the controller so Stop can retry the CMIO teardown. Do not continue into a
+                // requested install/remove action while the feeder may still own the stream.
+                self.videoController = video
+                self.isRunning = true
+                self.statusText = "Stop failed"
+                self.lastError = "Virtual camera stop failed with status \(videoStopStatus). Select Stop Proxy to retry."
+                return
+            }
+
+            if self.videoController === video { self.videoController = nil }
+            self.isRunning = false
+            self.statusText = "Stopped"
+            completion?()
         }
     }
 
@@ -197,11 +198,18 @@ final class AppModel: ObservableObject {
                     model?.videoController?.update(snapshot: snapshot)
                 }
             },
-            onSpeech: { [weak self] data in
-                guard gate.isActive else { return }
-                Task { @MainActor [weak model = self] in
-                    guard gate.isActive else { return }
-                    model?.audioController?.playSpeech(wavData: data)
+            onSpeech: { [weak self] event in
+                guard gate.isActive else { return false }
+                return await withCheckedContinuation { continuation in
+                    Task { @MainActor [weak model = self] in
+                        guard gate.isActive, let audio = model?.audioController else {
+                            continuation.resume(returning: false)
+                            return
+                        }
+                        audio.handleSpeech(event) { accepted in
+                            continuation.resume(returning: accepted)
+                        }
+                    }
                 }
             },
             onError: { [weak self] message in
@@ -249,9 +257,16 @@ final class AppModel: ObservableObject {
             try video.start()
         } catch {
             gate.cancel()
-            video.stop()
-            lastError = error.localizedDescription
-            statusText = "Video failed"
+            let stopStatus = video.stop()
+            if stopStatus == noErr {
+                lastError = error.localizedDescription
+                statusText = "Video failed"
+            } else {
+                videoController = video
+                isRunning = true
+                lastError = "\(error.localizedDescription) Camera cleanup also failed with status \(stopStatus); select Stop Proxy to retry."
+                statusText = "Stop failed"
+            }
             return
         }
 
@@ -260,20 +275,21 @@ final class AppModel: ObservableObject {
             let controller = AudioPipelineController(
                 configuration: configuration.capture,
                 utteranceSeconds: configuration.pipeline.conversation.utteranceSeconds,
-                onUtterance: { wav in
+                transcriptionEnabled: configuration.pipeline.conversation.enabled
+                    && configuration.pipeline.conversation.transcriptionEnabled
+                    && configuration.pipeline.conversation.transcriptionEndpointID != nil,
+                onUtterance: { utterance in
                     guard gate.isActive else { return }
                     Task {
                         guard gate.isActive else { return }
-                        await coordinator.submit(utteranceWAV: wav)
+                        await coordinator.submit(utterance: utterance)
                     }
                 },
-                onBargeIn: { [weak self] in
+                onBargeIn: {
                     guard gate.isActive else { return }
-                    Task { @MainActor [weak self] in
+                    Task {
                         guard gate.isActive else { return }
-                        await coordinator.bargeIn()
-                        guard gate.isActive else { return }
-                        self?.audioController?.stopSpeech()
+                        _ = await coordinator.bargeIn()
                     }
                 },
                 onError: { [weak self] message in

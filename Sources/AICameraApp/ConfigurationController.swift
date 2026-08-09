@@ -142,7 +142,8 @@ final class ConfigurationController: ObservableObject {
                 adapter: .openAISpeech,
                 baseURL: URL(string: "http://127.0.0.1:4003")!,
                 model: "qwen3-tts-customvoice-1.7b",
-                timeoutSeconds: 60
+                timeoutSeconds: 60,
+                options: ["streamingPCM": .bool(true)]
             ),
         ]
         let stages: [VideoStageConfiguration] = [

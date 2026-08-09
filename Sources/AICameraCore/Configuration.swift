@@ -179,13 +179,25 @@ public struct VideoStageConfiguration: Codable, Equatable, Sendable, Identifiabl
     }
 }
 
+public enum ConversationActivationMode: String, Codable, CaseIterable, Sendable {
+    case wakePhrase
+    case alwaysListening
+}
+
 public struct ConversationConfiguration: Codable, Equatable, Sendable {
+    public static let defaultSystemPrompt = "You are an assistant present in a live camera conversation. Respond briefly and never claim to see facts that are not in the supplied scene context."
+    public static let defaultWakePhrase = "Hey Kortexa"
+
     public var enabled: Bool
+    public var transcriptionEnabled: Bool
     public var transcriptionEndpointID: String?
     public var agentEndpointID: String?
     public var speechEndpointID: String?
     public var systemPrompt: String
     public var respondToFinalTranscripts: Bool
+    public var activationMode: ConversationActivationMode
+    public var wakePhrase: String
+    public var wakeWindowSeconds: Double
     public var includeSceneSummary: Bool
     public var speechVoice: String
     public var speechInstructions: String?
@@ -196,11 +208,15 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
 
     public init(
         enabled: Bool = false,
+        transcriptionEnabled: Bool = true,
         transcriptionEndpointID: String? = nil,
         agentEndpointID: String? = nil,
         speechEndpointID: String? = nil,
-        systemPrompt: String = "You are an assistant present in a live camera conversation. Respond briefly and never claim to see facts that are not in the supplied scene context.",
+        systemPrompt: String = Self.defaultSystemPrompt,
         respondToFinalTranscripts: Bool = true,
+        activationMode: ConversationActivationMode = .wakePhrase,
+        wakePhrase: String = Self.defaultWakePhrase,
+        wakeWindowSeconds: Double = 8,
         includeSceneSummary: Bool = true,
         speechVoice: String = "aiden",
         speechInstructions: String? = nil,
@@ -210,11 +226,15 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
         gestureCooldownSeconds: Double = 2
     ) {
         self.enabled = enabled
+        self.transcriptionEnabled = transcriptionEnabled
         self.transcriptionEndpointID = transcriptionEndpointID
         self.agentEndpointID = agentEndpointID
         self.speechEndpointID = speechEndpointID
         self.systemPrompt = systemPrompt
         self.respondToFinalTranscripts = respondToFinalTranscripts
+        self.activationMode = activationMode
+        self.wakePhrase = wakePhrase
+        self.wakeWindowSeconds = wakeWindowSeconds
         self.includeSceneSummary = includeSceneSummary
         self.speechVoice = speechVoice
         self.speechInstructions = speechInstructions
@@ -222,6 +242,50 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
         self.bargeIn = bargeIn
         self.respondToGestures = respondToGestures
         self.gestureCooldownSeconds = gestureCooldownSeconds
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case enabled
+        case transcriptionEnabled
+        case transcriptionEndpointID
+        case agentEndpointID
+        case speechEndpointID
+        case systemPrompt
+        case respondToFinalTranscripts
+        case activationMode
+        case wakePhrase
+        case wakeWindowSeconds
+        case includeSceneSummary
+        case speechVoice
+        case speechInstructions
+        case utteranceSeconds
+        case bargeIn
+        case respondToGestures
+        case gestureCooldownSeconds
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decode(Bool.self, forKey: .enabled)
+        transcriptionEndpointID = try container.decodeIfPresent(String.self, forKey: .transcriptionEndpointID)
+        transcriptionEnabled = try container.decodeIfPresent(Bool.self, forKey: .transcriptionEnabled)
+            ?? (transcriptionEndpointID != nil)
+        agentEndpointID = try container.decodeIfPresent(String.self, forKey: .agentEndpointID)
+        speechEndpointID = try container.decodeIfPresent(String.self, forKey: .speechEndpointID)
+        systemPrompt = try container.decode(String.self, forKey: .systemPrompt)
+        respondToFinalTranscripts = try container.decode(Bool.self, forKey: .respondToFinalTranscripts)
+        // Schema-1 profiles predate wake gating and therefore retain their always-listening behavior.
+        activationMode = try container.decodeIfPresent(ConversationActivationMode.self, forKey: .activationMode)
+            ?? .alwaysListening
+        wakePhrase = try container.decodeIfPresent(String.self, forKey: .wakePhrase) ?? Self.defaultWakePhrase
+        wakeWindowSeconds = try container.decodeIfPresent(Double.self, forKey: .wakeWindowSeconds) ?? 8
+        includeSceneSummary = try container.decode(Bool.self, forKey: .includeSceneSummary)
+        speechVoice = try container.decode(String.self, forKey: .speechVoice)
+        speechInstructions = try container.decodeIfPresent(String.self, forKey: .speechInstructions)
+        utteranceSeconds = try container.decode(Double.self, forKey: .utteranceSeconds)
+        bargeIn = try container.decode(Bool.self, forKey: .bargeIn)
+        respondToGestures = try container.decode(Bool.self, forKey: .respondToGestures)
+        gestureCooldownSeconds = try container.decode(Double.self, forKey: .gestureCooldownSeconds)
     }
 }
 

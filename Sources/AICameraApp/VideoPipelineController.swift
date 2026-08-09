@@ -84,15 +84,19 @@ final class VideoPipelineController: NSObject {
         }
     }
 
-    func stop() {
-        guard endRun() else { return }
-        videoOutput.setSampleBufferDelegate(nil, queue: nil)
-        captureQueue.sync {
-            if session.isRunning { session.stopRunning() }
-            gestureInFlight = false
-            networkInFlight = false
+    @discardableResult
+    func stop() -> OSStatus {
+        if endRun() {
+            videoOutput.setSampleBufferDelegate(nil, queue: nil)
+            captureQueue.sync {
+                if session.isRunning { session.stopRunning() }
+                gestureInFlight = false
+                networkInFlight = false
+            }
         }
-        feeder.stop()
+        // Retry feeder teardown even after the capture generation already ended. The feeder keeps
+        // its CMIO state after a failed stop so a later explicit Stop can complete safely.
+        return feeder.stop()
     }
 
     func update(snapshot: SceneSnapshot) {
@@ -152,6 +156,14 @@ final class VideoPipelineController: NSObject {
         videoOutput.setSampleBufferDelegate(self, queue: captureQueue)
     }
 
+    private struct FormatCandidate {
+        let format: AVCaptureDevice.Format
+        let range: AVFrameRateRange
+        let dimensions: CMVideoDimensions
+        let frameRateDistance: Double
+        let durationSelection: FrameRateDurationSelection
+    }
+
     private func selectedCamera() -> AVCaptureDevice? {
         let discovery = AVCaptureDevice.DiscoverySession(
             deviceTypes: [.builtInWideAngleCamera, .external],
@@ -162,25 +174,36 @@ final class VideoPipelineController: NSObject {
         if let requested = configuration.capture.videoDeviceID {
             return hardware.first(where: { $0.uniqueID == requested })
         }
-        return hardware.first
+        let requestedFPS = Double(configuration.capture.framesPerSecond)
+        return hardware.first(where: { device in
+            device.formats.contains { frameRateMatch(for: $0, requestedFPS: requestedFPS) != nil }
+        }) ?? hardware.first
     }
 
     private func configure(device: AVCaptureDevice) throws {
-        let requestedWidth = Int32(configuration.capture.width)
-        let requestedHeight = Int32(configuration.capture.height)
+        let requestedWidth = configuration.capture.width
+        let requestedHeight = configuration.capture.height
         let requestedFPS = Double(configuration.capture.framesPerSecond)
-        let candidates = device.formats.filter { format in
+        let candidates = device.formats.compactMap { format -> FormatCandidate? in
             let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-            return format.videoSupportedFrameRateRanges.contains { range in
-                requestedFPS >= range.minFrameRate && requestedFPS <= range.maxFrameRate
-            } && dimensions.width > 0 && dimensions.height > 0
+            guard dimensions.width > 0,
+                  dimensions.height > 0,
+                  let match = frameRateMatch(for: format, requestedFPS: requestedFPS) else { return nil }
+            return FormatCandidate(
+                format: format,
+                range: match.range,
+                dimensions: dimensions,
+                frameRateDistance: match.result.distance,
+                durationSelection: match.result.durationSelection
+            )
         }
         guard let best = candidates.min(by: { lhs, rhs in
-            let left = CMVideoFormatDescriptionGetDimensions(lhs.formatDescription)
-            let right = CMVideoFormatDescriptionGetDimensions(rhs.formatDescription)
-            let leftScore = abs(left.width - requestedWidth) + abs(left.height - requestedHeight)
-            let rightScore = abs(right.width - requestedWidth) + abs(right.height - requestedHeight)
-            return leftScore < rightScore
+            let leftScore = abs(Int(lhs.dimensions.width) - requestedWidth)
+                + abs(Int(lhs.dimensions.height) - requestedHeight)
+            let rightScore = abs(Int(rhs.dimensions.width) - requestedWidth)
+                + abs(Int(rhs.dimensions.height) - requestedHeight)
+            if leftScore != rightScore { return leftScore < rightScore }
+            return lhs.frameRateDistance < rhs.frameRateDistance
         }) else {
             throw NSError(
                 domain: "AICamera.Video",
@@ -190,10 +213,37 @@ final class VideoPipelineController: NSObject {
         }
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
-        device.activeFormat = best
-        let duration = CMTime(value: 1, timescale: CMTimeScale(configuration.capture.framesPerSecond))
+        device.activeFormat = best.format
+        let requestedDuration = CMTime(
+            value: 1,
+            timescale: CMTimeScale(configuration.capture.framesPerSecond)
+        )
+        let duration: CMTime
+        switch best.durationSelection {
+        case .requested:
+            duration = requestedDuration
+        case .minimumFrameDuration:
+            duration = best.range.minFrameDuration
+        case .maximumFrameDuration:
+            duration = best.range.maxFrameDuration
+        }
         device.activeVideoMinFrameDuration = duration
         device.activeVideoMaxFrameDuration = duration
+    }
+
+    private func frameRateMatch(
+        for format: AVCaptureDevice.Format,
+        requestedFPS: Double
+    ) -> (range: AVFrameRateRange, result: NominalFrameRateMatch)? {
+        format.videoSupportedFrameRateRanges.compactMap { range in
+            guard let result = NominalFrameRateMatcher.match(
+                requestedFPS: requestedFPS,
+                minimumFPS: range.minFrameRate,
+                maximumFPS: range.maxFrameRate
+            ) else { return nil }
+            return (range: range, result: result)
+        }
+        .min { $0.result.distance < $1.result.distance }
     }
 
     private func currentSnapshot() -> SceneSnapshot {

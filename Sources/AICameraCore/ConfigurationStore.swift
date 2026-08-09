@@ -170,15 +170,21 @@ public enum ConfigurationValidator {
         }
 
         let conversation = configuration.pipeline.conversation
+        let wakePhrase = conversation.wakePhrase.trimmingCharacters(in: .whitespacesAndNewlines)
         guard conversation.systemPrompt.count <= AICameraContentLimits.promptCharacters,
               conversation.speechVoice.count <= AICameraContentLimits.labelCharacters,
-              (conversation.speechInstructions?.count ?? 0) <= AICameraContentLimits.promptCharacters else {
+              (conversation.speechInstructions?.count ?? 0) <= AICameraContentLimits.promptCharacters,
+              conversation.wakePhrase.count <= AICameraContentLimits.labelCharacters,
+              conversation.activationMode != .wakePhrase
+                || (!wakePhrase.isEmpty && WakePhraseGate.hasMatchableTokens(wakePhrase)) else {
             throw ConfigurationError.invalidText("conversation")
         }
         guard conversation.utteranceSeconds.isFinite,
               conversation.gestureCooldownSeconds.isFinite,
+              conversation.wakeWindowSeconds.isFinite,
               (0.5...30).contains(conversation.utteranceSeconds),
-              (0.2...3_600).contains(conversation.gestureCooldownSeconds) else {
+              (0.2...3_600).contains(conversation.gestureCooldownSeconds),
+              (1...30).contains(conversation.wakeWindowSeconds) else {
             throw ConfigurationError.invalidRate("conversation")
         }
         guard configuration.overlays.resultTTLSeconds.isFinite,
@@ -186,8 +192,13 @@ public enum ConfigurationValidator {
             throw ConfigurationError.invalidOverlayConfiguration
         }
         if conversation.enabled {
-            if let id = conversation.transcriptionEndpointID {
-                try requireEndpoint(id, for: "conversation.asr", adapters: [.openAITranscription, .kortexaPCMTranscription], endpoints: configuration.endpoints)
+            if conversation.transcriptionEnabled {
+                try requireEndpoint(
+                    conversation.transcriptionEndpointID,
+                    for: "conversation.asr",
+                    adapters: [.openAITranscription, .kortexaPCMTranscription],
+                    endpoints: configuration.endpoints
+                )
             }
             if let id = conversation.agentEndpointID {
                 try requireEndpoint(id, for: "conversation.agent", adapters: [.openAIChat], endpoints: configuration.endpoints)

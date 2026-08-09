@@ -20,7 +20,7 @@ enum CameraExtensionStatus: Equatable {
         switch self {
         case .unknown: return "Unknown"
         case .activating: return "Activating…"
-        case .active: return "Active"
+        case .active: return "Ready"
         case .deactivating: return "Deactivating…"
         case .inactive: return "Not installed"
         case .needsApproval: return "Approval required"

@@ -32,7 +32,7 @@ enum AudioDriverStatus: Equatable {
         switch self {
         case .checking: return "Checking…"
         case .notInstalled: return "Not installed"
-        case .installed: return "Installed and loaded"
+        case .installed: return "Ready"
         case .installedNeedsReload: return "Installed; Core Audio reload pending"
         case .installing: return "Installing…"
         case .uninstalling: return "Uninstalling…"
@@ -100,7 +100,7 @@ final class AudioDriverManager: ObservableObject {
             set sourcePath to item 1 of argv
             set destinationPath to item 2 of argv
             set expectedID to item 3 of argv
-            set commandText to "set -eu; src=" & quoted form of sourcePath & "; dst=" & quoted form of destinationPath & "; expected=" & quoted form of expectedID & "; tmp=\"${dst}.installing\"; bak=\"${dst}.backup\"; test -n \"$dst\"; test \"$dst\" != /; actual=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \"$src/Contents/Info.plist\"); test \"$actual\" = \"$expected\"; if test -e \"$dst\"; then installed=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \"$dst/Contents/Info.plist\"); test \"$installed\" = \"$expected\"; fi; /bin/rm -rf \"$tmp\" \"$bak\"; /usr/bin/ditto \"$src\" \"$tmp\"; /usr/sbin/chown -R root:wheel \"$tmp\"; /bin/chmod -R go-w \"$tmp\"; had=0; if test -e \"$dst\"; then /bin/mv \"$dst\" \"$bak\"; had=1; fi; if /bin/mv \"$tmp\" \"$dst\"; then /bin/rm -rf \"$bak\"; else if test \"$had\" = 1; then /bin/mv \"$bak\" \"$dst\"; fi; exit 1; fi; { /usr/bin/killall -HUP coreaudiod || true; }"
+            set commandText to "set -eu; src=" & quoted form of sourcePath & "; dst=" & quoted form of destinationPath & "; expected=" & quoted form of expectedID & "; tmp=\"${dst}.installing\"; bak=\"${dst}.backup\"; test -n \"$dst\"; test \"$dst\" != /; actual=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \"$src/Contents/Info.plist\"); test \"$actual\" = \"$expected\"; if test -e \"$dst\"; then installed=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \"$dst/Contents/Info.plist\"); test \"$installed\" = \"$expected\"; fi; /bin/rm -rf \"$tmp\" \"$bak\"; /usr/bin/ditto \"$src\" \"$tmp\"; /usr/sbin/chown -R root:wheel \"$tmp\"; /bin/chmod -R go-w \"$tmp\"; had=0; if test -e \"$dst\"; then /bin/mv \"$dst\" \"$bak\"; had=1; fi; if /bin/mv \"$tmp\" \"$dst\"; then /bin/rm -rf \"$bak\"; else if test \"$had\" = 1; then /bin/mv \"$bak\" \"$dst\"; fi; exit 1; fi; { /usr/bin/killall -TERM coreaudiod || true; }"
             do shell script commandText with administrator privileges
         end run
         """#
@@ -131,7 +131,7 @@ final class AudioDriverManager: ObservableObject {
         on run argv
             set destinationPath to item 1 of argv
             set expectedID to item 2 of argv
-            set commandText to "set -eu; dst=" & quoted form of destinationPath & "; expected=" & quoted form of expectedID & "; test -n \"$dst\"; test \"$dst\" != /; if test -e \"$dst\"; then actual=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \"$dst/Contents/Info.plist\"); test \"$actual\" = \"$expected\"; /bin/rm -rf \"$dst\"; fi; { /usr/bin/killall -HUP coreaudiod || true; }"
+            set commandText to "set -eu; dst=" & quoted form of destinationPath & "; expected=" & quoted form of expectedID & "; test -n \"$dst\"; test \"$dst\" != /; if test -e \"$dst\"; then actual=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \"$dst/Contents/Info.plist\"); test \"$actual\" = \"$expected\"; /bin/rm -rf \"$dst\"; fi; { /usr/bin/killall -TERM coreaudiod || true; }"
             do shell script commandText with administrator privileges
         end run
         """#
@@ -151,6 +151,7 @@ final class AudioDriverManager: ObservableObject {
                 self.status = .failed(failure)
             } else {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
+                self.status = .checking
                 self.refresh()
             }
         }

@@ -1,6 +1,14 @@
 import AICameraCore
 import Foundation
 
+enum SpeechPlaybackEvent: Sendable {
+    case wav(speechID: UUID, data: Data)
+    case beginPCM(speechID: UUID, sampleRate: Int, channels: Int)
+    case pcm(speechID: UUID, data: Data)
+    case finishPCM(speechID: UUID)
+    case stop(speechID: UUID?)
+}
+
 struct FrameAnalysisPacket: Sendable {
     let frameID: FrameID
     let capturedAt: Date
@@ -11,12 +19,11 @@ struct FrameAnalysisPacket: Sendable {
 
 actor PipelineCoordinator {
     private enum ConversationInput: Sendable {
-        case utterance(Data)
         case text(String)
     }
 
     typealias SnapshotHandler = @Sendable (SceneSnapshot) -> Void
-    typealias SpeechHandler = @Sendable (Data) -> Void
+    typealias SpeechHandler = @Sendable (SpeechPlaybackEvent) async -> Bool
     typealias ErrorHandler = @Sendable (String) -> Void
 
     private let configuration: AICameraConfiguration
@@ -31,11 +38,15 @@ actor PipelineCoordinator {
     private var pendingPackets: [String: FrameAnalysisPacket] = [:]
     private var isRunning = true
     private var lastStageStart: [String: Date] = [:]
+    private var transcriptionTask: Task<Void, Never>?
+    private var pendingUtterance: AudioUtterance?
+    private var transcriptionGeneration: UInt64 = 0
     private var conversationTask: Task<Void, Never>?
     private var pendingConversationInput: ConversationInput?
     private var conversationGeneration: UInt64 = 0
     private var lastGestureResponse = Date.distantPast
     private var lastObservedGestureKind: GestureKind?
+    private var wakePhraseGate = WakePhraseGate()
     private var expiryTask: Task<Void, Never>?
 
     init(
@@ -69,12 +80,18 @@ actor PipelineCoordinator {
         }
     }
 
-    func stop() {
+    func stop() async {
         isRunning = false
+        transcriptionGeneration &+= 1
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        pendingUtterance = nil
         conversationGeneration &+= 1
         conversationTask?.cancel()
         conversationTask = nil
         pendingConversationInput = nil
+        _ = await onSpeech(.stop(speechID: nil))
+        wakePhraseGate.reset()
         expiryTask?.cancel()
         expiryTask = nil
         for task in stageTasks.values { task.cancel() }
@@ -119,24 +136,35 @@ actor PipelineCoordinator {
         enqueueConversation(.text("The user made a \(description) gesture. Acknowledge it briefly and respond appropriately."))
     }
 
-    func submit(utteranceWAV: Data) {
-        guard isRunning, configuration.pipeline.conversation.enabled else { return }
-        enqueueConversation(.utterance(utteranceWAV))
+    func submit(utterance: AudioUtterance) {
+        let conversation = configuration.pipeline.conversation
+        guard isRunning, conversation.enabled, conversation.transcriptionEnabled else { return }
+        if transcriptionTask != nil {
+            if conversation.activationMode == .alwaysListening || pendingUtterance == nil {
+                // Always-listening favors the latest ambient window. Wake mode preserves the first
+                // pending window so a command immediately after a wake-only window cannot be
+                // overwritten while the wake transcription is still in flight.
+                pendingUtterance = utterance
+            }
+            return
+        }
+        startTranscription(utterance)
     }
 
-    func askAgentAboutScene() {
-        guard isRunning else { return }
-        enqueueConversation(.text("Briefly describe what is currently notable and useful in the scene."))
-    }
-
-    func bargeIn() async {
-        guard configuration.pipeline.conversation.bargeIn else { return }
+    @discardableResult
+    func bargeIn() async -> Bool {
+        guard configuration.pipeline.conversation.bargeIn,
+              conversationTask != nil else { return false }
         conversationGeneration &+= 1
+        let generation = conversationGeneration
         conversationTask?.cancel()
         conversationTask = nil
         pendingConversationInput = nil
+        _ = await onSpeech(.stop(speechID: nil))
+        guard generation == conversationGeneration else { return true }
         await scene.applyAgentResponse(nil)
         await publish()
+        return true
     }
 
     private func start(stage: VideoStageConfiguration, packet: FrameAnalysisPacket) {
@@ -215,31 +243,64 @@ actor PipelineCoordinator {
         start(stage: stage, packet: packet)
     }
 
+    private func startTranscription(_ utterance: AudioUtterance) {
+        guard isRunning else { return }
+        transcriptionGeneration &+= 1
+        let generation = transcriptionGeneration
+        transcriptionTask = Task { [weak self] in
+            guard let self else { return }
+            await self.runTranscription(utterance: utterance)
+            await self.finishTranscription(generation: generation)
+        }
+    }
+
+    private func finishTranscription(generation: UInt64) {
+        guard generation == transcriptionGeneration else { return }
+        transcriptionTask = nil
+        guard isRunning, let pending = pendingUtterance else {
+            pendingUtterance = nil
+            return
+        }
+        pendingUtterance = nil
+        startTranscription(pending)
+    }
+
     private func enqueueConversation(_ input: ConversationInput) {
         guard isRunning, configuration.pipeline.conversation.enabled else { return }
+        var stopSpeechFirst = false
         if conversationTask != nil {
             if configuration.pipeline.conversation.bargeIn {
                 conversationGeneration &+= 1
                 conversationTask?.cancel()
                 conversationTask = nil
+                pendingConversationInput = nil
+                stopSpeechFirst = true
             } else {
                 // Preserve at most the latest pending turn while the current turn completes.
                 pendingConversationInput = input
                 return
             }
         }
-        startConversation(input)
+        startConversation(input, stopSpeechFirst: stopSpeechFirst)
     }
 
-    private func startConversation(_ input: ConversationInput) {
+    private func startConversation(
+        _ input: ConversationInput,
+        stopSpeechFirst: Bool = false
+    ) {
         guard isRunning else { return }
         conversationGeneration &+= 1
         let generation = conversationGeneration
         conversationTask = Task { [weak self] in
             guard let self else { return }
+            if stopSpeechFirst {
+                _ = await self.onSpeech(.stop(speechID: nil))
+                guard !Task.isCancelled else {
+                    await self.finishConversation(generation: generation)
+                    return
+                }
+            }
             switch input {
-            case let .utterance(wavData):
-                await self.runConversation(wavData: wavData)
             case let .text(text):
                 await self.runAgent(userText: text)
             }
@@ -258,24 +319,52 @@ actor PipelineCoordinator {
         startConversation(pending)
     }
 
-    private func runConversation(wavData: Data) async {
+    private func runTranscription(utterance: AudioUtterance) async {
         let conversation = configuration.pipeline.conversation
         guard let endpointID = conversation.transcriptionEndpointID,
               let endpoint = configuration.endpoints.first(where: { $0.id == endpointID }) else { return }
         do {
             let client = try factory.transcription(for: endpoint)
-            let transcript = try await client.transcribe(.init(wavData: wavData))
+            let transcript = try await client.transcribe(.init(wavData: utterance.wavData))
             try Task.checkCancellation()
             guard !transcript.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             await scene.applyTranscript(transcript)
             await publish()
-            if conversation.respondToFinalTranscripts {
-                await runAgent(userText: transcript.text)
+            if let command = agentCommand(
+                for: transcript,
+                endedAtUptime: utterance.endedAtUptime,
+                conversation: conversation
+            ) {
+                enqueueConversation(.text(command))
             }
         } catch is CancellationError {
             return
         } catch {
             onError("transcription: \(error.localizedDescription)")
+        }
+    }
+
+    private func agentCommand(
+        for transcript: TranscriptEvent,
+        endedAtUptime: TimeInterval,
+        conversation: ConversationConfiguration
+    ) -> String? {
+        guard conversation.respondToFinalTranscripts, transcript.mode == .final else { return nil }
+        switch conversation.activationMode {
+        case .alwaysListening:
+            return transcript.text
+        case .wakePhrase:
+            switch wakePhraseGate.process(
+                transcript: transcript.text,
+                wakePhrase: conversation.wakePhrase,
+                windowSeconds: conversation.wakeWindowSeconds,
+                uptime: endedAtUptime
+            ) {
+            case .ignored, .armed:
+                return nil
+            case let .command(command):
+                return command
+            }
         }
     }
 
@@ -306,19 +395,82 @@ actor PipelineCoordinator {
         let conversation = configuration.pipeline.conversation
         guard let endpointID = conversation.speechEndpointID,
               let endpoint = configuration.endpoints.first(where: { $0.id == endpointID }) else { return }
+        var streamingPlaybackBegan = false
+        var streamingSpeechID: UUID?
         do {
             let client = try factory.speech(for: endpoint)
-            let data = try await client.synthesize(.init(
+            let stream = try await client.synthesizeStream(.init(
                 text: text,
                 voice: conversation.speechVoice,
                 instructions: conversation.speechInstructions,
                 responseFormat: "wav"
             ))
-            try Task.checkCancellation()
-            onSpeech(data)
+            let speechID = UUID()
+            streamingSpeechID = speechID
+            // Create the iterator before any playback await so cancellation during admission also
+            // terminates the network producer instead of abandoning an unconsumed stream.
+            var chunkIterator = stream.chunks.makeAsyncIterator()
+            switch stream.format.encoding {
+            case .wav:
+                var wavData = Data()
+                while let chunk = try await chunkIterator.next() {
+                    try Task.checkCancellation()
+                    guard chunk.count <= URLSessionHTTPTransport.defaultMaximumResponseBytes - wavData.count else {
+                        throw HTTPAdapterError.responseTooLarge(URLSessionHTTPTransport.defaultMaximumResponseBytes)
+                    }
+                    wavData.append(chunk)
+                }
+                try Task.checkCancellation()
+                guard !wavData.isEmpty else {
+                    throw HTTPAdapterError.invalidResponse("empty speech response")
+                }
+                guard await onSpeech(.wav(speechID: speechID, data: wavData)) else {
+                    throw CancellationError()
+                }
+            case .pcm16LittleEndian:
+                guard let sampleRate = stream.format.sampleRate,
+                      let channels = stream.format.channelCount else {
+                    throw HTTPAdapterError.invalidResponse("missing streaming PCM format")
+                }
+                guard await onSpeech(
+                    .beginPCM(speechID: speechID, sampleRate: sampleRate, channels: channels)
+                ) else {
+                    throw CancellationError()
+                }
+                streamingPlaybackBegan = true
+                try Task.checkCancellation()
+                let maximumIngressBytes = sampleRate * MemoryLayout<Int16>.size
+                while let chunk = try await chunkIterator.next() {
+                    try Task.checkCancellation()
+                    var offset = chunk.startIndex
+                    while offset < chunk.endIndex {
+                        let byteCount = min(
+                            maximumIngressBytes,
+                            chunk.distance(from: offset, to: chunk.endIndex)
+                        )
+                        let end = chunk.index(offset, offsetBy: byteCount)
+                        let boundedChunk = Data(chunk[offset..<end])
+                        guard await onSpeech(.pcm(speechID: speechID, data: boundedChunk)) else {
+                            throw CancellationError()
+                        }
+                        offset = end
+                    }
+                }
+                try Task.checkCancellation()
+                guard await onSpeech(.finishPCM(speechID: speechID)) else {
+                    throw CancellationError()
+                }
+                streamingPlaybackBegan = false
+            }
         } catch is CancellationError {
+            if streamingPlaybackBegan {
+                _ = await onSpeech(.stop(speechID: streamingSpeechID))
+            }
             return
         } catch {
+            if streamingPlaybackBegan {
+                _ = await onSpeech(.stop(speechID: streamingSpeechID))
+            }
             onError("speech: \(error.localizedDescription)")
         }
     }

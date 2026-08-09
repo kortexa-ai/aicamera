@@ -25,8 +25,10 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
     private var selectedFormatIndex = AICameraVirtualCamera.defaultFormatIndex
     private var selectedFrameRate = AICameraVirtualCamera.defaultFrameRate
     private var sourceStartCount = 0
+    private var sourceGeneration: UInt64 = 0
     private var sinkClient: CMIOExtensionClient?
     private var sinkIsRunning = false
+    private var sinkGeneration: UInt64 = 0
     private var consumeIsOutstanding = false
     private var lastFeederFrameHostTime: UInt64 = 0
 
@@ -192,9 +194,13 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
             stateLock.lock()
             sourceStartCount += 1
             let shouldStartTimer = sourceStartCount == 1
+            if shouldStartTimer { sourceGeneration &+= 1 }
+            let generation = sourceGeneration
             stateLock.unlock()
             if shouldStartTimer {
-                mediaQueue.async { [weak self] in self?.startPlaceholderTimer() }
+                mediaQueue.async { [weak self] in
+                    self?.startPlaceholderTimer(generation: generation)
+                }
             }
         case .sink:
             guard let client else {
@@ -205,11 +211,13 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
                 )
             }
             stateLock.lock()
+            sinkGeneration &+= 1
+            let generation = sinkGeneration
             sinkClient = client
             sinkIsRunning = true
             lastFeederFrameHostTime = 0
             stateLock.unlock()
-            mediaQueue.async { [weak self] in self?.startConsumeTimer() }
+            mediaQueue.async { [weak self] in self?.startConsumeTimer(generation: generation) }
         @unknown default:
             throw NSError(
                 domain: cameraExtensionErrorDomain,
@@ -223,42 +231,60 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
         switch direction {
         case .source:
             stateLock.lock()
+            let hadSourceClient = sourceStartCount > 0
             sourceStartCount = max(0, sourceStartCount - 1)
-            let shouldStopTimer = sourceStartCount == 0
+            let shouldStopTimer = hadSourceClient && sourceStartCount == 0
+            if shouldStopTimer { sourceGeneration &+= 1 }
+            let generation = sourceGeneration
             stateLock.unlock()
             if shouldStopTimer {
-                mediaQueue.async { [weak self] in self?.stopPlaceholderTimer() }
+                mediaQueue.async { [weak self] in
+                    self?.stopPlaceholderTimer(generation: generation)
+                }
             }
         case .sink:
             stateLock.lock()
+            sinkGeneration &+= 1
+            let generation = sinkGeneration
             sinkIsRunning = false
             sinkClient = nil
             lastFeederFrameHostTime = 0
             stateLock.unlock()
-            mediaQueue.async { [weak self] in self?.stopConsumeTimer() }
+            mediaQueue.async { [weak self] in self?.stopConsumeTimer(generation: generation) }
         @unknown default:
             break
         }
     }
 
-    private func startConsumeTimer() {
-        guard consumeTimer == nil else { return }
+    private func startConsumeTimer(generation: UInt64) {
+        // Start/stop callbacks can arrive from different extension threads. Ignore a stale queued
+        // transition so it cannot cancel the timer for a newer sink client.
+        guard isActiveSinkGeneration(generation) else { return }
+        consumeTimer?.cancel()
+        consumeTimer = nil
+        consumeIsOutstanding = false
         let timer = DispatchSource.makeTimerSource(flags: .strict, queue: mediaQueue)
         timer.schedule(deadline: .now(), repeating: .milliseconds(4), leeway: .milliseconds(1))
-        timer.setEventHandler { [weak self] in self?.consumeOneBufferIfAvailable() }
+        timer.setEventHandler { [weak self] in
+            self?.consumeOneBufferIfAvailable(generation: generation)
+        }
         consumeTimer = timer
         timer.activate()
     }
 
-    private func stopConsumeTimer() {
+    private func stopConsumeTimer(generation: UInt64) {
+        stateLock.lock()
+        let isCurrentStoppedGeneration = !sinkIsRunning && sinkGeneration == generation
+        stateLock.unlock()
+        guard isCurrentStoppedGeneration else { return }
         consumeTimer?.cancel()
         consumeTimer = nil
         consumeIsOutstanding = false
     }
 
-    private func consumeOneBufferIfAvailable() {
+    private func consumeOneBufferIfAvailable(generation: UInt64) {
         stateLock.lock()
-        let client = sinkIsRunning ? sinkClient : nil
+        let client = sinkIsRunning && sinkGeneration == generation ? sinkClient : nil
         stateLock.unlock()
         guard let client, !consumeIsOutstanding else { return }
 
@@ -266,6 +292,7 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
         sinkStreamSource.stream.consumeSampleBuffer(from: client) { [weak self] sampleBuffer, sequenceNumber, discontinuity, hasMore, error in
             guard let self else { return }
             self.mediaQueue.async {
+                guard self.isActiveSinkGeneration(generation) else { return }
                 self.consumeIsOutstanding = false
                 if let sampleBuffer {
                     self.forward(
@@ -277,10 +304,16 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
                     self.logger.debug("Sink consume returned no frame: \(error.localizedDescription, privacy: .public)")
                 }
                 if hasMore {
-                    self.consumeOneBufferIfAvailable()
+                    self.consumeOneBufferIfAvailable(generation: generation)
                 }
             }
         }
+    }
+
+    private func isActiveSinkGeneration(_ generation: UInt64) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return sinkIsRunning && sinkGeneration == generation
     }
 
     private func forward(
@@ -321,6 +354,14 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
         )
     }
 
+    private func startPlaceholderTimer(generation: UInt64) {
+        stateLock.lock()
+        let isCurrentRunningGeneration = sourceStartCount > 0 && sourceGeneration == generation
+        stateLock.unlock()
+        guard isCurrentRunningGeneration else { return }
+        startPlaceholderTimer()
+    }
+
     private func startPlaceholderTimer() {
         guard placeholderTimer == nil else { return }
         let duration = frameDuration
@@ -335,6 +376,14 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
         timer.activate()
     }
 
+    private func stopPlaceholderTimer(generation: UInt64) {
+        stateLock.lock()
+        let isCurrentStoppedGeneration = sourceStartCount == 0 && sourceGeneration == generation
+        stateLock.unlock()
+        guard isCurrentStoppedGeneration else { return }
+        stopPlaceholderTimer()
+    }
+
     private func stopPlaceholderTimer() {
         placeholderTimer?.cancel()
         placeholderTimer = nil
@@ -343,6 +392,13 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
     }
 
     private func restartPlaceholderTimerIfNeeded() {
+        stateLock.lock()
+        let hasSourceClient = sourceStartCount > 0
+        stateLock.unlock()
+        guard hasSourceClient else {
+            stopPlaceholderTimer()
+            return
+        }
         guard placeholderTimer != nil else { return }
         stopPlaceholderTimer()
         startPlaceholderTimer()

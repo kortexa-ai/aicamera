@@ -135,6 +135,10 @@ public struct OpenAITranscriptionClient: TranscriptionClient {
 }
 
 public struct OpenAISpeechClient: SpeechClient {
+    public static let defaultPCMSampleRate = 24_000
+    public static let minimumPCMSampleRate = 8_000
+    public static let maximumPCMSampleRate = 192_000
+
     public let endpoint: EndpointConfiguration
     public let transport: any HTTPTransport
     public let secrets: any SecretResolver
@@ -150,22 +154,106 @@ public struct OpenAISpeechClient: SpeechClient {
     }
 
     public func synthesize(_ input: SpeechRequest) async throws -> Data {
+        let request = try await makeRequest(
+            input,
+            responseFormat: input.responseFormat,
+            streamFormat: nil
+        )
+        let (data, response) = try await transport.data(for: request)
+        return try checkedResponse(data, response)
+    }
+
+    public func synthesizeStream(_ input: SpeechRequest) async throws -> SpeechAudioStream {
+        guard endpoint.options["streamingPCM"]?.boolValue == true,
+              let streamingTransport = transport as? any HTTPStreamingTransport else {
+            return try await completeWAVStream(input)
+        }
+
+        let request = try await makeRequest(
+            input,
+            responseFormat: "pcm",
+            streamFormat: "audio"
+        )
+        let (chunks, response) = try await streamingTransport.stream(for: request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw HTTPAdapterError.httpStatus(response.statusCode, "<streaming response>")
+        }
+        let sampleRate = try pcmSampleRate(from: response)
+        return SpeechAudioStream(
+            format: .pcm16LittleEndian(sampleRate: sampleRate, channelCount: 1),
+            chunks: chunks
+        )
+    }
+
+    private func completeWAVStream(_ input: SpeechRequest) async throws -> SpeechAudioStream {
+        var wavRequest = input
+        wavRequest.responseFormat = "wav"
+        let data = try await synthesize(wavRequest)
+        let chunks = AsyncThrowingStream<Data, Error>(bufferingPolicy: .bufferingOldest(1)) { continuation in
+            continuation.yield(data)
+            continuation.finish()
+        }
+        return SpeechAudioStream(format: .wav, chunks: chunks)
+    }
+
+    private func makeRequest(
+        _ input: SpeechRequest,
+        responseFormat: String,
+        streamFormat: String?
+    ) async throws -> URLRequest {
         try privacy.authorize(endpoint: endpoint, data: [.promptText])
         guard let model = endpoint.model else { throw HTTPAdapterError.missingModel(endpoint.id) }
         var payload: [String: Any] = [
             "model": model,
             "input": input.text.aicameraLimited(to: AICameraContentLimits.agentCharacters),
             "voice": input.voice.aicameraLimited(to: AICameraContentLimits.labelCharacters),
-            "response_format": input.responseFormat,
+            "response_format": responseFormat,
             "speed": input.speed,
         ]
         if let instructions = input.instructions {
             payload["instructions"] = instructions.aicameraLimited(to: AICameraContentLimits.promptCharacters)
         }
+        if let streamFormat { payload["stream_format"] = streamFormat }
+
         var request = try await EndpointRequestBuilder(endpoint: endpoint, secrets: secrets).request(path: "/v1/audio/speech")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        let (data, response) = try await transport.data(for: request)
-        return try checkedResponse(data, response)
+        return request
+    }
+
+    private func pcmSampleRate(from response: HTTPURLResponse) throws -> Int {
+        if let header = response.value(forHTTPHeaderField: "x-sample-rate") {
+            guard let sampleRate = Self.safeSampleRate(
+                from: header.trimmingCharacters(in: .whitespacesAndNewlines)
+            ) else {
+                throw HTTPAdapterError.invalidResponse(
+                    "x-sample-rate must be an integer from \(Self.minimumPCMSampleRate) through \(Self.maximumPCMSampleRate)"
+                )
+            }
+            return sampleRate
+        }
+
+        guard let configured = endpoint.options["pcmSampleRate"]?.numberValue else {
+            return Self.defaultPCMSampleRate
+        }
+        guard let sampleRate = Self.safeSampleRate(from: configured) else {
+            throw HTTPAdapterError.invalidResponse(
+                "pcmSampleRate must be an integer from \(Self.minimumPCMSampleRate) through \(Self.maximumPCMSampleRate)"
+            )
+        }
+        return sampleRate
+    }
+
+    private static func safeSampleRate(from string: String) -> Int? {
+        guard let value = Double(string) else { return nil }
+        return safeSampleRate(from: value)
+    }
+
+    private static func safeSampleRate(from value: Double) -> Int? {
+        guard value.isFinite,
+              value.rounded(.towardZero) == value,
+              value >= Double(minimumPCMSampleRate),
+              value <= Double(maximumPCMSampleRate) else { return nil }
+        return Int(value)
     }
 }

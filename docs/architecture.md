@@ -13,13 +13,13 @@ hardware camera ──AVCaptureVideoDataOutput──> render/overlay ──> pre
                                                          └──> AI Camera source
 
 hardware microphone ──AVAudioEngine tap──> bounded conversion queue
-          ├──> 16 kHz mono utterance windows ──> ASR ──> agent ──> TTS
-          │                                                        │
-          └──> microphone player ──┐                               │
-                                   ├──AVAudioEngine mixer<─────────┘
+          ├──> 16 kHz mono windows ──> bounded ASR lane ──> wake gate ──> agent
+          │                                                               │
+          └──> microphone player ──┐                         WAV/PCM TTS ──┘
+                                   ├──AVAudioEngine mixer<───────────────┘
                                    └──> HAL plug-in output ring
                                                 │
-                                                └──> AI Camera Audio input
+                                                └──> AI Camera Microphone input
 ```
 
 ## Targets
@@ -41,8 +41,10 @@ Capture callbacks do not wait for a network request.
 - A frame is checked for age before and after inference.
 - Results have independent frame ordering. A fast gesture cannot invalidate a detector result from another modality.
 - The CoreMediaIO feeder queue has one frame. A full queue drops the new frame.
-- Microphone and speech player-node queues have fixed limits. New stale buffers are dropped instead of accumulating latency.
-- Stop cancels conversation, expiry, and stage tasks.
+- Two copied microphone buffers may wait off the real-time callback; microphone player buffers also have a fixed limit.
+- ASR has one in-flight window and one bounded pending window. Always-listening mode keeps the latest pending window; wake mode preserves the immediate next window so a wake-only turn cannot lose its command.
+- Streaming HTTP has cumulative, chunk-size, and buffered-chunk limits. The audio controller holds a fixed player queue and at most one awaited ingress chunk, so playback pressure reaches the network consumer without an unbounded closure queue.
+- Stop, accepted turn replacement, and barge-in cancel network work and reset queued speech. A conversation remains active until its final audio buffer plays or is reset.
 
 The app stores only the current scene state. It does not write frames or audio to disk. `privacy.persistMedia` is reserved for a future explicit recording feature and must remain `false` in the current schema.
 
@@ -56,7 +58,7 @@ Apple Vision hand pose processing runs locally. Network frame JPEGs have a maxim
 
 The app selects Core Audio devices by stable UID. One engine captures the microphone. A second engine targets the configured loopback output. The host converts the microphone to stereo Float32 for the mix and separately to mono Float32 at 16 kHz for ASR windows.
 
-TTS must return PCM16 WAV. The host converts it to the mix format and schedules it with a bounded queue. Barge-in cancels the active agent/TTS turn only while a speech buffer is pending.
+TTS can return a complete PCM16 WAV. An `openAISpeech` endpoint can also opt into streamed mono PCM16 little-endian audio. The host converts either form to the mix format and applies bounded player admission. Barge-in cancels the active agent/TTS request and queued playback while a speech buffer is pending.
 
 The HAL plug-in is not an inference component. It exposes the samples written to its output stream through its input stream. When no writer is active, readers receive silence.
 

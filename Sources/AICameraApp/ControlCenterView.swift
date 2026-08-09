@@ -1,7 +1,9 @@
+import AppKit
 import SwiftUI
 
 struct ControlCenterView: View {
     @ObservedObject var model: AppModel
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -44,17 +46,21 @@ struct ControlCenterView: View {
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.space, modifiers: [])
                 .disabled(model.isStopping)
-
-                Button("Ask Agent") { model.askAgentAboutScene() }
-                    .disabled(!model.isRunning || !model.canAskAgent)
                 Spacer()
-                SettingsLink { Image(systemName: "gearshape") }
-                    .help("Settings")
+                Button {
+                    openSettings()
+                    NSApp.activate(ignoringOtherApps: true)
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .help("Settings")
+                .accessibilityLabel("Open Settings")
+                .accessibilityIdentifier("open-settings")
             }
 
             Divider()
 
-            deviceRow(
+            DeviceStatusRow(
                 title: "Virtual camera",
                 status: model.cameraExtensionManager.status.label,
                 installed: model.cameraExtensionManager.status == .active,
@@ -62,7 +68,7 @@ struct ControlCenterView: View {
                 install: model.activateCameraExtension,
                 uninstall: model.deactivateCameraExtension
             )
-            deviceRow(
+            DeviceStatusRow(
                 title: "Virtual microphone",
                 status: model.audioDriverManager.status.label,
                 installed: model.audioDriverManager.status.isInstalled,
@@ -100,15 +106,17 @@ struct ControlCenterView: View {
         .task { model.refreshDevicesAndDrivers() }
     }
 
-    @ViewBuilder
-    private func deviceRow(
-        title: String,
-        status: String,
-        installed: Bool,
-        busy: Bool,
-        install: @escaping () -> Void,
-        uninstall: @escaping () -> Void
-    ) -> some View {
+}
+
+struct DeviceStatusRow: View {
+    let title: String
+    let status: String
+    let installed: Bool
+    let busy: Bool
+    let install: () -> Void
+    let uninstall: () -> Void
+
+    var body: some View {
         HStack {
             Circle()
                 .fill(installed ? Color.green : Color.orange)

@@ -32,13 +32,15 @@ Stable IDs are discovered in the UI. Do not copy IDs from another Mac.
 | `openAIChat` | `/v1/chat/completions` | system/user prompt, transcript, optional scene metadata |
 | `openAIVision` | `/v1/chat/completions` | JPEG frame and prompt |
 | `openAITranscription` | `/v1/audio/transcriptions` | PCM16 WAV |
-| `openAISpeech` | `/v1/audio/speech` | response text, voice, and WAV request |
+| `openAISpeech` | `/v1/audio/speech` | response text, voice, and speech format request |
 | `kortexaDetection` | `/detect` | multipart JPEG and confidence/model fields |
 | `kortexaPCMTranscription` | `/transcribe/pcm?sample_rate=16000` | raw signed PCM16 mono bytes |
 
 `path` replaces the compatible default route. `model` is sent only by adapters that use it. Common options are `temperature`, `max_tokens`, and `confidence`. Unknown option values remain inert unless an adapter reads them.
 
-OpenAI-compatible clients currently use non-streaming JSON/HTTP requests. TTS responses must be PCM16 RIFF/WAV.
+Chat, vision, and transcription responses use complete JSON or multipart HTTP requests. Speech defaults to a complete PCM16 RIFF/WAV response. For an endpoint that supports the Kortexa raw-audio contract, set `options.streamingPCM` to `true`. The speech adapter then sends `response_format: "pcm"` and `stream_format: "audio"` and consumes mono PCM16 little-endian bytes as they arrive. This option is endpoint-specific and is not a generic OpenAI API guarantee.
+
+For streamed PCM, `x-sample-rate` on the response takes precedence over numeric `options.pcmSampleRate`; otherwise the adapter uses 24000 Hz. The accepted range is 8000 through 192000 Hz. A transport without streaming support falls back to complete WAV. Production transport still rejects redirects and cookies, caps the cumulative body at 32 MiB, splits chunks to a fixed size, and fails instead of dropping data when its bounded stream buffer fills.
 
 ## Authentication
 
@@ -82,9 +84,13 @@ A stage keeps at most one in-flight request and one replaceable pending frame. S
 
 ## Conversation
 
-The optional conversation selects transcription, agent, and speech endpoint IDs. These roles can be omitted independently. `utteranceSeconds` controls fixed 16 kHz ASR windows. The current speech gate rejects all-silence windows; it is not a full VAD.
+The optional conversation selects transcription, agent, and speech endpoint IDs. These roles can be omitted independently. `transcriptionEnabled` controls ASR without disabling microphone passthrough or barge-in. `utteranceSeconds` controls fixed 16 kHz ASR windows from 0.5 through 30 seconds. The current speech gate rejects all-silence windows; it is not a full VAD.
 
-`respondToFinalTranscripts` routes ASR text to the agent. `respondToGestures` sends an edge-triggered gesture description to the agent. `gestureCooldownSeconds` limits repeated gesture turns. `bargeIn` stops an active TTS/agent turn when microphone energy is detected during speech output.
+`activationMode` is `wakePhrase` or `alwaysListening`. Checked-in profiles use `wakePhrase`. In that mode, `respondToFinalTranscripts` allows only accepted final ASR text to reach the agent: a leading, case-insensitive `wakePhrase` either prefixes a command or arms the next speech-bearing utterance for `wakeWindowSeconds` (1 through 30). The phrase must contain at least one letter or number and is limited to 128 characters. The deadline uses each utterance's monotonic capture time, so ASR latency cannot extend or shorten the physical window. Fixed ASR windows can still split a phrase at a boundary; bounded overlap is deferred.
+
+Schema-1 profiles that omit `activationMode` retain their former always-listening behavior. If `transcriptionEnabled` is omitted, it is true only when the legacy profile has a transcription endpoint. Settings exposes conversation, ASR, agent-reply, and wake-phrase controls. The current mode and wake-window controls remain in Profile JSON.
+
+One ASR request and one pending window are bounded independently from the agent/TTS turn, so ambient transcription cannot cancel an active response. Always-listening mode replaces the pending window with the latest one. Wake mode preserves the first pending window so a command immediately after a wake-only window is not overwritten by later speech. `respondToGestures` sends an edge-triggered gesture description directly to the agent without consuming the voice gate. `gestureCooldownSeconds` limits repeated gesture turns. `bargeIn` stops the active TTS/agent turn and queued speech when microphone energy is detected during playback, even if that speech does not contain the wake phrase.
 
 ## Privacy
 

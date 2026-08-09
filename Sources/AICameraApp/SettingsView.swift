@@ -7,10 +7,14 @@ struct SettingsView: View {
     @State private var keychainAccount = ""
     @State private var keychainSecret = ""
     @State private var keychainMessage: String?
+    @State private var wakePhraseDraft: String
 
     init(model: AppModel) {
         self.model = model
         self.configuration = model.configurationController
+        self._wakePhraseDraft = State(
+            initialValue: model.configurationController.configuration.pipeline.conversation.wakePhrase
+        )
     }
 
     var body: some View {
@@ -57,12 +61,53 @@ struct SettingsView: View {
             .tabItem { Label("Devices", systemImage: "video") }
 
             VStack(alignment: .leading, spacing: 10) {
+                GroupBox("Conversation") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 18) {
+                            Toggle("Enabled", isOn: conversationBoolBinding(\.enabled))
+                            Toggle("Transcribe microphone", isOn: conversationBoolBinding(\.transcriptionEnabled))
+                                .disabled(!configuration.configuration.pipeline.conversation.enabled)
+                            Toggle("Agent replies", isOn: conversationBoolBinding(\.respondToFinalTranscripts))
+                                .disabled(!configuration.configuration.pipeline.conversation.enabled)
+                            Spacer()
+                        }
+                        HStack {
+                            Text("Wake phrase")
+                            TextField("Hey Kortexa", text: $wakePhraseDraft)
+                                .onSubmit { applyWakePhrase() }
+                            Button("Apply") { applyWakePhrase() }
+                                .disabled(
+                                    wakePhraseDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                        || wakePhraseDraft == configuration.configuration.pipeline.conversation.wakePhrase
+                                )
+                        }
+                        .disabled(!configuration.configuration.pipeline.conversation.enabled)
+                        if configuration.configuration.pipeline.conversation.activationMode == .alwaysListening {
+                            Text("Legacy always-listening mode is active. A Settings control is planned; use Profile JSON to select wakePhrase now.")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                        Text("Audio changes apply when the proxy restarts.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 HStack {
                     Text("Profile JSON").font(.headline)
                     Spacer()
-                    Button("Kortexa Local Preset") { configuration.applyKortexaLocalPreset() }
-                    Button("Reload") { configuration.reload() }
-                    Button("Validate & Save") { configuration.applyJSON() }
+                    Button("Kortexa Local Preset") {
+                        configuration.applyKortexaLocalPreset()
+                        syncWakePhraseDraft()
+                    }
+                    Button("Reload") {
+                        configuration.reload()
+                        syncWakePhraseDraft()
+                    }
+                    Button("Validate & Save") {
+                        configuration.applyJSON()
+                        syncWakePhraseDraft()
+                    }
                         .buttonStyle(.borderedProminent)
                 }
                 TextEditor(text: $configuration.jsonText)
@@ -78,28 +123,27 @@ struct SettingsView: View {
                 }
             }
             .padding()
+            .onAppear { syncWakePhraseDraft() }
             .tabItem { Label("Pipeline", systemImage: "point.3.connected.trianglepath.dotted") }
 
             VStack(alignment: .leading, spacing: 12) {
                 Text("System devices").font(.headline)
-                HStack {
-                    Text("Camera extension")
-                    Spacer()
-                    Text(model.cameraExtensionManager.status.label).foregroundStyle(.secondary)
-                    Button("Install") { model.activateCameraExtension() }
-                        .disabled(model.deviceOperationInProgress)
-                    Button("Remove") { model.deactivateCameraExtension() }
-                        .disabled(model.deviceOperationInProgress)
-                }
-                HStack {
-                    Text("Audio driver")
-                    Spacer()
-                    Text(model.audioDriverManager.status.label).foregroundStyle(.secondary)
-                    Button("Install") { model.installAudioDriver() }
-                        .disabled(model.deviceOperationInProgress)
-                    Button("Remove") { model.uninstallAudioDriver() }
-                        .disabled(model.deviceOperationInProgress)
-                }
+                DeviceStatusRow(
+                    title: "Virtual camera",
+                    status: model.cameraExtensionManager.status.label,
+                    installed: model.cameraExtensionManager.status == .active,
+                    busy: model.deviceOperationInProgress,
+                    install: model.activateCameraExtension,
+                    uninstall: model.deactivateCameraExtension
+                )
+                DeviceStatusRow(
+                    title: "Virtual microphone",
+                    status: model.audioDriverManager.status.label,
+                    installed: model.audioDriverManager.status.isInstalled,
+                    busy: model.deviceOperationInProgress,
+                    install: model.installAudioDriver,
+                    uninstall: model.uninstallAudioDriver
+                )
                 Divider()
                 Text("Endpoint Keychain secret").font(.headline)
                 HStack {
@@ -165,6 +209,28 @@ struct SettingsView: View {
             get: { configuration.configuration.capture[keyPath: keyPath] },
             set: { value in configuration.update { $0.capture[keyPath: keyPath] = value } }
         )
+    }
+
+    private func conversationBoolBinding(
+        _ keyPath: WritableKeyPath<ConversationConfiguration, Bool>
+    ) -> Binding<Bool> {
+        Binding(
+            get: { configuration.configuration.pipeline.conversation[keyPath: keyPath] },
+            set: { value in
+                configuration.update { $0.pipeline.conversation[keyPath: keyPath] = value }
+            }
+        )
+    }
+
+    private func applyWakePhrase() {
+        let phrase = wakePhraseDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !phrase.isEmpty else { return }
+        configuration.update { $0.pipeline.conversation.wakePhrase = phrase }
+        syncWakePhraseDraft()
+    }
+
+    private func syncWakePhraseDraft() {
+        wakePhraseDraft = configuration.configuration.pipeline.conversation.wakePhrase
     }
 
     private var resolutionBinding: Binding<String> {
