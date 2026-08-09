@@ -3,7 +3,6 @@ import SwiftUI
 
 struct ControlCenterView: View {
     @ObservedObject var model: AppModel
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -48,8 +47,7 @@ struct ControlCenterView: View {
                 .disabled(model.isStopping)
                 Spacer()
                 Button {
-                    openSettings()
-                    NSApp.activate(ignoringOtherApps: true)
+                    openSettingsWindow()
                 } label: {
                     Image(systemName: "gearshape")
                 }
@@ -106,6 +104,12 @@ struct ControlCenterView: View {
         .task { model.refreshDevicesAndDrivers() }
     }
 
+    private func openSettingsWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        if !NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
+            _ = NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+        }
+    }
 }
 
 struct DeviceStatusRow: View {
