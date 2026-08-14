@@ -10,14 +10,21 @@ No team ID or profile is committed. Copy the ignored local template:
 cp Config/Local.example.xcconfig Config/Local.xcconfig
 ```
 
-Set `DEVELOPMENT_TEAM` and any local signing overrides. Make sure Xcode has an Apple account that can create or download suitable profiles. Then run:
+Set `DEVELOPMENT_TEAM` and any local signing overrides. Make sure Xcode has an Apple account that can create or download suitable profiles. For a signed non-installing build, run:
 
 ```sh
 SIGNING=1 scripts/build.sh
+```
+
+To build and install the signed Release configuration, run:
+
+```sh
 scripts/install-app.sh
 ```
 
-A plain `scripts/build.sh` is unsigned and cannot activate the extension.
+A plain `scripts/build.sh` is unsigned and cannot activate the extension. A signed Debug host is not accepted as a feeder.
+
+The development installer uses one administrator-authorized transaction. It checks exact Apple-anchored host and extension identifiers, matching signing teams, and absence of `get-task-allow` before and after copying into a root-private staging directory. It strips ACL and group/world write access, serializes installers with a stale-aware lock, moves the verified app on the same filesystem without following a destination symlink, protects the final app root, checks that its inode is the staged inode, terminates only old processes at the exact app or rollback path, and commits a protected build marker. Catchable failures and signals restore the prior app and marker.
 
 ## Camera extension
 
@@ -26,7 +33,7 @@ A plain `scripts/build.sh` is unsigned and cannot activate the extension.
 3. Select **Install** for the virtual camera.
 4. If a newer extension is bundled later, the row reports **Update available**. Select **Update**; do not remove the active extension first.
 5. If status is **Approval required**, select **Open Extension Settings** and approve it.
-6. If status is **Pending reboot**, restart macOS.
+6. If status is **Pending reboot**, restart macOS. An updated build can be active while older terminated generations wait for that reboot; confirm the active version with `systemextensionsctl list`.
 
 Select **Remove** for the virtual camera before removing the app. Deactivation can also require approval or a reboot. The app submits `OSSystemExtensionRequest`; it never edits system-extension directories directly.
 

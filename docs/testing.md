@@ -11,11 +11,12 @@ scripts/validate.sh
 It performs:
 
 1. Swift package unit tests;
-2. property-list and entitlement linting;
-3. strict C syntax checks for the HAL plug-in;
-4. an unsigned Xcode build of all four targets;
-5. bundle-ID, resource, embed-path, and exported-factory checks; and
-6. an in-process HAL factory/IO harness for the exact property graph, malformed inputs, clock behavior, multi-client reads, sample-rate request coalescing, concurrent ring wrap, and reset behavior.
+2. Bash syntax checks plus non-executing AppleScript compilation and rendered privileged-shell syntax checks;
+3. property-list and entitlement linting;
+4. strict C syntax checks for the HAL plug-in;
+5. an unsigned Xcode build of all four targets;
+6. bundle-ID, resource, embed-path, and exported-factory checks; and
+7. an in-process HAL factory/IO harness for the exact property graph, malformed inputs, clock behavior, multi-client reads, sample-rate request coalescing, concurrent ring wrap, and reset behavior.
 
 It does not request media permission, start inference services, install a driver, or submit a system-extension request.
 
@@ -29,7 +30,7 @@ This builds temporary AddressSanitizer/UndefinedBehaviorSanitizer and ThreadSani
 
 ## Unit coverage
 
-The 50 core tests cover profile round trips and legacy migration, wake-phrase matching and capture-time expiry, nominal frame-rate matching, remote privacy grants, adapter normalization, WAV encoding/decoding, streamed-speech metadata, cumulative and buffer limits, redirect rejection, startup and active-body cancellation, per-modality stale results, result expiry, and latest-value mailbox replacement. App media orchestration and CoreMediaIO lifecycle still require the signed manual checks below.
+The 50 core tests cover profile round trips and legacy migration, wake-phrase matching and capture-time expiry, nominal frame-rate matching, remote privacy grants, adapter normalization, WAV encoding/decoding, streamed-speech metadata, cumulative and buffer limits, redirect rejection, startup and active-body cancellation, per-modality stale results, result expiry, and latest-value mailbox replacement. App media orchestration and CoreMediaIO lifecycle remain signed, manual per-release checks; build-9 results are recorded in [`VALIDATION.md`](../VALIDATION.md).
 
 ## Manual device acceptance
 
@@ -40,10 +41,11 @@ Use a signed app installed in `/Applications`.
 1. Activate and approve the extension. If the installed build is older, use the explicit **Update** action first.
 2. Before starting the host, use a bounded AVFoundation client to confirm the animated placeholder, strictly increasing timestamps, and changing in-memory frame hashes. Do not record frames.
 3. Start AI Camera with a hardware camera.
-4. In QuickTime Player, create a movie recording and select **AI Camera**.
-5. Confirm the processed picture, overlay alignment, frame continuity, and return to the placeholder when the host stops.
-6. Repeat the bounded client after host stop/start and with a second simultaneous client at the configured format.
-7. Deactivate the extension and confirm that the device disappears after the OS completes removal.
+4. Use the bounded client to classify live frames in memory. Confirm changing hashes, increasing timestamps, the negotiated dimensions, and absence of the placeholder pattern.
+5. Stop the host and confirm return to the animated placeholder without persisting a frame.
+6. Restart the host, then run two bounded clients simultaneously at the configured format.
+7. Check extension logs for an authorized feeder, no binding revocation, and no start/stop error.
+8. Deactivate the extension only when removal acceptance is intended, and confirm that the device disappears after macOS completes removal.
 
 ### Audio
 

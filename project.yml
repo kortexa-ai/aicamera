@@ -17,7 +17,7 @@ settings:
     SWIFT_VERSION: "5.10"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "2"
+    CURRENT_PROJECT_VERSION: "9"
     CODE_SIGN_STYLE: Automatic
     CLANG_ENABLE_MODULES: true
   configs:
@@ -26,6 +26,7 @@ settings:
     Release:
       SWIFT_COMPILATION_MODE: wholemodule
       SWIFT_OPTIMIZATION_LEVEL: "-O"
+      CODE_SIGN_INJECT_BASE_ENTITLEMENTS: false
 
 targets:
   AICameraCore:

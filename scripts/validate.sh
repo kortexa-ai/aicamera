@@ -7,6 +7,40 @@ cd "$ROOT"
 swift test
 "$ROOT/scripts/bootstrap.sh"
 
+for script in scripts/*.sh; do
+    bash -n "$script"
+done
+VALIDATION_TMP="$(mktemp -d "${TMPDIR:-/tmp}/aicamera-validation.XXXXXX")"
+trap 'rm -rf "$VALIDATION_TMP"' EXIT
+sed -n '/^on run argv$/,/^end run$/p' scripts/install-app.sh \
+    > "$VALIDATION_TMP/install-app.applescript"
+osacompile \
+    -o "$VALIDATION_TMP/install-app.scpt" \
+    "$VALIDATION_TMP/install-app.applescript"
+sed 's/do shell script commandText with administrator privileges/return commandText/' \
+    "$VALIDATION_TMP/install-app.applescript" \
+    > "$VALIDATION_TMP/install-app-render.applescript"
+osascript "$VALIDATION_TMP/install-app-render.applescript" \
+    "$ROOT/build/DerivedData/Build/Products/Release/AI Camera.app" \
+    '/Applications/AI Camera.app' \
+    'ai.kortexa.aicamera' \
+    'ai.kortexa.aicamera.camera-extension' \
+    > "$VALIDATION_TMP/install-app-root-command.sh"
+/bin/sh -n "$VALIDATION_TMP/install-app-root-command.sh"
+grep -Fq 'certificate leaf[subject.OU] = ${dq}${team}${dq}' \
+    "$VALIDATION_TMP/install-app-root-command.sh"
+grep -Fq 'verify_identity "$dst" "$installed_ext"' \
+    "$VALIDATION_TMP/install-app-root-command.sh"
+if grep -Fq 'verify_product "$dst" "$installed_ext"' \
+    "$VALIDATION_TMP/install-app-root-command.sh"; then
+    echo "The installer must allow a strictly identified signed Debug predecessor to upgrade." >&2
+    exit 1
+fi
+grep -Fq '/bin/mv -h "$tmp" "$dst"' \
+    "$VALIDATION_TMP/install-app-root-command.sh"
+grep -Fq '/usr/bin/chflags -h uchg "$dst"' \
+    "$VALIDATION_TMP/install-app-root-command.sh"
+
 find Resources \( -name '*.plist' -o -name '*.entitlements' \) -print0 \
     | while IFS= read -r -d '' plist; do
         plutil -lint "$plist"

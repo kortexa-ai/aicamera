@@ -32,7 +32,7 @@ scripts/bootstrap.sh
 scripts/validate.sh
 ```
 
-`validate.sh` runs unit tests, validates metadata, compiles the HAL driver, and makes an unsigned four-target Xcode build. It does **not** install or activate system software.
+`validate.sh` runs unit tests, validates metadata and installer syntax, compiles and exercises the HAL driver, and makes an unsigned four-target Xcode build. It does **not** install or activate system software.
 
 An unsigned development build is also available with:
 
@@ -41,14 +41,19 @@ scripts/build.sh
 scripts/run.sh
 ```
 
-For a signed build, copy `Config/Local.example.xcconfig` to the ignored `Config/Local.xcconfig`, select a valid team, add the required capabilities to its profiles, and run:
+For signed work, copy `Config/Local.example.xcconfig` to the ignored `Config/Local.xcconfig`, select a valid team, and add the required capabilities to its profiles. For a signed non-installing build, run:
 
 ```sh
 SIGNING=1 scripts/build.sh
+```
+
+To build and install the signed Release configuration through the protected installer, run:
+
+```sh
 scripts/install-app.sh
 ```
 
-The app must be in `/Applications` before macOS can activate its camera system extension. Installation can show standard macOS authorization and approval dialogs.
+The app must be in `/Applications` before macOS can activate its camera system extension. The installer verifies exact host and extension identity before and after root-private staging, serializes concurrent installs, rolls back catchable failures, and verifies the final inode and `uchg` protection. Installation can show standard macOS authorization and approval dialogs.
 
 ## First use
 
@@ -74,7 +79,7 @@ The profile is stored at `~/Library/Application Support/AI Camera/profile.json`.
 
 ## Current validation boundary
 
-The core tests and unsigned app, framework, camera-extension, and audio-driver build are automated. System-extension activation and HAL installation are deliberately manual because they modify the operating system and can require a registered signing profile, administrator authorization, user approval, and a reboot.
+The core tests and unsigned app, framework, camera-extension, and audio-driver build are automated. System-extension activation and HAL installation are deliberately manual because they modify the operating system and can require a registered signing profile, administrator authorization, user approval, and a reboot. Development-signed build 9 passed bounded native placeholder/live, stop/restart, and simultaneous-client camera acceptance; see [`VALIDATION.md`](VALIDATION.md).
 
 ## License
 

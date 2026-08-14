@@ -10,7 +10,7 @@ AI Camera processes camera and microphone data in memory. It does not record or 
 
 Real-time callbacks copy only bounded buffers needed for processing. Network stages hold at most one active request and one replaceable pending frame. Overlays keep normalized current state and expire it.
 
-The camera extension has no network client. Its feeder sink rejects writers unless the CoreMediaIO client PID resolves to live code that satisfies an Apple-anchored requirement for the exact host bundle identifier and the extension's signing team. CoreMediaIO does not expose an audit token, so PID lookup is performed synchronously for every new client, never cached by PID, and the result is bound to that client's `clientID` only for the stream lifetime. Lookup, requirement, or team failures reject the stream. The HAL driver has no network client and uses only a bounded in-memory ring.
+The camera extension has no network client. If the CMIO service can resolve the client, Security.framework also validates the live host against the exact identifier, Apple generic anchor, extension-derived team, and absence of `get-task-allow`. Every authorization requires two identical PID-version-bound `csops_audittoken` snapshots with the exact installed path, identifier, and team; an Apple Development, App Store, or Developer ID validation category; hardened runtime and library validation; and no ad-hoc, debugged, invalid-page, or `get-task-allow` state. PID version changes on `exec`. The accepted CoreMediaIO client identity and execution binding are checked again at stream start. A bounded watchdog checks the execution binding while the sink waits, and every forwarded sample gets an immediate check. Stop or identity change clears or revokes the binding. Results are never cached by numeric PID. The kernel selectors are XNU ABI that the SDK does not expose, so unavailable or changed operations reject the stream and every release needs native acceptance. The HAL driver has no network client and uses only a bounded in-memory ring.
 
 ## Network egress
 
@@ -33,7 +33,7 @@ Do not put credentials in `Config/Local.xcconfig`, example profiles, source, log
 
 ## Privileged operations
 
-The app uses Apple’s system-extension API for the camera. It uses one administrator-authorized AppleScript command for the HAL driver. Install and removal paths are fixed and shell quoted. The removal command targets only `AICameraAudioDriver.driver`.
+The app uses Apple’s system-extension API for the camera. The development installer verifies exact Apple-anchored, same-team host and camera-extension requirements before and after copying into a root-private staging directory, strips ACL and write access, serializes transactions, and uses no-follow same-filesystem moves. It protects the installed root and verifies that its inode is the verified staged inode before it commits the build marker. Catchable failures and signals restore the prior app and marker. The installer uses one administrator-authorized AppleScript transaction. The app uses a separate administrator-authorized command for the HAL driver. Install and removal paths are fixed and shell quoted. The removal command targets only `AICameraAudioDriver.driver`.
 
 Verify the app’s signature and bundled driver before authorizing installation. Device lifecycle tests are manual and opt-in.
 

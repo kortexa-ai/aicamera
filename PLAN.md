@@ -15,7 +15,7 @@ AICamera is a configurable macOS audio/video proxy. The host captures a physical
 - [x] Add bounded frame sampling for VLM, object detection, and hand gestures.
 - [x] Render agent annotations and overlays without blocking capture.
 - [x] Add a CoreMediaIO camera system extension with source and feeder sink streams.
-- [ ] Feed processed frames to the extension and verify the virtual camera with AVFoundation.
+- [x] Feed processed frames to the extension and verify placeholder, live, stop/restart, and simultaneous-client output with bounded AVFoundation canaries.
 
 ## Phase 3 — Audio path
 
@@ -39,7 +39,7 @@ AICamera is a configurable macOS audio/video proxy. The host captures a physical
 - [x] Add safe bundle, app-launch, redirect-policy, and configured model-adapter smoke checks; keep device loading opt-in.
 - [x] Document development signing, install/uninstall, privacy, model composition, and troubleshooting.
 - [x] Complete the safe production-readiness audit and publish the reviewed implementation to private `main`.
-- [ ] Complete signed device acceptance before declaring a distributable release.
+- [x] Complete development-signed device acceptance; keep Developer ID, notarization, and clean-machine checks as the distribution boundary.
 
 ## Current signed acceptance pass
 
@@ -48,9 +48,12 @@ AICamera is a configurable macOS audio/video proxy. The host captures a physical
 - [x] Normalize ready-state wording, fix Settings navigation, and show identical install status on the main and Privacy pages.
 - [x] Correct nominal 29.97/30 fps matching and the host's reversed CoreMediaIO sink-stream selection.
 - [x] Reboot, activate the corrected camera extension, and verify its native animated placeholder with a bounded in-memory AVFoundation canary.
-- [ ] Install and activate build 2 with PID-bound code-requirement sink authorization, then run live, stop/start, and multiple-client frame acceptance.
+- [x] Install and activate build 9 with PID-version-bound live-code authorization, then pass live, stop/placeholder, restart, and simultaneous-client frame acceptance.
+- [x] Protect the signed Release installer with exact Apple-anchor, same-team, and no-debug checks before and after root-private staging, `shlock` serialization, rollback traps, and final inode/`uchg` verification.
 - [x] Complete silent ASR toggle, wake-phrase, agent, bounded streamed-TTS mixing, and barge-in acceptance with a development-signed build.
-- [ ] Install the latest accepted build and repeat the short Yeti/HyperX human audio check.
+- [x] Install build 9, restore the normal wake-phrase profile, and restore Yeti input and HyperX output defaults.
+- [ ] Repeat the short audible Yeti/HyperX human check for the final notarized distribution candidate.
+- [ ] Let the operator reboot once to remove retired camera-extension generations; active build 9 is not blocked.
 
 ## Phase 6 — EVERYTHING!!! MWAHAHAHA!!!
 
