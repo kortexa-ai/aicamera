@@ -52,7 +52,7 @@ public struct CaptureConfiguration: Codable, Equatable, Sendable {
         width: Int = 1280,
         height: Int = 720,
         framesPerSecond: Int = 30,
-        mirrorVideo: Bool = true,
+        mirrorVideo: Bool = false,
         audioSampleRate: Double = 48_000,
         audioChannels: Int = 1,
         virtualAudioOutputDeviceID: String? = "ai.kortexa.aicamera.audio.device",
@@ -208,7 +208,7 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
 
     public init(
         enabled: Bool = false,
-        transcriptionEnabled: Bool = true,
+        transcriptionEnabled: Bool = false,
         transcriptionEndpointID: String? = nil,
         agentEndpointID: String? = nil,
         speechEndpointID: String? = nil,
@@ -294,9 +294,7 @@ public struct PipelineConfiguration: Codable, Equatable, Sendable {
     public var conversation: ConversationConfiguration
 
     public init(
-        videoStages: [VideoStageConfiguration] = [
-            .init(id: "hands", kind: .handGesture, maximumRateHz: 8)
-        ],
+        videoStages: [VideoStageConfiguration] = [],
         conversation: ConversationConfiguration = .init()
     ) {
         self.videoStages = videoStages
@@ -315,7 +313,7 @@ public struct OverlayConfiguration: Codable, Equatable, Sendable {
     public var accentHex: String
 
     public init(
-        enabled: Bool = true,
+        enabled: Bool = false,
         showDetectionBoxes: Bool = true,
         showGestureLabels: Bool = true,
         showTranscript: Bool = true,

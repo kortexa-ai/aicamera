@@ -2,8 +2,17 @@ import XCTest
 @testable import AICameraCore
 
 final class ConfigurationTests: XCTestCase {
-    func testDefaultConfigurationIsValid() throws {
-        try ConfigurationValidator.validate(.default)
+    func testDefaultConfigurationIsPurePassthrough() throws {
+        let configuration = AICameraConfiguration.default
+        try ConfigurationValidator.validate(configuration)
+        XCTAssertNil(configuration.capture.videoDeviceID)
+        XCTAssertNil(configuration.capture.audioDeviceID)
+        XCTAssertFalse(configuration.capture.mirrorVideo)
+        XCTAssertTrue(configuration.endpoints.isEmpty)
+        XCTAssertTrue(configuration.pipeline.videoStages.isEmpty)
+        XCTAssertFalse(configuration.pipeline.conversation.enabled)
+        XCTAssertFalse(configuration.pipeline.conversation.transcriptionEnabled)
+        XCTAssertFalse(configuration.overlays.enabled)
     }
 
     func testRoundTripsThroughStore() throws {
@@ -177,6 +186,7 @@ final class ConfigurationTests: XCTestCase {
     func testEffectiveTranscriptionRequiresEndpoint() {
         var configuration = AICameraConfiguration.default
         configuration.pipeline.conversation.enabled = true
+        configuration.pipeline.conversation.transcriptionEnabled = true
         XCTAssertThrowsError(try ConfigurationValidator.validate(configuration)) { error in
             XCTAssertEqual(
                 error as? ConfigurationError,
@@ -218,7 +228,9 @@ final class ConfigurationTests: XCTestCase {
         }
 
         configuration = .default
-        configuration.pipeline.videoStages[0].maximumRateHz = 1e-300
+        configuration.pipeline.videoStages = [
+            .init(id: "hands", kind: .handGesture, maximumRateHz: 1e-300)
+        ]
         XCTAssertThrowsError(try ConfigurationValidator.validate(configuration)) { error in
             XCTAssertEqual(error as? ConfigurationError, .invalidRate("hands"))
         }

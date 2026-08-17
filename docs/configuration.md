@@ -6,24 +6,30 @@ AI Camera reads one schema-versioned JSON profile from:
 ~/Library/Application Support/AI Camera/profile.json
 ```
 
-Edit it in the Settings window. **Apply JSON** validates and atomically saves it. **Reload from disk** discards unsaved editor text. Device selections in the menu-bar panel also update this file.
+Edit it in the Settings window. **Apply JSON** validates and atomically saves it. **Reload from disk** discards unsaved editor text. Device selections in Settings also update this file. A valid change stops the currently active lanes and then reconciles current client demand with new controller snapshots.
 
-Start with [`Examples/kortexa-local.json`](../Examples/kortexa-local.json) or [`Examples/remote-openai-compatible.json`](../Examples/remote-openai-compatible.json). The local preset is an example only. No service address, model, hardware ID, or credential is a runtime requirement.
+A new profile is operational without model or hardware configuration. It uses system-default inputs with mirroring, overlays, video stages, conversation, and transcription disabled. This is the pure-passthrough base mode. If an existing profile is corrupt, too new, or invalid, the app preserves its text and blocks automatic camera and microphone capture until **Validate & Save** succeeds; it never silently runs the in-memory default instead. Start with [`Examples/kortexa-local.json`](../Examples/kortexa-local.json) or [`Examples/remote-openai-compatible.json`](../Examples/remote-openai-compatible.json) only when AI processing is wanted. The local preset is an example, not a runtime requirement.
 
 ## Capture
 
 | Key | Meaning |
 |---|---|
-| `videoDeviceID` | Optional AVFoundation device unique ID. Omit it to use the first hardware camera. |
-| `audioDeviceID` | Optional Core Audio device UID. Omit it to use the current system input. |
+| `videoDeviceID` | Optional AVFoundation device unique ID. Omit it to use the compatible system-preferred physical camera. Software and Continuity cameras are excluded. If the system default is excluded, the app warns and uses the first compatible physical camera. |
+| `audioDeviceID` | Optional Core Audio device UID. Omit it to use the system-default physical input. Software loopbacks and wired or wireless Continuity microphones are excluded. If the system default is excluded, the app warns and uses the first physical microphone. |
 | `width`, `height`, `framesPerSecond` | Render and virtual-camera format. The extension publishes 640×480, 1280×720, and 1920×1080 at 15, 30, or 60 fps. |
 | `mirrorVideo` | Mirror the rendered output and gesture coordinates. |
 | `audioSampleRate` | Host mix rate. Use 44100 or 48000 for the bundled driver. |
 | `audioChannels` | Capture profile channel request. The bundled virtual device is stereo. |
-| `virtualAudioOutputDeviceID` | Core Audio output UID for the mix. The bundled value is `ai.kortexa.aicamera.audio.device`; another duplex loopback device can be selected. |
+| `virtualAudioOutputDeviceID` | Core Audio output UID for the mix. Omitted values fall back to the bundled `ai.kortexa.aicamera.audio.device`; advanced profiles can name another duplex loopback device. |
 | `microphoneGain`, `speechGain` | Nonnegative mixer gains. |
 
 Stable IDs are discovered in the UI. Do not copy IDs from another Mac.
+
+## Automatic lifecycle
+
+The profile does not contain a manual running flag. The camera extension reports active source clients and the HAL driver reports recent input readers. The host polls these bounded signals and reconciles camera and microphone capture independently. No enabled AI stage means no model request is made. When the last relevant client closes, the host stops that physical input; when both lanes are idle it also cancels and releases the shared pipeline coordinator.
+
+Configuration changes are applied by stopping current lanes, replacing the immutable controller snapshots, and reconciling current demand. Capture never waits for this work on a real-time callback.
 
 ## Endpoint adapters
 

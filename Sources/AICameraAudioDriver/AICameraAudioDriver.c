@@ -120,6 +120,8 @@ static Boolean								gBox_Acquired					= true;
 
 #define										kDevice_UID						"ai.kortexa.aicamera.audio.device"
 #define										kDevice_ModelUID				"ai.kortexa.aicamera.audio.model"
+#define										kCompanionHost_BundleID		"ai.kortexa.aicamera"
+#define										kAICameraDevicePropertyConsumerCount ((AudioObjectPropertySelector)0x61696363U)
 static pthread_mutex_t						gDevice_IOMutex					= PTHREAD_MUTEX_INITIALIZER;
 static Float64								gDevice_SampleRate				= 48000.0;
 static Float64								gDevice_RequestedSampleRate		= 48000.0;
@@ -130,8 +132,16 @@ static UInt64								gDevice_IOIsRunning				= 0;
 enum
 {
 	kDevice_RingBufferSize = 16384,
-	kDevice_ChannelCount = 2
+	kDevice_ChannelCount = 2,
+	kDevice_MaxTrackedClients = 64
 };
+// Actual microphone demand is recorded only by ReadInput operations. The real-time callback
+// touches this fixed lock-free table and never allocates, locks, logs, or performs IPC.
+static _Atomic(UInt64)					gDevice_InputConsumerClientIDs[kDevice_MaxTrackedClients];
+static _Atomic(UInt64)					gDevice_InputConsumerLastRead[kDevice_MaxTrackedClients];
+static _Atomic(UInt64)					gDevice_CompanionClientIDs[kDevice_MaxTrackedClients];
+static _Atomic(UInt64)					gDevice_InputConsumerOverflowLastRead = 0;
+static Float64								gDevice_HostTicksPerSecond		= 1000000000.0;
 // Atomic sample bits and per-slot frame tags avoid C data races between HAL input and output IO threads.
 static _Alignas(64) _Atomic(UInt32)	gDevice_LoopbackSampleBits[kDevice_RingBufferSize * kDevice_ChannelCount];
 static _Alignas(64) _Atomic(UInt64)	gDevice_LoopbackFrameTags[kDevice_RingBufferSize];
@@ -145,6 +155,152 @@ static UInt64								gDevice_AnchorHostTime			= 0;
 
 static bool									gStream_Input_IsActive			= true;
 static bool									gStream_Output_IsActive			= true;
+
+static void AICameraAudioDriver_SetCompanionClient(UInt32 inClientID, Boolean inIsCompanion)
+{
+	UInt64 theEncodedClientID = (UInt64)inClientID + 1;
+	for(UInt32 theIndex = 0; theIndex < kDevice_MaxTrackedClients; ++theIndex)
+	{
+		UInt64 theExisting = atomic_load_explicit(
+			&gDevice_CompanionClientIDs[theIndex],
+			memory_order_acquire);
+		if(theExisting == theEncodedClientID)
+		{
+			if(!inIsCompanion)
+			{
+				atomic_store_explicit(
+					&gDevice_CompanionClientIDs[theIndex],
+					0,
+					memory_order_release);
+			}
+			return;
+		}
+	}
+	if(!inIsCompanion) return;
+	for(UInt32 theIndex = 0; theIndex < kDevice_MaxTrackedClients; ++theIndex)
+	{
+		UInt64 theExpected = 0;
+		if(atomic_compare_exchange_strong_explicit(
+			&gDevice_CompanionClientIDs[theIndex],
+			&theExpected,
+			theEncodedClientID,
+			memory_order_acq_rel,
+			memory_order_acquire) || theExpected == theEncodedClientID)
+		{
+			return;
+		}
+	}
+}
+
+static Boolean AICameraAudioDriver_IsCompanionClient(UInt32 inClientID)
+{
+	UInt64 theEncodedClientID = (UInt64)inClientID + 1;
+	for(UInt32 theIndex = 0; theIndex < kDevice_MaxTrackedClients; ++theIndex)
+	{
+		if(atomic_load_explicit(
+			&gDevice_CompanionClientIDs[theIndex],
+			memory_order_acquire) == theEncodedClientID)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+static void AICameraAudioDriver_MarkInputConsumer(UInt32 inClientID)
+{
+	if(AICameraAudioDriver_IsCompanionClient(inClientID)) return;
+	UInt64 theEncodedClientID = (UInt64)inClientID + 1;
+	UInt64 theNow = mach_absolute_time();
+	for(UInt32 theIndex = 0; theIndex < kDevice_MaxTrackedClients; ++theIndex)
+	{
+		UInt64 theExisting = atomic_load_explicit(
+			&gDevice_InputConsumerClientIDs[theIndex],
+			memory_order_acquire);
+		if(theExisting == theEncodedClientID)
+		{
+			atomic_store_explicit(
+				&gDevice_InputConsumerLastRead[theIndex],
+				theNow,
+				memory_order_release);
+			return;
+		}
+	}
+	for(UInt32 theIndex = 0; theIndex < kDevice_MaxTrackedClients; ++theIndex)
+	{
+		UInt64 theExpected = 0;
+		if(atomic_compare_exchange_strong_explicit(
+			&gDevice_InputConsumerClientIDs[theIndex],
+			&theExpected,
+			theEncodedClientID,
+			memory_order_acq_rel,
+			memory_order_acquire) || theExpected == theEncodedClientID)
+		{
+			atomic_store_explicit(
+				&gDevice_InputConsumerLastRead[theIndex],
+				theNow,
+				memory_order_release);
+			return;
+		}
+	}
+	// Preserve safe demand when more readers exist than the bounded identity table can name.
+	atomic_store_explicit(
+		&gDevice_InputConsumerOverflowLastRead,
+		theNow,
+		memory_order_release);
+}
+
+static void AICameraAudioDriver_ClearInputConsumer(UInt32 inClientID)
+{
+	UInt64 theEncodedClientID = (UInt64)inClientID + 1;
+	for(UInt32 theIndex = 0; theIndex < kDevice_MaxTrackedClients; ++theIndex)
+	{
+		UInt64 theExpected = theEncodedClientID;
+		if(atomic_compare_exchange_strong_explicit(
+			&gDevice_InputConsumerClientIDs[theIndex],
+			&theExpected,
+			0,
+			memory_order_acq_rel,
+			memory_order_acquire))
+		{
+			atomic_store_explicit(
+				&gDevice_InputConsumerLastRead[theIndex],
+				0,
+				memory_order_release);
+			return;
+		}
+	}
+}
+
+static UInt32 AICameraAudioDriver_CopyInputConsumerCount(void)
+{
+	UInt32 theCount = 0;
+	UInt64 theNow = mach_absolute_time();
+	UInt64 theWindow = (UInt64)gDevice_HostTicksPerSecond;
+	for(UInt32 theIndex = 0; theIndex < kDevice_MaxTrackedClients; ++theIndex)
+	{
+		UInt64 theClientID = atomic_load_explicit(
+			&gDevice_InputConsumerClientIDs[theIndex],
+			memory_order_acquire);
+		UInt64 theLastRead = atomic_load_explicit(
+			&gDevice_InputConsumerLastRead[theIndex],
+			memory_order_acquire);
+		if(theClientID != 0 && theLastRead != 0 && theNow >= theLastRead &&
+			theNow - theLastRead <= theWindow)
+		{
+			++theCount;
+		}
+	}
+	UInt64 theOverflowRead = atomic_load_explicit(
+		&gDevice_InputConsumerOverflowLastRead,
+		memory_order_acquire);
+	if(theOverflowRead != 0 && theNow >= theOverflowRead &&
+		theNow - theOverflowRead <= theWindow)
+	{
+		++theCount;
+	}
+	return theCount;
+}
 
 static Boolean AICameraAudioDriver_CopyBoxAcquired(void)
 {
@@ -535,6 +691,7 @@ static OSStatus	AICameraAudioDriver_Initialize(AudioServerPlugInDriverRef inDriv
 	mach_timebase_info(&theTimeBaseInfo);
 	Float64 theHostClockFrequency = (Float64)theTimeBaseInfo.denom / (Float64)theTimeBaseInfo.numer;
 	theHostClockFrequency *= 1000000000.0;
+	gDevice_HostTicksPerSecond = theHostClockFrequency;
 	gDevice_HostTicksPerFrame = theHostClockFrequency / gDevice_SampleRate;
 
 Done:
@@ -585,14 +742,18 @@ static OSStatus	AICameraAudioDriver_AddDeviceClient(AudioServerPlugInDriverRef i
 	//	not need to track the clients using the device, so we just check the arguments and return
 	//	successfully.
 
-	#pragma unused(inClientInfo)
-
 	//	declare the local variables
 	OSStatus theAnswer = 0;
 
 	//	check the arguments
 	FailWithAction(inDriver != gAudioServerPlugInDriverRef, theAnswer = kAudioHardwareBadObjectError, Done, "AICameraAudioDriver_AddDeviceClient: bad driver reference");
 	FailWithAction(inDeviceObjectID != kObjectID_Device, theAnswer = kAudioHardwareBadObjectError, Done, "AICameraAudioDriver_AddDeviceClient: bad device ID");
+	FailWithAction(inClientInfo == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done, "AICameraAudioDriver_AddDeviceClient: missing client info");
+
+	AICameraAudioDriver_SetCompanionClient(
+		inClientInfo->mClientID,
+		inClientInfo->mBundleID != NULL &&
+			CFEqual(inClientInfo->mBundleID, CFSTR(kCompanionHost_BundleID)));
 
 Done:
 	return theAnswer;
@@ -600,18 +761,15 @@ Done:
 
 static OSStatus	AICameraAudioDriver_RemoveDeviceClient(AudioServerPlugInDriverRef inDriver, AudioObjectID inDeviceObjectID, const AudioServerPlugInClientInfo* inClientInfo)
 {
-	//	This method is used to inform the driver about a client that is no longer using the given
-	//	device. This driver does not track clients, so we just check the arguments and return
-	//	successfully.
-
-	#pragma unused(inClientInfo)
-
-	//	declare the local variables
+	//	Remove stale demand even if a client disconnects without a balanced StopIO call.
 	OSStatus theAnswer = 0;
 
-	//	check the arguments
 	FailWithAction(inDriver != gAudioServerPlugInDriverRef, theAnswer = kAudioHardwareBadObjectError, Done, "AICameraAudioDriver_RemoveDeviceClient: bad driver reference");
 	FailWithAction(inDeviceObjectID != kObjectID_Device, theAnswer = kAudioHardwareBadObjectError, Done, "AICameraAudioDriver_RemoveDeviceClient: bad device ID");
+	FailWithAction(inClientInfo == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done, "AICameraAudioDriver_RemoveDeviceClient: missing client info");
+
+	AICameraAudioDriver_SetCompanionClient(inClientInfo->mClientID, false);
+	AICameraAudioDriver_ClearInputConsumer(inClientInfo->mClientID);
 
 Done:
 	return theAnswer;
@@ -1802,6 +1960,7 @@ static Boolean	AICameraAudioDriver_HasDeviceProperty(AudioServerPlugInDriverRef 
 	{
 		case kAudioObjectPropertyBaseClass:
 		case kAudioObjectPropertyClass:
+		case kAudioObjectPropertyCustomPropertyInfoList:
 		case kAudioObjectPropertyOwner:
 		case kAudioObjectPropertyName:
 		case kAudioObjectPropertyManufacturer:
@@ -1812,6 +1971,7 @@ static Boolean	AICameraAudioDriver_HasDeviceProperty(AudioServerPlugInDriverRef 
 		case kAudioDevicePropertyClockDomain:
 		case kAudioDevicePropertyDeviceIsAlive:
 		case kAudioDevicePropertyDeviceIsRunning:
+		case kAICameraDevicePropertyConsumerCount:
 		case kAudioDevicePropertyNominalSampleRate:
 		case kAudioDevicePropertyAvailableNominalSampleRates:
 		case kAudioDevicePropertyIsHidden:
@@ -1875,6 +2035,7 @@ static OSStatus	AICameraAudioDriver_IsDevicePropertySettable(AudioServerPlugInDr
 	{
 		case kAudioObjectPropertyBaseClass:
 		case kAudioObjectPropertyClass:
+		case kAudioObjectPropertyCustomPropertyInfoList:
 		case kAudioObjectPropertyOwner:
 		case kAudioObjectPropertyName:
 		case kAudioObjectPropertyManufacturer:
@@ -1887,6 +2048,7 @@ static OSStatus	AICameraAudioDriver_IsDevicePropertySettable(AudioServerPlugInDr
 		case kAudioDevicePropertyClockDomain:
 		case kAudioDevicePropertyDeviceIsAlive:
 		case kAudioDevicePropertyDeviceIsRunning:
+		case kAICameraDevicePropertyConsumerCount:
 		case kAudioDevicePropertyDeviceCanBeDefaultDevice:
 		case kAudioDevicePropertyDeviceCanBeDefaultSystemDevice:
 		case kAudioDevicePropertyLatency:
@@ -1918,7 +2080,7 @@ static OSStatus	AICameraAudioDriver_GetDevicePropertyDataSize(AudioServerPlugInD
 {
 	//	This method returns the byte size of the property's data.
 
-	#pragma unused(inClientProcessID, inQualifierDataSize, inQualifierData)
+	#pragma unused(inClientProcessID, inQualifierData)
 
 	//	declare the local variables
 	OSStatus theAnswer = 0;
@@ -1940,6 +2102,10 @@ static OSStatus	AICameraAudioDriver_GetDevicePropertyDataSize(AudioServerPlugInD
 
 		case kAudioObjectPropertyClass:
 			*outDataSize = sizeof(AudioClassID);
+			break;
+
+		case kAudioObjectPropertyCustomPropertyInfoList:
+			*outDataSize = sizeof(AudioServerPlugInCustomPropertyInfo);
 			break;
 
 		case kAudioObjectPropertyOwner:
@@ -2000,6 +2166,11 @@ static OSStatus	AICameraAudioDriver_GetDevicePropertyDataSize(AudioServerPlugInD
 
 		case kAudioDevicePropertyDeviceIsRunning:
 			*outDataSize = sizeof(UInt32);
+			break;
+
+		case kAICameraDevicePropertyConsumerCount:
+			FailWithAction(inQualifierDataSize != 0, theAnswer = kAudioHardwareBadPropertySizeError, Done, "AICameraAudioDriver_GetDevicePropertyDataSize: the consumer count does not accept a qualifier");
+			*outDataSize = sizeof(CFPropertyListRef);
 			break;
 
 		case kAudioDevicePropertyDeviceCanBeDefaultDevice:
@@ -2069,7 +2240,7 @@ Done:
 
 static OSStatus	AICameraAudioDriver_GetDevicePropertyData(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID, pid_t inClientProcessID, const AudioObjectPropertyAddress* inAddress, UInt32 inQualifierDataSize, const void* inQualifierData, UInt32 inDataSize, UInt32* outDataSize, void* outData)
 {
-	#pragma unused(inClientProcessID, inQualifierDataSize, inQualifierData)
+	#pragma unused(inClientProcessID, inQualifierData)
 
 	//	declare the local variables
 	OSStatus theAnswer = 0;
@@ -2102,6 +2273,14 @@ static OSStatus	AICameraAudioDriver_GetDevicePropertyData(AudioServerPlugInDrive
 			FailWithAction(inDataSize < sizeof(AudioClassID), theAnswer = kAudioHardwareBadPropertySizeError, Done, "AICameraAudioDriver_GetDevicePropertyData: not enough space for the return value of kAudioObjectPropertyClass for the device");
 			*((AudioClassID*)outData) = kAudioDeviceClassID;
 			*outDataSize = sizeof(AudioClassID);
+			break;
+
+		case kAudioObjectPropertyCustomPropertyInfoList:
+			FailWithAction(inDataSize < sizeof(AudioServerPlugInCustomPropertyInfo), theAnswer = kAudioHardwareBadPropertySizeError, Done, "AICameraAudioDriver_GetDevicePropertyData: not enough space for the custom property info list");
+			((AudioServerPlugInCustomPropertyInfo*)outData)->mSelector = kAICameraDevicePropertyConsumerCount;
+			((AudioServerPlugInCustomPropertyInfo*)outData)->mPropertyDataType = kAudioServerPlugInCustomPropertyDataTypeCFPropertyList;
+			((AudioServerPlugInCustomPropertyInfo*)outData)->mQualifierDataType = kAudioServerPlugInCustomPropertyDataTypeNone;
+			*outDataSize = sizeof(AudioServerPlugInCustomPropertyInfo);
 			break;
 
 		case kAudioObjectPropertyOwner:
@@ -2262,6 +2441,19 @@ static OSStatus	AICameraAudioDriver_GetDevicePropertyData(AudioServerPlugInDrive
 			*((UInt32*)outData) = ((gDevice_IOIsRunning > 0) > 0) ? 1 : 0;
 			pthread_mutex_unlock(&gPlugIn_StateMutex);
 			*outDataSize = sizeof(UInt32);
+			break;
+
+		case kAICameraDevicePropertyConsumerCount:
+			{
+				FailWithAction(inQualifierDataSize != 0, theAnswer = kAudioHardwareBadPropertySizeError, Done, "AICameraAudioDriver_GetDevicePropertyData: the consumer count does not accept a qualifier");
+				SInt32 theConsumerCount = (SInt32)AICameraAudioDriver_CopyInputConsumerCount();
+				CFNumberRef theConsumerCountValue;
+				FailWithAction(inDataSize < sizeof(CFPropertyListRef), theAnswer = kAudioHardwareBadPropertySizeError, Done, "AICameraAudioDriver_GetDevicePropertyData: not enough space for the consumer count");
+				theConsumerCountValue = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &theConsumerCount);
+				FailWithAction(theConsumerCountValue == NULL, theAnswer = kAudioHardwareUnspecifiedError, Done, "AICameraAudioDriver_GetDevicePropertyData: unable to allocate the consumer count");
+				*((CFPropertyListRef*)outData) = theConsumerCountValue;
+				*outDataSize = sizeof(CFPropertyListRef);
+			}
 			break;
 
 		case kAudioDevicePropertyDeviceCanBeDefaultDevice:
@@ -2910,13 +3102,12 @@ Done:
 
 static OSStatus	AICameraAudioDriver_StartIO(AudioServerPlugInDriverRef inDriver, AudioObjectID inDeviceObjectID, UInt32 inClientID)
 {
+	#pragma unused(inClientID)
 	//	This call tells the device that IO is starting for the given client. When this routine
 	//	returns, the device's clock is running and it is ready to have data read/written. It is
 	//	important to note that multiple clients can have IO running on the device at the same time.
 	//	So, work only needs to be done when the first client starts. All subsequent starts simply
 	//	increment the counter.
-
-	#pragma unused(inClientID)
 
 	//	declare the local variables
 	OSStatus theAnswer = 0;
@@ -2965,7 +3156,6 @@ static OSStatus	AICameraAudioDriver_StartIO(AudioServerPlugInDriverRef inDriver,
 		//	IO is already running, so just bump the counter
 		++gDevice_IOIsRunning;
 	}
-
 	//	unlock the state lock before notifying the host.
 	pthread_mutex_unlock(&gPlugIn_StateMutex);
 	if(didStart && gPlugIn_Host != NULL)
@@ -2982,8 +3172,6 @@ static OSStatus	AICameraAudioDriver_StopIO(AudioServerPlugInDriverRef inDriver, 
 {
 	//	This call tells the device that the client has stopped IO. The driver can stop the hardware
 	//	once all clients have stopped.
-
-	#pragma unused(inClientID)
 
 	//	declare the local variables
 	OSStatus theAnswer = 0;
@@ -3013,13 +3201,16 @@ static OSStatus	AICameraAudioDriver_StopIO(AudioServerPlugInDriverRef inDriver, 
 		//	IO is still running, so just bump the counter
 		--gDevice_IOIsRunning;
 	}
-
 	//	unlock the state lock before notifying the host.
 	pthread_mutex_unlock(&gPlugIn_StateMutex);
 	if(didStop && gPlugIn_Host != NULL)
 	{
 		AudioObjectPropertyAddress theAddress = { kAudioDevicePropertyDeviceIsRunning, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
 		gPlugIn_Host->PropertiesChanged(gPlugIn_Host, kObjectID_Device, 1, &theAddress);
+	}
+	if(theAnswer == noErr)
+	{
+		AICameraAudioDriver_ClearInputConsumer(inClientID);
 	}
 
 Done:
@@ -3150,7 +3341,7 @@ static OSStatus	AICameraAudioDriver_DoIOOperation(AudioServerPlugInDriverRef inD
 	//	the device sample timeline so reads are non-destructive and multiple input clients receive
 	//	the same samples. Never allocate, lock, log, or perform IPC in this method.
 
-	#pragma unused(inClientID, ioSecondaryBuffer)
+	#pragma unused(ioSecondaryBuffer)
 
 	OSStatus theAnswer = 0;
 	const AudioTimeStamp* theTimeStamp = NULL;
@@ -3211,6 +3402,11 @@ static OSStatus	AICameraAudioDriver_DoIOOperation(AudioServerPlugInDriverRef inD
 		goto Done;
 	}
 	theRequestedEndFrame = theFrame + inIOBufferFrameSize;
+
+	if(inOperationID == kAudioServerPlugInIOOperationReadInput)
+	{
+		AICameraAudioDriver_MarkInputConsumer(inClientID);
+	}
 
 	if(inOperationID == kAudioServerPlugInIOOperationWriteMix)
 	{

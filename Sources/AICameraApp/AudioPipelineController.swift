@@ -15,7 +15,13 @@ struct AudioUtterance: Sendable {
     let endedAtUptime: TimeInterval
 }
 
-final class AudioPipelineController {
+final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
+    /// The buffer is freshly allocated in the capture callback, then transferred once to
+    /// processingQueue and never mutated elsewhere.
+    private struct CapturedAudioBuffer: @unchecked Sendable {
+        let value: AVAudioPCMBuffer
+    }
+
     private struct PendingSpeechIngress {
         let speechID: UUID
         let data: Data
@@ -33,18 +39,34 @@ final class AudioPipelineController {
     private let onBargeIn: BargeInHandler
     private let onError: ErrorHandler
 
-    private let captureEngine = AVAudioEngine()
+    private let captureSession = AVCaptureSession()
+    private let captureOutput = AVCaptureAudioDataOutput()
+    /// Owns capture-session configuration and start/stop lifecycle.
+    private let captureControlQueue = DispatchQueue(
+        label: "ai.kortexa.aicamera.audio-capture-control",
+        qos: .userInitiated
+    )
+    /// Receives only bounded AVCapture sample callbacks.
+    private let captureCallbackQueue = DispatchQueue(
+        label: "ai.kortexa.aicamera.audio-capture-callback",
+        qos: .userInteractive
+    )
     private let outputEngine = AVAudioEngine()
     private let microphonePlayer = AVAudioPlayerNode()
     private let speechPlayer = AVAudioPlayerNode()
     private let processingQueue = DispatchQueue(label: "ai.kortexa.aicamera.audio-processing", qos: .userInitiated)
-    /// At most two copied hardware buffers may wait off the real-time callback.
+    /// At most two copied hardware buffers may wait beyond the AVCapture callback.
     private let processingSlots = DispatchSemaphore(value: 2)
 
     private var microphoneConverter: AVAudioConverter?
     private var asrConverter: AVAudioConverter?
     private var asrPCM = Data()
     private var lastBargeIn = Date.distantPast
+    /// Access only on processingQueue. Fast attack and bounded exponential decay.
+    private var smoothedInputLevel: Float = 0
+    /// Snapshot lock is used only by processingQueue and UI polling, never by the capture callback.
+    private let inputLevelLock = NSLock()
+    private var latestInputLevel: Float = 0
     private var pendingMicrophoneBuffers = 0
     private var pendingSpeechBuffers = 0
     private var speechPCMStaging = Data()
@@ -55,7 +77,9 @@ final class AudioPipelineController {
     private var speechPlaybackCompletion: (@Sendable (Bool) -> Void)?
     private var speechPlaybackGeneration: UInt64 = 0
     private var graphConfigured = false
-    private var tapInstalled = false
+    private var publishToVirtualMicrophone = false
+    /// The controller has immutable configuration and AppModel discards it after stop.
+    private var captureConfigured = false
     /// Access only on processingQueue.
     private var processingActive = false
     private var started = false
@@ -89,94 +113,128 @@ final class AudioPipelineController {
         self.onUtterance = onUtterance
         self.onBargeIn = onBargeIn
         self.onError = onError
+        super.init()
     }
 
-    func start() throws {
+    func start(publishToVirtualMicrophone: Bool = true) throws {
+        try captureControlQueue.sync {
+            try startLocked(publishToVirtualMicrophone: publishToVirtualMicrophone)
+        }
+    }
+
+    private func startLocked(publishToVirtualMicrophone: Bool) throws {
         guard !started else { return }
         started = true
         do {
-            guard let outputUID = configuration.virtualAudioOutputDeviceID else {
-                throw AudioPipelineError(message: "Select a mixed audio destination in Settings.")
-            }
-            guard let outputDeviceID = DeviceDiscovery.audioDeviceID(
-                forUID: outputUID,
-                requiringScope: kAudioDevicePropertyScopeOutput
-            ), DeviceDiscovery.isDuplexVirtualAudioDevice(outputDeviceID) else {
-                throw AudioPipelineError(message: "Mixed audio destination '\(outputUID)' is not an available duplex virtual device. Install the AI Camera audio driver or select another loopback device.")
-            }
-
-            if !graphConfigured {
-                outputEngine.attach(microphonePlayer)
-                outputEngine.attach(speechPlayer)
-                outputEngine.connect(microphonePlayer, to: outputEngine.mainMixerNode, format: mixFormat)
-                outputEngine.connect(speechPlayer, to: outputEngine.mainMixerNode, format: mixFormat)
-                graphConfigured = true
-            }
-            microphonePlayer.volume = Float(configuration.microphoneGain)
-            speechPlayer.volume = Float(configuration.speechGain)
-            try setCurrentDevice(outputDeviceID, on: outputEngine.outputNode)
-            outputEngine.prepare()
-            try outputEngine.start()
-            microphonePlayer.play()
-            speechPlayer.play()
-
-            let inputNode = captureEngine.inputNode
-            if let inputUID = configuration.audioDeviceID {
-                guard let inputDeviceID = DeviceDiscovery.audioDeviceID(
-                    forUID: inputUID,
-                    requiringScope: kAudioDevicePropertyScopeInput
-                ) else {
-                    throw AudioPipelineError(message: "The configured microphone is not available. Select another microphone or Automatic.")
+            var outputDeviceID: AudioDeviceID?
+            if publishToVirtualMicrophone {
+                let outputUID = configuration.virtualAudioOutputDeviceID ?? AICameraAudioDevice.uid
+                guard let resolvedOutputDeviceID = DeviceDiscovery.audioDeviceID(
+                    forUID: outputUID,
+                    requiringScope: kAudioDevicePropertyScopeOutput
+                ), DeviceDiscovery.isDuplexVirtualAudioDevice(resolvedOutputDeviceID) else {
+                    throw AudioPipelineError(message: "Configured audio destination '\(outputUID)' is not available. Install or update the AI Camera microphone.")
                 }
-                try setCurrentDevice(inputDeviceID, on: inputNode)
+                outputDeviceID = resolvedOutputDeviceID
+
+                if !graphConfigured {
+                    outputEngine.attach(microphonePlayer)
+                    outputEngine.attach(speechPlayer)
+                    outputEngine.connect(microphonePlayer, to: outputEngine.mainMixerNode, format: mixFormat)
+                    outputEngine.connect(speechPlayer, to: outputEngine.mainMixerNode, format: mixFormat)
+                    graphConfigured = true
+                }
+                microphonePlayer.volume = Float(configuration.microphoneGain)
+                speechPlayer.volume = Float(configuration.speechGain)
+                try setCurrentDevice(resolvedOutputDeviceID, on: outputEngine.outputNode)
+                outputEngine.prepare()
+                do {
+                    try outputEngine.start()
+                } catch {
+                    throw AudioPipelineError(
+                        message: "The virtual microphone output could not start: \(error.localizedDescription)"
+                    )
+                }
+                microphonePlayer.play()
+                speechPlayer.play()
             }
-            let selectedInputDeviceID = try currentDevice(on: inputNode)
-            guard selectedInputDeviceID != outputDeviceID else {
+
+            let selectedInputDeviceID: AudioDeviceID
+            let selectedInputUID: String
+            if let inputUID = configuration.audioDeviceID {
+                guard let inputDeviceID = DeviceDiscovery.physicalAudioInputDeviceID(
+                    forUID: inputUID
+                ) else {
+                    throw AudioPipelineError(message: "The configured microphone is not available. Select another microphone or System Default.")
+                }
+                selectedInputDeviceID = inputDeviceID
+                selectedInputUID = inputUID
+            } else {
+                let resolution = DeviceDiscovery.resolveDefaultAudioInput(
+                    excludingUID: AICameraAudioDevice.uid
+                )
+                guard let inputDeviceID = resolution.deviceID,
+                      let inputUID = resolution.device?.id else {
+                    throw AudioPipelineError(message: "No hardware microphone is available.")
+                }
+                selectedInputDeviceID = inputDeviceID
+                selectedInputUID = inputUID
+            }
+            if let outputDeviceID, selectedInputDeviceID == outputDeviceID {
                 throw AudioPipelineError(message: "The microphone and mixed output cannot be the same device. Select a hardware microphone to prevent an audio loop.")
             }
-            let inputFormat = inputNode.outputFormat(forBus: 0)
-            guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
-                throw AudioPipelineError(message: "The selected microphone has no usable input format.")
+            guard let captureDevice = DeviceDiscovery.audioCaptureDevice(forUID: selectedInputUID) else {
+                throw AudioPipelineError(message: "The selected microphone is not available to AVFoundation.")
             }
-            microphoneConverter = AVAudioConverter(from: inputFormat, to: mixFormat)
-            asrConverter = transcriptionEnabled ? AVAudioConverter(from: mixFormat, to: asrFormat) : nil
-            captureEngine.mainMixerNode.outputVolume = 0
-            inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, _ in
-                guard let self,
-                      self.processingSlots.wait(timeout: .now()) == .success else { return }
-                guard let copy = Self.copy(buffer) else {
-                    self.processingSlots.signal()
-                    return
-                }
-                self.processingQueue.async {
-                    defer { self.processingSlots.signal() }
-                    self.processMicrophone(copy)
-                }
+            try configureCaptureSession(device: captureDevice)
+            processingQueue.sync {
+                microphoneConverter = nil
+                asrConverter = transcriptionEnabled
+                    ? AVAudioConverter(from: mixFormat, to: asrFormat)
+                    : nil
+                self.publishToVirtualMicrophone = publishToVirtualMicrophone
+                processingActive = true
             }
-            tapInstalled = true
-            captureEngine.prepare()
-            try captureEngine.start()
-            processingQueue.sync { processingActive = true }
+            captureSession.startRunning()
+            guard captureSession.isRunning else {
+                throw AudioPipelineError(message: "The physical microphone capture could not start.")
+            }
         } catch {
-            tearDown()
+            tearDownLocked()
             started = false
             throw error
         }
     }
 
     func stop() {
-        guard started else { return }
-        started = false
-        tearDown()
+        captureControlQueue.sync {
+            guard started else { return }
+            started = false
+            tearDownLocked()
+        }
     }
 
-    private func tearDown() {
-        if tapInstalled {
-            captureEngine.inputNode.removeTap(onBus: 0)
-            tapInstalled = false
-        }
+    func inputLevelSnapshot() -> Float {
+        inputLevelLock.lock()
+        defer { inputLevelLock.unlock() }
+        return latestInputLevel
+    }
+
+    private func storeInputLevel(_ level: Float) {
+        inputLevelLock.lock()
+        latestInputLevel = min(1, max(0, level.isFinite ? level : 0))
+        inputLevelLock.unlock()
+    }
+
+    private func tearDownLocked() {
+        captureOutput.setSampleBufferDelegate(nil, queue: nil)
+        if captureSession.isRunning { captureSession.stopRunning() }
+        captureCallbackQueue.sync {}
         processingQueue.sync {
             processingActive = false
+            publishToVirtualMicrophone = false
+            smoothedInputLevel = 0
+            storeInputLevel(0)
             asrPCM.removeAll(keepingCapacity: false)
             microphoneConverter = nil
             asrConverter = nil
@@ -194,7 +252,6 @@ final class AudioPipelineController {
             playbackCompletion?(false)
             speechPlaybackGeneration &+= 1
         }
-        captureEngine.stop()
         microphonePlayer.stop()
         speechPlayer.stop()
         outputEngine.stop()
@@ -205,7 +262,7 @@ final class AudioPipelineController {
         completion: @escaping @Sendable (Bool) -> Void
     ) {
         processingQueue.async { [weak self] in
-            guard let self, self.processingActive else {
+            guard let self, self.processingActive, self.publishToVirtualMicrophone else {
                 completion(false)
                 return
             }
@@ -413,11 +470,56 @@ final class AudioPipelineController {
         playbackCompletion?(false)
     }
 
+    private func configureCaptureSession(device: AVCaptureDevice) throws {
+        guard !captureConfigured else {
+            captureOutput.setSampleBufferDelegate(self, queue: captureCallbackQueue)
+            return
+        }
+        captureSession.beginConfiguration()
+        defer { captureSession.commitConfiguration() }
+
+        let input = try AVCaptureDeviceInput(device: device)
+        guard captureSession.canAddInput(input) else {
+            throw AudioPipelineError(message: "The selected microphone cannot be added to the capture session.")
+        }
+        captureSession.addInput(input)
+        guard captureSession.canAddOutput(captureOutput) else {
+            captureSession.removeInput(input)
+            throw AudioPipelineError(message: "Microphone sample output is unavailable.")
+        }
+        captureSession.addOutput(captureOutput)
+        captureOutput.setSampleBufferDelegate(self, queue: captureCallbackQueue)
+        captureConfigured = true
+    }
+
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        guard processingSlots.wait(timeout: .now()) == .success else { return }
+        guard let buffer = Self.audioBuffer(from: sampleBuffer) else {
+            processingSlots.signal()
+            return
+        }
+        let captured = CapturedAudioBuffer(value: buffer)
+        let slots = processingSlots
+        processingQueue.async { [weak self, captured, slots] in
+            defer { slots.signal() }
+            guard let self, self.processingActive else { return }
+            let buffer = captured.value
+            if self.microphoneConverter?.inputFormat != buffer.format {
+                self.microphoneConverter = AVAudioConverter(from: buffer.format, to: self.mixFormat)
+            }
+            self.processMicrophone(buffer)
+        }
+    }
+
     private func processMicrophone(_ input: AVAudioPCMBuffer) {
         guard processingActive,
               let microphoneConverter,
               let mixed = Self.convert(input, using: microphoneConverter, to: mixFormat) else { return }
-        if pendingMicrophoneBuffers < 8 {
+        if publishToVirtualMicrophone, pendingMicrophoneBuffers < 8 {
             pendingMicrophoneBuffers += 1
             microphonePlayer.scheduleBuffer(
                 mixed,
@@ -440,6 +542,12 @@ final class AudioPipelineController {
                 }
             }
         }
+        let normalizedLevel = AudioLevelMeter.normalizedPeak(peak)
+        smoothedInputLevel = normalizedLevel >= smoothedInputLevel
+            ? normalizedLevel
+            : max(normalizedLevel, smoothedInputLevel * 0.82)
+        storeInputLevel(smoothedInputLevel)
+
         if pendingSpeechBuffers > 0,
            peak > 0.035,
            Date().timeIntervalSince(lastBargeIn) > 0.5 {
@@ -483,26 +591,6 @@ final class AudioPipelineController {
         }
     }
 
-    private func currentDevice(on node: AVAudioIONode) throws -> AudioDeviceID {
-        guard let audioUnit = node.audioUnit else {
-            throw AudioPipelineError(message: "Audio I/O unit is unavailable.")
-        }
-        var deviceID = AudioDeviceID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        let status = AudioUnitGetProperty(
-            audioUnit,
-            kAudioOutputUnitProperty_CurrentDevice,
-            kAudioUnitScope_Global,
-            0,
-            &deviceID,
-            &size
-        )
-        guard status == noErr else {
-            throw AudioPipelineError(message: "Core Audio could not read the selected device (OSStatus \(status)).")
-        }
-        return deviceID
-    }
-
     private func setCurrentDevice(_ deviceID: AudioDeviceID, on node: AVAudioIONode) throws {
         guard let audioUnit = node.audioUnit else {
             throw AudioPipelineError(message: "Audio I/O unit is unavailable.")
@@ -521,20 +609,33 @@ final class AudioPipelineController {
         }
     }
 
-    private static func copy(_ source: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        guard let destination = AVAudioPCMBuffer(pcmFormat: source.format, frameCapacity: source.frameLength) else { return nil }
-        destination.frameLength = source.frameLength
-        let sourceBuffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: source.audioBufferList))
-        let destinationBuffers = UnsafeMutableAudioBufferListPointer(destination.mutableAudioBufferList)
-        guard sourceBuffers.count == destinationBuffers.count else { return nil }
-        for index in 0..<sourceBuffers.count {
-            guard let sourceData = sourceBuffers[index].mData,
-                  let destinationData = destinationBuffers[index].mData else { continue }
-            let bytes = min(Int(sourceBuffers[index].mDataByteSize), Int(destinationBuffers[index].mDataByteSize))
-            memcpy(destinationData, sourceData, bytes)
-            destinationBuffers[index].mDataByteSize = UInt32(bytes)
-        }
-        return destination
+    private static func audioBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
+        guard CMSampleBufferDataIsReady(sampleBuffer),
+              let description = CMSampleBufferGetFormatDescription(sampleBuffer) else { return nil }
+        let format = AVAudioFormat(cmAudioFormatDescription: description)
+        guard format.streamDescription.pointee.mFormatID == kAudioFormatLinearPCM else { return nil }
+        let sampleCount = CMSampleBufferGetNumSamples(sampleBuffer)
+        let channelCount = Int(format.channelCount)
+        let bytesPerFrame = max(1, Int(format.streamDescription.pointee.mBytesPerFrame))
+        guard sampleCount > 0,
+              sampleCount <= 16_384,
+              format.sampleRate.isFinite,
+              (8_000...384_000).contains(format.sampleRate),
+              (1...32).contains(channelCount),
+              bytesPerFrame <= 1_024,
+              sampleCount * bytesPerFrame * channelCount <= 4 * 1_024 * 1_024,
+              let buffer = AVAudioPCMBuffer(
+                  pcmFormat: format,
+                  frameCapacity: AVAudioFrameCount(sampleCount)
+              ) else { return nil }
+        buffer.frameLength = AVAudioFrameCount(sampleCount)
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer,
+            at: 0,
+            frameCount: Int32(sampleCount),
+            into: buffer.mutableAudioBufferList
+        )
+        return status == noErr ? buffer : nil
     }
 
     private static func convert(

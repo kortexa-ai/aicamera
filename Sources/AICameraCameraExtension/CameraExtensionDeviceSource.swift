@@ -13,7 +13,12 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
     private(set) var sinkStreamSource: CameraExtensionStreamSource!
 
     private let logger = Logger(subsystem: cameraExtensionErrorDomain, category: "device")
+    private let extensionRunID = UUID()
     private let stateLock = NSLock()
+    private let demandQueue = DispatchQueue(
+        label: "ai.kortexa.aicamera.camera-extension.demand",
+        qos: .utility
+    )
     private let mediaQueue = DispatchQueue(
         label: "ai.kortexa.aicamera.camera-extension.media",
         qos: .userInteractive
@@ -37,6 +42,7 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
     private var placeholderTimer: DispatchSourceTimer?
     private var consumeTimer: DispatchSourceTimer?
     private var lastBindingValidationUptime: TimeInterval = 0
+    private var lastDemandHeartbeatUptime: TimeInterval = 0
     private var placeholderGenerator: PlaceholderFrameGenerator?
     private var placeholderFormatIndex: Int?
 
@@ -81,7 +87,12 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
     }
 
     var availableProperties: Set<CMIOExtensionProperty> {
-        [.deviceTransportType, .deviceModel, .deviceCanBeDefaultInputDevice]
+        [
+            .deviceTransportType,
+            .deviceModel,
+            .deviceCanBeDefaultInputDevice,
+            AICameraMediaDemandState.cameraDemandProperty,
+        ]
     }
 
     func deviceProperties(forProperties properties: Set<CMIOExtensionProperty>) throws -> CMIOExtensionDeviceProperties {
@@ -96,6 +107,13 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
             result.setPropertyState(
                 CMIOExtensionPropertyState(value: NSNumber(value: true)),
                 forProperty: .deviceCanBeDefaultInputDevice
+            )
+        }
+        if properties.contains(AICameraMediaDemandState.cameraDemandProperty),
+           let state = cameraDemandPropertyState() {
+            result.setPropertyState(
+                state,
+                forProperty: AICameraMediaDemandState.cameraDemandProperty
             )
         }
         return result
@@ -214,6 +232,7 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
             if shouldStartTimer { sourceGeneration &+= 1 }
             let generation = sourceGeneration
             stateLock.unlock()
+            publishCameraDemand()
             if shouldStartTimer {
                 mediaQueue.async { [weak self] in
                     self?.startPlaceholderTimer(generation: generation)
@@ -264,6 +283,7 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
             if shouldStopTimer { sourceGeneration &+= 1 }
             let generation = sourceGeneration
             stateLock.unlock()
+            publishCameraDemand()
             if shouldStopTimer {
                 mediaQueue.async { [weak self] in
                     self?.stopPlaceholderTimer(generation: generation)
@@ -282,6 +302,36 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
         @unknown default:
             break
         }
+    }
+
+    private func publishCameraDemand() {
+        demandQueue.async { [weak self] in
+            guard let self,
+                  let state = self.cameraDemandPropertyState() else { return }
+            self.device.notifyPropertiesChanged([
+                AICameraMediaDemandState.cameraDemandProperty: state,
+            ])
+        }
+    }
+
+    private func cameraDemandPropertyState() -> CMIOExtensionPropertyState<AnyObject>? {
+        stateLock.lock()
+        let generation = sourceGeneration
+        let sourceClientCount = sourceStartCount
+        stateLock.unlock()
+        let snapshot = AICameraCameraDemandSnapshot(
+            extensionRunID: extensionRunID,
+            generation: generation,
+            sourceClientCount: sourceClientCount,
+            updatedAt: Date()
+        )
+        guard let data = AICameraMediaDemandState.encodeCameraSnapshot(snapshot) else {
+            return nil
+        }
+        return CMIOExtensionPropertyState(
+            value: data as NSData,
+            attributes: CMIOExtensionPropertyAttributes<AnyObject>.readOnlyPropertyAttribute
+        )
     }
 
     private func startConsumeTimer(generation: UInt64) {
@@ -473,6 +523,12 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
         let lastFrame = lastFeederFrameHostTime
         stateLock.unlock()
         guard hasSourceClient else { return }
+
+        let uptime = ProcessInfo.processInfo.systemUptime
+        if uptime - lastDemandHeartbeatUptime >= 1 {
+            lastDemandHeartbeatUptime = uptime
+            publishCameraDemand()
+        }
 
         let now = CMClockGetTime(CMClockGetHostTimeClock())
         let nowNanos = Self.nanoseconds(for: now)

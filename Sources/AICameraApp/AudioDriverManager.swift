@@ -10,6 +10,7 @@ enum AudioDriverStatus: Equatable {
     case checking
     case notInstalled
     case installed
+    case updateAvailable
     case installedNeedsReload
     case installing
     case uninstalling
@@ -23,7 +24,7 @@ enum AudioDriverStatus: Equatable {
 
     var isInstalled: Bool {
         switch self {
-        case .installed, .installedNeedsReload: return true
+        case .installed, .updateAvailable, .installedNeedsReload: return true
         default: return false
         }
     }
@@ -33,6 +34,7 @@ enum AudioDriverStatus: Equatable {
         case .checking: return "Checking…"
         case .notInstalled: return "Not installed"
         case .installed: return "Ready"
+        case .updateAvailable: return "Update available"
         case .installedNeedsReload: return "Installed; Core Audio reload pending"
         case .installing: return "Installing…"
         case .uninstalling: return "Uninstalling…"
@@ -62,6 +64,15 @@ final class AudioDriverManager: ObservableObject {
         }
         guard Self.hasValidSignature(at: Self.installURL) else {
             status = .untrustedInstallation
+            return
+        }
+        if let bundledURL = Bundle.main.url(
+            forResource: "AICameraAudioDriver",
+            withExtension: "driver"
+        ), let installedVersion = Self.bundleVersion(at: Self.installURL),
+           let bundledVersion = Self.bundleVersion(at: bundledURL),
+           installedVersion.compare(bundledVersion, options: .numeric) == .orderedAscending {
+            status = .updateAvailable
             return
         }
         status = DeviceDiscovery.audioDeviceID(forUID: AICameraAudioDevice.uid) == nil
@@ -187,10 +198,19 @@ final class AudioDriverManager: ObservableObject {
     }
 
     nonisolated private static func bundleIdentifier(at url: URL) -> String? {
+        bundleInfo(at: url)?["CFBundleIdentifier"] as? String
+    }
+
+    nonisolated private static func bundleVersion(at url: URL) -> String? {
+        bundleInfo(at: url)?["CFBundleVersion"] as? String
+    }
+
+    nonisolated private static func bundleInfo(at url: URL) -> [String: Any]? {
         let infoURL = url.appendingPathComponent("Contents/Info.plist")
         guard let data = try? Data(contentsOf: infoURL),
-              let value = try? PropertyListSerialization.propertyList(from: data, format: nil),
-              let dictionary = value as? [String: Any] else { return nil }
-        return dictionary["CFBundleIdentifier"] as? String
+              let value = try? PropertyListSerialization.propertyList(from: data, format: nil) else {
+            return nil
+        }
+        return value as? [String: Any]
     }
 }

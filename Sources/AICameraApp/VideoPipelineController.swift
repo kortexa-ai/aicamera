@@ -56,7 +56,7 @@ final class VideoPipelineController: NSObject {
         super.init()
     }
 
-    func start() throws {
+    func start(publishToVirtualCamera: Bool = true) throws {
         snapshotLock.lock()
         guard !runIsActive else { snapshotLock.unlock(); return }
         runGeneration &+= 1
@@ -68,15 +68,17 @@ final class VideoPipelineController: NSObject {
             endRun()
             throw error
         }
-        let capture = configuration.capture
-        do {
-            try feeder.start(configuration: .init(
-                width: Int32(capture.width),
-                height: Int32(capture.height),
-                framesPerSecond: Int32(capture.framesPerSecond)
-            ))
-        } catch {
-            onError("Virtual camera is not receiving frames yet: \(error.localizedDescription)")
+        if publishToVirtualCamera {
+            let capture = configuration.capture
+            do {
+                try feeder.start(configuration: .init(
+                    width: Int32(capture.width),
+                    height: Int32(capture.height),
+                    framesPerSecond: Int32(capture.framesPerSecond)
+                ))
+            } catch {
+                onError("Virtual camera is not receiving frames yet: \(error.localizedDescription)")
+            }
         }
         captureQueue.async { [weak self] in
             guard let self, self.currentGeneration() != nil else { return }
@@ -134,8 +136,8 @@ final class VideoPipelineController: NSObject {
 
         guard let device = selectedCamera() else {
             let message = configuration.capture.videoDeviceID == nil
-                ? "No hardware camera is available."
-                : "The configured camera is not available. Select another camera or Automatic."
+                ? "No physical camera supports the configured frame rate. Select another camera or frame rate in Settings."
+                : "The configured camera is not available. Select another camera or System Default."
             throw NSError(domain: "AICamera.Video", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
         }
         try configure(device: device)
@@ -165,19 +167,11 @@ final class VideoPipelineController: NSObject {
     }
 
     private func selectedCamera() -> AVCaptureDevice? {
-        let discovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInWideAngleCamera, .external],
-            mediaType: .video,
-            position: .unspecified
-        )
-        let hardware = discovery.devices.filter { $0.uniqueID != AICameraVirtualCamera.deviceUID }
-        if let requested = configuration.capture.videoDeviceID {
-            return hardware.first(where: { $0.uniqueID == requested })
-        }
-        let requestedFPS = Double(configuration.capture.framesPerSecond)
-        return hardware.first(where: { device in
-            device.formats.contains { frameRateMatch(for: $0, requestedFPS: requestedFPS) != nil }
-        }) ?? hardware.first
+        DeviceDiscovery.resolveVideoInput(
+            requestedID: configuration.capture.videoDeviceID,
+            excluding: AICameraVirtualCamera.deviceUID,
+            requestedFPS: Double(configuration.capture.framesPerSecond)
+        ).device
     }
 
     private func configure(device: AVCaptureDevice) throws {

@@ -8,7 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define kAICameraDevicePropertyConsumerCount ((AudioObjectPropertySelector)0x61696363U)
+
 static _Atomic(UInt32) runningNotifications = 0;
+static _Atomic(UInt32) consumerNotifications = 0;
 static _Atomic(UInt32) configurationRequestCount = 0;
 static _Atomic(UInt64) configurationActions[4];
 
@@ -23,6 +26,8 @@ static OSStatus hostPropertiesChanged(
         for (UInt32 index = 0; index < count; ++index) {
             if (addresses[index].mSelector == kAudioDevicePropertyDeviceIsRunning) {
                 atomic_fetch_add_explicit(&runningNotifications, 1, memory_order_relaxed);
+            } else if (addresses[index].mSelector == kAICameraDevicePropertyConsumerCount) {
+                atomic_fetch_add_explicit(&consumerNotifications, 1, memory_order_relaxed);
             }
         }
     }
@@ -92,6 +97,29 @@ static OSStatus getProperty(
     return (*driver)->GetPropertyData(
         driver, objectID, 0, &address, 0, NULL, bufferSize, outSize, buffer
     );
+}
+
+static OSStatus getConsumerCount(
+    AudioServerPlugInDriverRef driver,
+    UInt32 *outCount
+) {
+    CFPropertyListRef value = NULL;
+    UInt32 written = 0;
+    OSStatus status = getProperty(
+        driver, 3, kAICameraDevicePropertyConsumerCount,
+        kAudioObjectPropertyScopeGlobal, sizeof(value), &written, &value
+    );
+    if (status != noErr || written != sizeof(value) || value == NULL ||
+        CFGetTypeID(value) != CFNumberGetTypeID()) {
+        if (value != NULL) CFRelease(value);
+        return status != noErr ? status : kAudioHardwareIllegalOperationError;
+    }
+    SInt32 signedCount = -1;
+    Boolean converted = CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &signedCount);
+    CFRelease(value);
+    if (!converted || signedCount < 0) return kAudioHardwareIllegalOperationError;
+    *outCount = (UInt32)signedCount;
+    return noErr;
 }
 
 static int checkListProperty(
@@ -191,6 +219,37 @@ static int validatePropertyGraph(AudioServerPlugInDriverRef driver) {
                            kAudioObjectPropertyScopeGlobal, streams, 2)) return 3;
     if (!checkListProperty(driver, 3, kAudioObjectPropertyControlList,
                            kAudioObjectPropertyScopeGlobal, NULL, 0)) return 4;
+
+    AudioObjectPropertyAddress customInfoAddress = {
+        kAudioObjectPropertyCustomPropertyInfoList,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+    UInt32 customInfoSize = 0, customInfoWritten = 0;
+    AudioServerPlugInCustomPropertyInfo customInfo;
+    memset(&customInfo, 0, sizeof(customInfo));
+    if (!(*driver)->HasProperty(driver, 3, 0, &customInfoAddress) ||
+        (*driver)->GetPropertyDataSize(driver, 3, 0, &customInfoAddress,
+            0, NULL, &customInfoSize) != noErr || customInfoSize != sizeof(customInfo) ||
+        (*driver)->GetPropertyData(driver, 3, 0, &customInfoAddress,
+            0, NULL, sizeof(customInfo), &customInfoWritten, &customInfo) != noErr ||
+        customInfoWritten != sizeof(customInfo) ||
+        customInfo.mSelector != kAICameraDevicePropertyConsumerCount ||
+        customInfo.mPropertyDataType != kAudioServerPlugInCustomPropertyDataTypeCFPropertyList ||
+        customInfo.mQualifierDataType != kAudioServerPlugInCustomPropertyDataTypeNone) return 29;
+
+    AudioObjectPropertyAddress consumerAddress = {
+        kAICameraDevicePropertyConsumerCount,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+    UInt32 invalidQualifier = 1, rejectedSize = 0;
+    CFPropertyListRef rejectedValue = NULL;
+    if ((*driver)->GetPropertyDataSize(driver, 3, 0, &consumerAddress,
+            sizeof(invalidQualifier), &invalidQualifier, &rejectedSize) == noErr ||
+        (*driver)->GetPropertyData(driver, 3, 0, &consumerAddress,
+            sizeof(invalidQualifier), &invalidQualifier, sizeof(rejectedValue),
+            &rejectedSize, &rejectedValue) == noErr || rejectedValue != NULL) return 30;
 
     const AudioObjectID inputStream[] = {4};
     const AudioObjectID outputStream[] = {8};
@@ -395,6 +454,40 @@ static int readFrames(
     );
 }
 
+typedef struct {
+    AudioServerPlugInDriverRef driver;
+    _Atomic(bool) *start;
+    OSStatus status;
+} DemandRaceContext;
+
+static void *demandRaceReader(void *rawContext) {
+    DemandRaceContext *context = rawContext;
+    while (!atomic_load_explicit(context->start, memory_order_acquire)) usleep(50);
+    AudioServerPlugInIOCycleInfo cycle;
+    float samples[16];
+    memset(&cycle, 0, sizeof(cycle));
+    memset(samples, 0, sizeof(samples));
+    context->status = readFrames(context->driver, &cycle, 55, 0, 8, samples);
+    return NULL;
+}
+
+static int runConcurrentFirstReadDemand(AudioServerPlugInDriverRef driver) {
+    _Atomic(bool) start = false;
+    DemandRaceContext first = {driver, &start, -1};
+    DemandRaceContext second = {driver, &start, -1};
+    pthread_t firstThread, secondThread;
+    if (pthread_create(&firstThread, NULL, demandRaceReader, &first) != 0) return 0;
+    if (pthread_create(&secondThread, NULL, demandRaceReader, &second) != 0) {
+        atomic_store_explicit(&start, true, memory_order_release);
+        pthread_join(firstThread, NULL);
+        return 0;
+    }
+    atomic_store_explicit(&start, true, memory_order_release);
+    pthread_join(firstThread, NULL);
+    pthread_join(secondThread, NULL);
+    return first.status == noErr && second.status == noErr;
+}
+
 enum { stressFrames = 64, stressChunks = 20000 };
 typedef struct {
     AudioServerPlugInDriverRef driver;
@@ -503,6 +596,8 @@ int main(int argc, char **argv) {
         (*driver)->AddDeviceClient(driver, 3, &client2) != noErr) return 4;
     if ((*driver)->StartIO(driver, 3, 1) != noErr ||
         (*driver)->StartIO(driver, 3, 2) != noErr) return 5;
+    UInt32 consumerCount = 0;
+    if (getConsumerCount(driver, &consumerCount) != noErr || consumerCount != 0) return 38;
     UInt64 hostTime = 0, seed = 0;
     volatile uintptr_t zeroAddress = (uintptr_t)(argc - argc);
     Float64 *missingSampleTime = (Float64 *)zeroAddress;
@@ -544,6 +639,8 @@ int main(int argc, char **argv) {
     if (readFrames(driver, &cycle, 1, 512, 8, read1) != 0 || !equal(written, read1, 16)) return 4;
     memset(read2, 0, sizeof(read2));
     if (readFrames(driver, &cycle, 2, 512, 8, read2) != 0 || !equal(written, read2, 16)) return 5;
+    consumerCount = 0;
+    if (getConsumerCount(driver, &consumerCount) != noErr || consumerCount != 2) return 46;
 
     // A timeline gap invalidates stale samples.
     if (writeFrames(driver, &cycle, 1000, 8, written) != 0) return 6;
@@ -556,7 +653,11 @@ int main(int argc, char **argv) {
     if (readFrames(driver, &cycle, 1, 16380, 8, read1) != 0 || !equal(written, read1, 16)) return 9;
 
     if ((*driver)->StopIO(driver, 3, 1) != noErr) return 30;
+    consumerCount = 0;
+    if (getConsumerCount(driver, &consumerCount) != noErr || consumerCount != 1) return 39;
     if ((*driver)->StopIO(driver, 3, 2) != noErr) return 31;
+    consumerCount = 1;
+    if (getConsumerCount(driver, &consumerCount) != noErr || consumerCount != 0) return 40;
     if ((*driver)->StartIO(driver, 3, 1) != noErr) return 32;
     memset(read1, 1, sizeof(read1));
     if (readFrames(driver, &cycle, 1, 16380, 8, read1) != noErr || !equal(zero, read1, 16)) return 33;
@@ -564,11 +665,33 @@ int main(int argc, char **argv) {
     if ((*driver)->GetZeroTimeStamp(driver, 3, 1, &sampleTime, &hostTime, &seed) != noErr ||
         sampleTime >= 16384.0 || seed == initialSeed) return 34;
     if ((*driver)->StopIO(driver, 3, 1) != noErr) return 35;
+    consumerCount = 1;
+    if (getConsumerCount(driver, &consumerCount) != noErr || consumerCount != 0) return 41;
     if ((*driver)->RemoveDeviceClient(driver, 3, &client1) != noErr ||
         (*driver)->RemoveDeviceClient(driver, 3, &client2) != noErr) return 36;
-    if (atomic_load_explicit(&runningNotifications, memory_order_relaxed) != 4) return 37;
+
+    if ((*driver)->StartIO(driver, 3, 55) != noErr ||
+        !runConcurrentFirstReadDemand(driver)) return 47;
+    consumerCount = 0;
+    if (getConsumerCount(driver, &consumerCount) != noErr || consumerCount != 1) return 48;
+    if ((*driver)->StopIO(driver, 3, 55) != noErr) return 49;
+    consumerCount = 1;
+    if (getConsumerCount(driver, &consumerCount) != noErr || consumerCount != 0) return 50;
+
+    AudioServerPlugInClientInfo companion = {3, getpid(), true, CFSTR("ai.kortexa.aicamera")};
+    if ((*driver)->AddDeviceClient(driver, 3, &companion) != noErr ||
+        (*driver)->StartIO(driver, 3, 3) != noErr) return 42;
+    memset(read1, 0, sizeof(read1));
+    if (readFrames(driver, &cycle, 3, 0, 8, read1) != noErr) return 51;
+    consumerCount = 1;
+    if (getConsumerCount(driver, &consumerCount) != noErr || consumerCount != 0) return 43;
+    if ((*driver)->StopIO(driver, 3, 3) != noErr ||
+        (*driver)->RemoveDeviceClient(driver, 3, &companion) != noErr) return 44;
+
+    if (atomic_load_explicit(&runningNotifications, memory_order_relaxed) != 8) return 37;
+    if (atomic_load_explicit(&consumerNotifications, memory_order_relaxed) != 0) return 45;
 
     (*driver)->Release(driver);
-    puts("HAL harness passed: graph, address/size errors, clock, multi-client loopback, concurrent wrap, and reset");
+    puts("HAL harness passed: graph, input demand, clock, multi-client loopback, concurrent wrap, and reset");
     return 0;
 }

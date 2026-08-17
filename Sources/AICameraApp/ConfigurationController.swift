@@ -6,6 +6,7 @@ final class ConfigurationController: ObservableObject {
     @Published private(set) var configuration: AICameraConfiguration
     @Published var jsonText: String = ""
     @Published private(set) var validationMessage: String?
+    @Published private(set) var isConfigurationUsable = true
 
     let fileURL: URL
     private let store: ConfigurationStore
@@ -23,6 +24,7 @@ final class ConfigurationController: ObservableObject {
                 self.configuration = .default
                 self.jsonText = Self.readProfileTextSafely(from: fileURL)
                 self.validationMessage = "The saved profile was not changed: \(error.localizedDescription)"
+                self.isConfigurationUsable = false
             }
         } else {
             self.configuration = .default
@@ -37,12 +39,17 @@ final class ConfigurationController: ObservableObject {
     }
 
     func update(_ change: (inout AICameraConfiguration) -> Void) {
+        guard isConfigurationUsable else {
+            validationMessage = "Repair and save the profile in AI & Advanced before changing other settings."
+            return
+        }
         var candidate = configuration
         change(&candidate)
         do {
             try ConfigurationValidator.validate(candidate)
             try store.save(candidate)
             configuration = candidate
+            isConfigurationUsable = true
             validationMessage = nil
             refreshJSON()
         } catch {
@@ -56,6 +63,7 @@ final class ConfigurationController: ObservableObject {
             try ConfigurationValidator.validate(candidate)
             try store.save(candidate)
             configuration = candidate
+            isConfigurationUsable = true
             validationMessage = nil
             refreshJSON()
         } catch {
@@ -66,9 +74,11 @@ final class ConfigurationController: ObservableObject {
     func reload() {
         do {
             configuration = try store.load()
+            isConfigurationUsable = true
             validationMessage = nil
             refreshJSON()
         } catch {
+            isConfigurationUsable = false
             validationMessage = error.localizedDescription
         }
     }
@@ -78,6 +88,7 @@ final class ConfigurationController: ObservableObject {
         do {
             try store.save(local)
             configuration = local
+            isConfigurationUsable = true
             validationMessage = nil
             refreshJSON()
         } catch {

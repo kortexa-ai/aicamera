@@ -17,6 +17,10 @@ enum CameraExtensionStatus: Equatable {
         self == .activating || self == .deactivating
     }
 
+    var isInstalled: Bool {
+        self == .active || self == .updateAvailable
+    }
+
     var label: String {
         switch self {
         case .unknown: return "Unknown"
@@ -38,23 +42,25 @@ final class CameraExtensionManager: NSObject, ObservableObject {
 
     @Published private(set) var status: CameraExtensionStatus = .unknown
     private enum PendingAction: Equatable { case query, activate, deactivate }
-    private var pendingAction: PendingAction?
+    private var pendingActions: [ObjectIdentifier: PendingAction] = [:]
 
-    var hasPendingRequest: Bool { pendingAction != nil || status.isBusy }
+    var hasPendingRequest: Bool {
+        status.isBusy || pendingActions.values.contains(where: { $0 != .query })
+    }
 
     func refresh() {
-        guard pendingAction == nil, !status.isBusy else { return }
-        pendingAction = .query
+        guard !pendingActions.values.contains(.query) else { return }
         let request = OSSystemExtensionRequest.propertiesRequest(
             forExtensionWithIdentifier: Self.bundleIdentifier,
             queue: .main
         )
+        pendingActions[ObjectIdentifier(request)] = .query
         request.delegate = self
         OSSystemExtensionManager.shared.submitRequest(request)
     }
 
     func activate() {
-        guard pendingAction == nil, !status.isBusy else { return }
+        guard !hasPendingRequest else { return }
         guard installedApplication else {
             status = .failed("Copy the signed app to /Applications before activating its camera extension")
             return
@@ -64,23 +70,23 @@ final class CameraExtensionManager: NSObject, ObservableObject {
             return
         }
         status = .activating
-        pendingAction = .activate
         let request = OSSystemExtensionRequest.activationRequest(
             forExtensionWithIdentifier: Self.bundleIdentifier,
             queue: .main
         )
+        pendingActions[ObjectIdentifier(request)] = .activate
         request.delegate = self
         OSSystemExtensionManager.shared.submitRequest(request)
     }
 
     func deactivate() {
-        guard pendingAction == nil, !status.isBusy else { return }
+        guard !hasPendingRequest else { return }
         status = .deactivating
-        pendingAction = .deactivate
         let request = OSSystemExtensionRequest.deactivationRequest(
             forExtensionWithIdentifier: Self.bundleIdentifier,
             queue: .main
         )
+        pendingActions[ObjectIdentifier(request)] = .deactivate
         request.delegate = self
         OSSystemExtensionManager.shared.submitRequest(request)
     }
@@ -126,7 +132,11 @@ extension CameraExtensionManager: OSSystemExtensionRequestDelegate {
     }
 
     nonisolated func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
-        Task { @MainActor in self.status = .needsApproval }
+        Task { @MainActor in
+            guard self.pendingActions[ObjectIdentifier(request)] == .activate else { return }
+            self.status = .needsApproval
+            self.openApprovalSettings()
+        }
     }
 
     nonisolated func request(
@@ -134,8 +144,9 @@ extension CameraExtensionManager: OSSystemExtensionRequestDelegate {
         didFinishWithResult result: OSSystemExtensionRequest.Result
     ) {
         Task { @MainActor in
-            let action = self.pendingAction
-            self.pendingAction = nil
+            guard let action = self.pendingActions.removeValue(
+                forKey: ObjectIdentifier(request)
+            ) else { return }
             switch result {
             case .completed:
                 if action == .activate || action == .deactivate {
@@ -151,7 +162,9 @@ extension CameraExtensionManager: OSSystemExtensionRequestDelegate {
 
     nonisolated func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
         Task { @MainActor in
-            self.pendingAction = nil
+            guard self.pendingActions.removeValue(
+                forKey: ObjectIdentifier(request)
+            ) != nil else { return }
             self.status = .failed(error.localizedDescription)
         }
     }
@@ -161,8 +174,11 @@ extension CameraExtensionManager: OSSystemExtensionRequestDelegate {
         foundProperties properties: [OSSystemExtensionProperties]
     ) {
         Task { @MainActor in
-            self.pendingAction = nil
+            self.pendingActions.removeValue(forKey: ObjectIdentifier(request))
             guard !properties.isEmpty else {
+                if self.pendingActions.values.contains(.deactivate) {
+                    self.pendingActions = self.pendingActions.filter { $0.value != .deactivate }
+                }
                 self.status = .inactive
                 return
             }
@@ -178,9 +194,12 @@ extension CameraExtensionManager: OSSystemExtensionRequestDelegate {
                 self.status = .inactive
                 return
             }
-            self.status = self.bundledExtensionIsNewer(than: property.bundleVersion)
-                ? .updateAvailable
-                : .active
+            if self.bundledExtensionIsNewer(than: property.bundleVersion) {
+                self.status = .updateAvailable
+            } else {
+                self.pendingActions = self.pendingActions.filter { $0.value != .activate }
+                self.status = .active
+            }
         }
     }
 }
