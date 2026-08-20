@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<script src="three.min.js"></script>
+<script>
+(function () {
+  function log(msg) {
+    try { window.webkit.messageHandlers.log.postMessage(String(msg)); } catch (e) {}
+  }
+  // Channel selection: served over http:// -> raw binary POST; file:// -> base64 message.
+  var useHTTP = location.protocol === "http:";
+  var W = window.innerWidth;
+  var H = window.innerHeight;
+  var TARGET_FPS = 30;
+  var canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  document.body.appendChild(canvas);
+
+  var renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({
+      canvas: canvas,
+      alpha: true,
+      antialias: true,
+      preserveDrawingBuffer: true
+    });
+  } catch (e) {
+    log('WEBGL FAILED: ' + e);
+    return;
+  }
+  renderer.setPixelRatio(1);
+  renderer.setSize(W, H, false);
+  var gl = renderer.getContext();
+  log('gl version: ' + (gl instanceof WebGL2RenderingContext ? 'webgl2' : 'webgl1'));
+
+  var scene = new THREE.Scene();
+  var camera = new THREE.PerspectiveCamera(50, W / H, 0.1, 100);
+  camera.position.set(0, 0, 6);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  var dir = new THREE.DirectionalLight(0xffffff, 0.9);
+  dir.position.set(2, 3, 4);
+  scene.add(dir);
+
+  var cube = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 2, 2),
+    new THREE.MeshStandardMaterial({ color: 0x59f3c2, metalness: 0.25, roughness: 0.45 })
+  );
+  scene.add(cube);
+
+  var ring = new THREE.Mesh(
+    new THREE.TorusGeometry(3.1, 0.045, 8, 128),
+    new THREE.MeshBasicMaterial({ color: 0xffffff })
+  );
+  ring.rotation.x = Math.PI / 2.4;
+  scene.add(ring);
+
+  function bufToBase64(buf) {
+    var bytes = new Uint8Array(buf);
+    var binary = '';
+    var chunk = 0x8000;
+    for (var i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+  }
+
+  var seq = 0;
+  var lastPost = 0;
+  var last = performance.now();
+  var minInterval = 1000 / TARGET_FPS;
+
+  function postFrame(buf, renderMs, readMs) {
+    if (useHTTP) {
+      var url = '/frame?r=' + renderMs.toFixed(2) + '&d=' + readMs.toFixed(2) + '&t=' + Date.now();
+      fetch(url, { method: 'POST', body: buf }).catch(function (e) {
+        log('http post failed: ' + e);
+      });
+    } else {
+      var t0 = performance.now();
+      var b64 = bufToBase64(buf);
+      var encMs = performance.now() - t0;
+      window.webkit.messageHandlers.frame.postMessage({
+        seq: seq,
+        w: W,
+        h: H,
+        renderMs: renderMs,
+        readMs: readMs,
+        encMs: encMs,
+        wallMs: Date.now(),
+        b64: b64
+      });
+    }
+    seq += 1;
+  }
+
+  // WebKit's WebGL2 readPixels only accepts an ArrayBufferView destination
+  // (ArrayBuffer silently fails with INVALID_OPERATION). Reuse one view.
+  var pixelView = new Uint8Array(W * H * 4);
+
+  function pump() {
+    var t0 = performance.now();
+    var dt = Math.min(0.1, (t0 - last) / 1000);
+    last = t0;
+    cube.rotation.x += dt * 0.9;
+    cube.rotation.y += dt * 1.3;
+    ring.rotation.z += dt * 0.35;
+    renderer.render(scene, camera);
+    var t1 = performance.now();
+    if (t0 - lastPost >= minInterval - 1) {
+      gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, pixelView);
+      var t2 = performance.now();
+      lastPost = t0;
+      postFrame(pixelView.buffer, t1 - t0, t2 - t1);
+    }
+    requestAnimationFrame(pump);
+  }
+  requestAnimationFrame(pump);
+  log('overlay page ready ' + W + 'x' + H + ' channel=' + (useHTTP ? 'http' : 'base64'));
+  window.addEventListener('error', function (e) { log('PAGE ERROR: ' + e.message); });
+})();
+</script>
+</body>
+</html>
