@@ -6,6 +6,7 @@ final class ConfigurationController: ObservableObject {
     @Published private(set) var configuration: AICameraConfiguration
     @Published var jsonText: String = ""
     @Published private(set) var validationMessage: String?
+    @Published private(set) var profileTransferMessage: String?
     @Published private(set) var isConfigurationUsable = true
 
     let fileURL: URL
@@ -68,6 +69,29 @@ final class ConfigurationController: ObservableObject {
             refreshJSON()
         } catch {
             validationMessage = error.localizedDescription
+        }
+    }
+
+    func importProfile(from url: URL) {
+        do {
+            let candidate = try ProfileTransfer.read(from: url)
+            try store.save(candidate)
+            configuration = candidate
+            isConfigurationUsable = true
+            validationMessage = nil
+            profileTransferMessage = "Imported \(candidate.profileName)."
+            refreshJSON()
+        } catch {
+            profileTransferMessage = "Import failed: \(error.localizedDescription)"
+        }
+    }
+
+    func exportProfile(to url: URL) {
+        do {
+            try ProfileTransfer.write(configuration, to: url)
+            profileTransferMessage = "Exported profile without secret values."
+        } catch {
+            profileTransferMessage = "Export failed: \(error.localizedDescription)"
         }
     }
 

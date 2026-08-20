@@ -70,6 +70,11 @@ The app must be in `/Applications` before macOS can activate its camera system e
 
 No model configuration is needed for passthrough. To add AI, enable stages or conversation in Settings or apply one of the checked examples in [`Examples/`](Examples/). The profile is stored at `~/Library/Application Support/AI Camera/profile.json`. Existing schema-1 profiles retain their compatibility behavior, including always-listening activation when `activationMode` is absent.
 
+Profiles can be imported or exported under **Settings → AI & Advanced**. Transfers contain only
+environment-variable or Keychain references; they never copy secret values. The checked
+[`Examples/openai.json`](Examples/openai.json) profile uses an `OPENAI_API_KEY` reference and can
+be imported directly.
+
 ## Documentation
 
 - [Architecture and media flow](docs/architecture.md)

@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "profileName": "OpenAI example",
+  "capture": {
+    "width": 1280,
+    "height": 720,
+    "framesPerSecond": 30,
+    "mirrorVideo": false,
+    "audioSampleRate": 48000,
+    "audioChannels": 1,
+    "virtualAudioOutputDeviceID": "ai.kortexa.aicamera.audio.device",
+    "microphoneGain": 1,
+    "speechGain": 1
+  },
+  "endpoints": [
+    {
+      "id": "openai-asr",
+      "adapter": "openAITranscription",
+      "baseURL": "https://api.openai.com",
+      "model": "whisper-1",
+      "auth": {
+        "kind": "bearerEnvironment",
+        "reference": "OPENAI_API_KEY",
+        "header": "Authorization",
+        "prefix": "Bearer "
+      },
+      "timeoutSeconds": 30,
+      "options": {}
+    },
+    {
+      "id": "openai-agent",
+      "adapter": "openAIChat",
+      "baseURL": "https://api.openai.com",
+      "model": "gpt-5-mini",
+      "auth": {
+        "kind": "bearerEnvironment",
+        "reference": "OPENAI_API_KEY",
+        "header": "Authorization",
+        "prefix": "Bearer "
+      },
+      "timeoutSeconds": 30,
+      "options": {
+        "temperature": 0.3,
+        "max_tokens": 256
+      }
+    },
+    {
+      "id": "openai-speech",
+      "adapter": "openAISpeech",
+      "baseURL": "https://api.openai.com",
+      "model": "gpt-4o-mini-tts",
+      "auth": {
+        "kind": "bearerEnvironment",
+        "reference": "OPENAI_API_KEY",
+        "header": "Authorization",
+        "prefix": "Bearer "
+      },
+      "timeoutSeconds": 60,
+      "options": {}
+    }
+  ],
+  "pipeline": {
+    "videoStages": [],
+    "conversation": {
+      "enabled": true,
+      "transcriptionEnabled": true,
+      "transcriptionEndpointID": "openai-asr",
+      "agentEndpointID": "openai-agent",
+      "speechEndpointID": "openai-speech",
+      "systemPrompt": "You are an assistant present in a live camera conversation. Respond briefly and never claim to see facts that are not in the supplied scene context.",
+      "respondToFinalTranscripts": true,
+      "activationMode": "wakePhrase",
+      "wakePhrase": "Hey Kortexa",
+      "wakeWindowSeconds": 8,
+      "includeSceneSummary": false,
+      "speechVoice": "alloy",
+      "utteranceSeconds": 3,
+      "bargeIn": true,
+      "respondToGestures": false,
+      "gestureCooldownSeconds": 2
+    }
+  },
+  "overlays": {
+    "enabled": false,
+    "showDetectionBoxes": true,
+    "showGestureLabels": true,
+    "showTranscript": true,
+    "showAgentResponse": true,
+    "showStatus": true,
+    "resultTTLSeconds": 4,
+    "accentHex": "#59F3C2"
+  },
+  "privacy": {
+    "networkMode": "allowListed",
+    "allowedHosts": [
+      "api.openai.com"
+    ],
+    "grants": [
+      {
+        "endpointID": "openai-asr",
+        "allowedData": [
+          "rawAudio"
+        ]
+      },
+      {
+        "endpointID": "openai-agent",
+        "allowedData": [
+          "promptText",
+          "transcript"
+        ]
+      },
+      {
+        "endpointID": "openai-speech",
+        "allowedData": [
+          "promptText"
+        ]
+      }
+    ],
+    "persistMedia": false
+  }
+}

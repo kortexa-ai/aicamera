@@ -55,10 +55,10 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 
 ### Profiles and production packaging
 
-- [ ] Remove the **Kortexa Local** preset from Settings in production/release builds; keep development access where useful.
-- [ ] Add validated import and export of versioned profiles so development presets such as **Kortexa Local** can be moved between installations quickly.
-- [ ] Keep secrets out of ordinary profile exports. Export secret references by default and require a separate explicit secure flow for any secret transfer.
-- [ ] Ship an importable example OpenAI profile with OpenAI endpoint definitions and an `OPENAI_API_KEY` environment/Keychain reference. Never include a real API key in the repository or app bundle.
+- [x] Remove the **Kortexa Local** preset from Settings in production/release builds; keep development access where useful.
+- [x] Add validated import and export of versioned profiles so development presets such as **Kortexa Local** can be moved between installations quickly.
+- [x] Keep secrets out of ordinary profile exports. Export secret references by default and require a separate explicit secure flow for any secret transfer.
+- [x] Ship an importable example OpenAI profile with OpenAI endpoint definitions and an `OPENAI_API_KEY` environment/Keychain reference. Never include a real API key in the repository or app bundle.
 - [ ] Add the bounded WebRTC conversation session described in `docs/realtime-conversation.md`: canonical OpenAI Realtime, self-hosted OpenAI-compatible Realtime, and an explicitly experimental ChatGPT/Codex subscription provider; keep separate ASR, agent, and TTS stages as the selectable fallback.
 - [ ] Add one-shot **Talk** activation with server VAD and **Stop**: connect with microphone egress closed, transmit only during an explicitly armed utterance, close the gate on VAD stop/timeout/cancellation, and route decoded remote PCM through the existing bounded virtual-microphone mixer.
 - [ ] Add Realtime Settings for provider, endpoint, model, voice, and Keychain-backed credentials or OAuth; profiles store secret references only. Test the standard protocol against canonical OpenAI and `api.server`.
@@ -72,7 +72,7 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 
 ### Natural interaction and conversation UX
 
-- [ ] Expose activation mode and wake-window controls in Settings; they are currently Profile JSON options.
+- [x] Expose activation mode and wake-window controls in Settings; they are currently Profile JSON options.
 - [ ] Show speaker-labelled user transcripts and agent responses in one bounded conversation view and optional overlay.
 - [ ] Let the agent choose a voice only from a configured local allowlist, with a deterministic fallback.
 
@@ -106,7 +106,7 @@ Design: `docs/overlay-script-renderer.md`. The model gets a bounded `render_over
 
 - [ ] Rewrite the README for a public audience: concise product purpose, supported macOS versions, privacy and host-absent behavior, virtual-device installation and approval overview, pure-passthrough quick start, screenshots after the visual redesign, architecture links, local build/test commands, release downloads, known limitations, and support paths.
 - [ ] Review the existing root MIT `LICENSE` for the intended copyright holder and year, then expose the same license information in About, the README, installer metadata, and release artifacts.
-- [ ] Add `CONTRIBUTING.md` with the repository layout, supported toolchain, setup/build/test commands, code style, real-time and media-privacy rules, system-component safety boundary, test and documentation expectations, issue/PR guidance, and a strict ban on committed credentials, signing material, or captured media.
+- [x] Add `CONTRIBUTING.md` with the repository layout, supported toolchain, setup/build/test commands, code style, real-time and media-privacy rules, system-component safety boundary, test and documentation expectations, issue/PR guidance, and a strict ban on committed credentials, signing material, or captured media.
 - [ ] Before changing repository visibility, audit tracked files and Git history for secrets, signing identifiers/material, machine-specific paths, generated products, private media, and third-party license obligations. Keep local signing/configuration files ignored and document any required history cleanup before publishing.
 
 ### Distribution

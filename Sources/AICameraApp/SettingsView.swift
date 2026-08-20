@@ -1,5 +1,6 @@
 import AICameraCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @ObservedObject var model: AppModel
@@ -172,6 +173,24 @@ struct SettingsView: View {
                             .disabled(!configuration.configuration.pipeline.conversation.enabled)
                         Spacer()
                     }
+                    HStack(spacing: 18) {
+                        Picker("Activation", selection: conversationActivationBinding) {
+                            Text("Wake phrase").tag(ConversationActivationMode.wakePhrase)
+                            Text("Always listening").tag(ConversationActivationMode.alwaysListening)
+                        }
+                        .pickerStyle(.segmented)
+                        Stepper(
+                            "Wake window: \(Int(configuration.configuration.pipeline.conversation.wakeWindowSeconds)) seconds",
+                            value: conversationDoubleBinding(\.wakeWindowSeconds),
+                            in: 1...30,
+                            step: 1
+                        )
+                        .disabled(
+                            !configuration.configuration.pipeline.conversation.enabled
+                                || configuration.configuration.pipeline.conversation.activationMode != .wakePhrase
+                        )
+                    }
+                    .disabled(!configuration.configuration.pipeline.conversation.enabled)
                     HStack {
                         Text("Wake phrase")
                         TextField("Hey Kortexa", text: $wakePhraseDraft)
@@ -182,17 +201,24 @@ struct SettingsView: View {
                                     || wakePhraseDraft == configuration.configuration.pipeline.conversation.wakePhrase
                             )
                     }
-                    .disabled(!configuration.configuration.pipeline.conversation.enabled)
+                    .disabled(
+                        !configuration.configuration.pipeline.conversation.enabled
+                            || configuration.configuration.pipeline.conversation.activationMode != .wakePhrase
+                    )
                 }
             }
 
             HStack {
                 Text("Profile JSON").font(.headline)
                 Spacer()
+#if DEBUG
                 Button("Kortexa Local Preset") {
                     configuration.applyKortexaLocalPreset()
                     syncWakePhraseDraft()
                 }
+#endif
+                Button("Import…") { importProfile() }
+                Button("Export…") { exportProfile() }
                 Button("Reload") {
                     configuration.reload()
                     syncWakePhraseDraft()
@@ -208,6 +234,8 @@ struct SettingsView: View {
                 .border(Color.secondary.opacity(0.3))
             if let message = configuration.validationMessage {
                 Text(message).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+            } else if let message = configuration.profileTransferMessage {
+                Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             } else {
                 Text(configuration.fileURL.path)
                     .font(.caption)
@@ -312,6 +340,25 @@ struct SettingsView: View {
         }
     }
 
+    private func importProfile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        configuration.importProfile(from: url)
+        syncWakePhraseDraft()
+    }
+
+    private func exportProfile() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "AI Camera Profile.json"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        configuration.exportProfile(to: url)
+    }
+
     private func optionalBinding(_ keyPath: WritableKeyPath<CaptureConfiguration, String?>) -> Binding<String?> {
         Binding(
             get: { configuration.configuration.capture[keyPath: keyPath] },
@@ -343,6 +390,26 @@ struct SettingsView: View {
     private func conversationBoolBinding(
         _ keyPath: WritableKeyPath<ConversationConfiguration, Bool>
     ) -> Binding<Bool> {
+        Binding(
+            get: { configuration.configuration.pipeline.conversation[keyPath: keyPath] },
+            set: { value in
+                configuration.update { $0.pipeline.conversation[keyPath: keyPath] = value }
+            }
+        )
+    }
+
+    private var conversationActivationBinding: Binding<ConversationActivationMode> {
+        Binding(
+            get: { configuration.configuration.pipeline.conversation.activationMode },
+            set: { value in
+                configuration.update { $0.pipeline.conversation.activationMode = value }
+            }
+        )
+    }
+
+    private func conversationDoubleBinding(
+        _ keyPath: WritableKeyPath<ConversationConfiguration, Double>
+    ) -> Binding<Double> {
         Binding(
             get: { configuration.configuration.pipeline.conversation[keyPath: keyPath] },
             set: { value in

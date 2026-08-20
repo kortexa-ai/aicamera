@@ -10,6 +10,23 @@ Edit it in the Settings window. **Apply JSON** validates and atomically saves it
 
 A new profile is operational without model or hardware configuration. It uses system-default inputs with mirroring, overlays, video stages, conversation, and transcription disabled. This is the pure-passthrough base mode. If an existing profile is corrupt, too new, or invalid, the app preserves its text and blocks automatic camera and microphone capture until **Validate & Save** succeeds; it never silently runs the in-memory default instead. Start with [`Examples/kortexa-local.json`](../Examples/kortexa-local.json) or [`Examples/remote-openai-compatible.json`](../Examples/remote-openai-compatible.json) only when AI processing is wanted. The local preset is an example, not a runtime requirement.
 
+## Import and export
+
+Use **Settings → AI & Advanced → Import…** or **Export…** to move a profile between
+installations. Imports are limited to 1 MiB and must pass the same schema, endpoint, privacy,
+and credential-reference validation as the active profile before they replace it. A rejected
+import leaves the active profile unchanged.
+
+Ordinary exports contain environment-variable or Keychain account references only. AI Camera
+does not read or copy the referenced secret values during export; move those secrets separately
+using the destination system's secure credential setup. Exported files are written with
+owner-only permissions.
+
+[`Examples/openai.json`](../Examples/openai.json) is an importable canonical OpenAI profile. It
+references `OPENAI_API_KEY` and contains no credential value. The **Kortexa Local Preset** button
+is available only in development builds, though its checked example remains available for
+development profile import.
+
 ## Capture
 
 | Key | Meaning |
@@ -94,7 +111,7 @@ The optional conversation selects transcription, agent, and speech endpoint IDs.
 
 `activationMode` is `wakePhrase` or `alwaysListening`. Checked-in profiles use `wakePhrase`. In that mode, `respondToFinalTranscripts` allows only accepted final ASR text to reach the agent: a leading, case-insensitive `wakePhrase` either prefixes a command or arms the next speech-bearing utterance for `wakeWindowSeconds` (1 through 30). The phrase must contain at least one letter or number and is limited to 128 characters. The deadline uses each utterance's monotonic capture time, so ASR latency cannot extend or shorten the physical window. Fixed ASR windows can still split a phrase at a boundary; bounded overlap is deferred.
 
-Schema-1 profiles that omit `activationMode` retain their former always-listening behavior. If `transcriptionEnabled` is omitted, it is true only when the legacy profile has a transcription endpoint. Settings exposes conversation, ASR, agent-reply, and wake-phrase controls. The current mode and wake-window controls remain in Profile JSON.
+Schema-1 profiles that omit `activationMode` retain their former always-listening behavior. If `transcriptionEnabled` is omitted, it is true only when the legacy profile has a transcription endpoint. Settings exposes conversation, ASR, agent-reply, activation-mode, wake-phrase, and bounded wake-window controls.
 
 One ASR request and one pending window are bounded independently from the agent/TTS turn, so ambient transcription cannot cancel an active response. Always-listening mode replaces the pending window with the latest one. Wake mode preserves the first pending window so a command immediately after a wake-only window is not overwritten by later speech. `respondToGestures` sends an edge-triggered gesture description directly to the agent without consuming the voice gate. `gestureCooldownSeconds` limits repeated gesture turns. `bargeIn` stops the active TTS/agent turn and queued speech when microphone energy is detected during playback, even if that speech does not contain the wake phrase.
 
