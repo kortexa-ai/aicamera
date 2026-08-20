@@ -9,6 +9,7 @@ public enum AICameraContentLimits {
     public static let agentCharacters = 8_192
     public static let promptCharacters = 16_384
     public static let statusCharacters = 512
+    public static let scriptBytes = 65_536
 }
 
 public extension String {

@@ -302,6 +302,34 @@ public struct PipelineConfiguration: Codable, Equatable, Sendable {
     }
 }
 
+/// Bounds for model-rendered overlay scripts (three.js scenes in a hidden WKWebView).
+public struct ScriptOverlayConfiguration: Codable, Equatable, Sendable {
+    public var enabled: Bool
+    public var maxScriptBytes: Int
+    public var maximumFps: Int
+    public var defaultTTLSeconds: Double
+    public var maximumTTLSeconds: Double
+    /// When true, the script can read the current scene snapshot (detections,
+    /// gestures, transcript) through the bridge. The data stays local.
+    public var allowSceneData: Bool
+
+    public init(
+        enabled: Bool = false,
+        maxScriptBytes: Int = 65_536,
+        maximumFps: Int = 30,
+        defaultTTLSeconds: Double = 30,
+        maximumTTLSeconds: Double = 60,
+        allowSceneData: Bool = false
+    ) {
+        self.enabled = enabled
+        self.maxScriptBytes = maxScriptBytes
+        self.maximumFps = maximumFps
+        self.defaultTTLSeconds = defaultTTLSeconds
+        self.maximumTTLSeconds = maximumTTLSeconds
+        self.allowSceneData = allowSceneData
+    }
+}
+
 public struct OverlayConfiguration: Codable, Equatable, Sendable {
     public var enabled: Bool
     public var showDetectionBoxes: Bool
@@ -311,6 +339,7 @@ public struct OverlayConfiguration: Codable, Equatable, Sendable {
     public var showStatus: Bool
     public var resultTTLSeconds: Double
     public var accentHex: String
+    public var script: ScriptOverlayConfiguration
 
     public init(
         enabled: Bool = false,
@@ -320,7 +349,8 @@ public struct OverlayConfiguration: Codable, Equatable, Sendable {
         showAgentResponse: Bool = true,
         showStatus: Bool = true,
         resultTTLSeconds: Double = 4,
-        accentHex: String = "#59F3C2"
+        accentHex: String = "#59F3C2",
+        script: ScriptOverlayConfiguration = .init()
     ) {
         self.enabled = enabled
         self.showDetectionBoxes = showDetectionBoxes
@@ -330,6 +360,22 @@ public struct OverlayConfiguration: Codable, Equatable, Sendable {
         self.showStatus = showStatus
         self.resultTTLSeconds = resultTTLSeconds
         self.accentHex = accentHex
+        self.script = script
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decode(Bool.self, forKey: .enabled)
+        showDetectionBoxes = try container.decode(Bool.self, forKey: .showDetectionBoxes)
+        showGestureLabels = try container.decode(Bool.self, forKey: .showGestureLabels)
+        showTranscript = try container.decode(Bool.self, forKey: .showTranscript)
+        showAgentResponse = try container.decode(Bool.self, forKey: .showAgentResponse)
+        showStatus = try container.decode(Bool.self, forKey: .showStatus)
+        resultTTLSeconds = try container.decode(Double.self, forKey: .resultTTLSeconds)
+        accentHex = try container.decode(String.self, forKey: .accentHex)
+        // Schema-1 profiles predate script overlays and keep the disabled default.
+        script = try container.decodeIfPresent(ScriptOverlayConfiguration.self, forKey: .script)
+            ?? ScriptOverlayConfiguration()
     }
 }
 

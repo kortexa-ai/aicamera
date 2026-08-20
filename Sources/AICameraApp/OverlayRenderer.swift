@@ -19,7 +19,8 @@ final class OverlayRenderer {
         input: CVPixelBuffer,
         capture: CaptureConfiguration,
         overlay: OverlayConfiguration,
-        snapshot: SceneSnapshot
+        snapshot: SceneSnapshot,
+        scriptOverlay: CVPixelBuffer? = nil
     ) -> CVPixelBuffer? {
         guard let output = outputBuffer(width: capture.width, height: capture.height) else { return nil }
         let target = CGRect(x: 0, y: 0, width: capture.width, height: capture.height)
@@ -33,9 +34,30 @@ final class OverlayRenderer {
         if capture.mirrorVideo {
             image = image.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: target.width, ty: 0))
         }
+        // The script overlay sits above the camera frame but below the
+        // native labels, so status and transcript stay readable.
+        if let scriptOverlay {
+            image = Self.composite(scriptOverlay: scriptOverlay, over: image, into: target)
+        }
         ciContext.render(image, to: output, bounds: target, colorSpace: CGColorSpaceCreateDeviceRGB())
         if overlay.enabled { draw(snapshot: snapshot, configuration: overlay, into: output) }
         return output
+    }
+
+    /// Scales the (possibly smaller) transparent overlay to fill the target
+    /// and alpha-composites it over the camera image.
+    private static func composite(scriptOverlay: CVPixelBuffer, over image: CIImage, into target: CGRect) -> CIImage {
+        var overlayImage = CIImage(cvPixelBuffer: scriptOverlay)
+        if overlayImage.extent != target {
+            let scale = max(target.width / overlayImage.extent.width, target.height / overlayImage.extent.height)
+            overlayImage = overlayImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            let cropX = max(0, (overlayImage.extent.width - target.width) / 2)
+            let cropY = max(0, (overlayImage.extent.height - target.height) / 2)
+            overlayImage = overlayImage
+                .transformed(by: CGAffineTransform(translationX: -cropX, y: -cropY))
+                .cropped(to: target)
+        }
+        return overlayImage.composited(over: image)
     }
 
     func previewImage(from pixelBuffer: CVPixelBuffer) -> NSImage? {

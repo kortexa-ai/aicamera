@@ -27,6 +27,59 @@ final class ConfigurationTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
+    func testScriptOverlayDefaultsAreDisabled() throws {
+        let configuration = AICameraConfiguration.default
+        try ConfigurationValidator.validate(configuration)
+        XCTAssertFalse(configuration.overlays.script.enabled)
+        XCTAssertEqual(configuration.overlays.script.maxScriptBytes, 65_536)
+        XCTAssertEqual(configuration.overlays.script.maximumFps, 30)
+        XCTAssertEqual(configuration.overlays.script.defaultTTLSeconds, 30)
+        XCTAssertEqual(configuration.overlays.script.maximumTTLSeconds, 60)
+        XCTAssertFalse(configuration.overlays.script.allowSceneData)
+    }
+
+    func testDecodesProfileWithoutScriptBlock() throws {
+        var configuration = AICameraConfiguration.default
+        configuration.overlays.enabled = true
+        configuration.overlays.script = ScriptOverlayConfiguration(enabled: true)
+        let data = try JSONEncoder().encode(configuration)
+        // Simulate a schema-1 profile: strip the script key before decoding.
+        var root = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        var overlays = root["overlays"] as! [String: Any]
+        overlays.removeValue(forKey: "script")
+        root["overlays"] = overlays
+        let legacy = try JSONSerialization.data(withJSONObject: root)
+        let decoded = try JSONDecoder().decode(AICameraConfiguration.self, from: legacy)
+        XCTAssertFalse(decoded.overlays.script.enabled)
+        XCTAssertTrue(decoded.overlays.enabled)
+    }
+
+    func testRejectsInvalidScriptOverlayConfiguration() {
+        var configuration = AICameraConfiguration.default
+        configuration.overlays.script = ScriptOverlayConfiguration(
+            enabled: true,
+            maxScriptBytes: 64,
+            maximumFps: 30,
+            defaultTTLSeconds: 30,
+            maximumTTLSeconds: 60,
+            allowSceneData: false
+        )
+        XCTAssertThrowsError(try ConfigurationValidator.validate(configuration)) { error in
+            XCTAssertEqual(error as? ConfigurationError, .invalidOverlayConfiguration)
+        }
+        configuration.overlays.script = ScriptOverlayConfiguration(
+            enabled: true,
+            maxScriptBytes: 65_536,
+            maximumFps: 30,
+            defaultTTLSeconds: 120,
+            maximumTTLSeconds: 60,
+            allowSceneData: false
+        )
+        XCTAssertThrowsError(try ConfigurationValidator.validate(configuration)) { error in
+            XCTAssertEqual(error as? ConfigurationError, .invalidOverlayConfiguration)
+        }
+    }
+
     func testRejectsDuplicateEndpoints() {
         let endpoint = EndpointConfiguration(
             id: "same",

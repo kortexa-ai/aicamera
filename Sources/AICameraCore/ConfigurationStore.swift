@@ -187,8 +187,16 @@ public enum ConfigurationValidator {
               (1...30).contains(conversation.wakeWindowSeconds) else {
             throw ConfigurationError.invalidRate("conversation")
         }
+        let scriptOverlay = configuration.overlays.script
         guard configuration.overlays.resultTTLSeconds.isFinite,
-              (0.1...3_600).contains(configuration.overlays.resultTTLSeconds) else {
+              (0.1...3_600).contains(configuration.overlays.resultTTLSeconds),
+              (1_024...1_048_576).contains(scriptOverlay.maxScriptBytes),
+              (1...60).contains(scriptOverlay.maximumFps),
+              scriptOverlay.defaultTTLSeconds.isFinite,
+              (1...3_600).contains(scriptOverlay.defaultTTLSeconds),
+              scriptOverlay.maximumTTLSeconds.isFinite,
+              (1...3_600).contains(scriptOverlay.maximumTTLSeconds),
+              scriptOverlay.defaultTTLSeconds <= scriptOverlay.maximumTTLSeconds else {
             throw ConfigurationError.invalidOverlayConfiguration
         }
         if conversation.enabled {

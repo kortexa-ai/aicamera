@@ -26,5 +26,11 @@ let package = Package(
             dependencies: ["AICameraShared"],
             path: "Tests/AICameraSharedTests"
         ),
+        // Phase 0 dev tool for the model-rendered overlay layer. Not shipped with the app.
+        .executableTarget(
+            name: "AICameraOverlaySpike",
+            path: "Sources/AICameraOverlaySpike",
+            resources: [.copy("Resources")]
+        ),
     ]
 )

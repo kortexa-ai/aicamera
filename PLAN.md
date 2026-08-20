@@ -77,9 +77,22 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 ### AI-generated camera composition
 
 - [ ] Define bounded structured overlay instructions for text, shapes, boxes, and locally rasterized SVG.
-- [ ] Reject scripts, external resources, oversized SVG, excessive element counts, and stale overlay work.
+- [ ] Reject external resources, oversized SVG, excessive element counts, and stale overlay work. Model-rendered scripts are covered by the section below.
 - [ ] Continue sending clean pre-overlay frames to inference so generated content cannot recursively contaminate vision input.
 - [ ] Run an end-to-end `snappy` test that adds random annotations and verifies composed pixels in an independent virtual-camera client.
+
+### Model-rendered overlay scripts (transparent render layer)
+
+Design: `docs/overlay-script-renderer.md`. The model gets a bounded `render_overlay` tool; the script (three.js, WebGL2) runs in a hidden in-app WKWebView and its transparent frames are composited onto the published camera frames.
+
+- [ ] Keep the cheaper structured/SVG overlay path for simple labels; use script rendering for rich 2D/3D/animated content.
+- [x] Phase 0 spike: the `AICameraOverlaySpike` dev tool proves hidden WKWebView + three.js + `readPixels` to `CVPixelBuffer` + alpha composite at 30 fps. Results and WebKit/SDK quirks are recorded in `docs/overlay-script-renderer.md`.
+- [x] Add `OverlayScriptRenderer` (hidden below-desktop window, WKWebView, bounded `window.AICamera` bridge, no network, opaque origin, non-persistent storage) and a lock-based single-slot overlay-frame mailbox (`LatestValueSlot`); composite only fresh frames in `OverlayRenderer`; keep the inference path clean. Manual camera-test acceptance pending.
+- [ ] Extend the agent protocol with bounded tool calls; add `render_overlay(script, ttlSeconds?)` and `clear_overlay()` tools; validate script size and TTL; expire stale scripts; tear down on lane stop, barge-in, and teardown.
+- [x] Add `overlays.script` profile settings (`enabled`, `maxScriptBytes`, `maximumFps`, `defaultTTLSeconds`, `maximumTTLSeconds`, `allowSceneData`); scripts are memory-only and never persisted.
+- [x] Add a dev-only overlay script box to the control center (visible during a local camera test when script overlays are enabled) for acceptance without a model round-trip.
+- [ ] Add a web-content crash watchdog (no fresh frame means the overlay disappears), memory caps, and an end-to-end acceptance test where an independent virtual-camera client sees the composed script pixels.
+- [ ] Keep a hosted Chromium renderer (Electron/ElectronBun) as a swap-in option behind the same protocol if WebGPU/typegpu is required later.
 
 ### Agent camera and microphone tools
 

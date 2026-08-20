@@ -36,8 +36,11 @@ struct ControlCenterView: View {
                     .foregroundStyle(.white.opacity(0.6))
                 }
             }
+            // The popup has a fixed 420-point width and 14-point padding.
+            // Keep an explicit 16:9 height so flexible preview images cannot
+            // collapse this view during the transition from the placeholder.
             .frame(maxWidth: .infinity)
-            .aspectRatio(16 / 9, contentMode: .fit)
+            .frame(height: 220.5)
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
             HStack(spacing: 8) {
@@ -71,6 +74,33 @@ struct ControlCenterView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+
+            if model.cameraTestActive, model.scriptOverlayEnabled {
+                GroupBox("Overlay script") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextField(
+                            "three.js script — try: AICamera.onFrame(dt => { AICamera.scene.rotation.y += dt })",
+                            text: $model.overlayScriptDraft,
+                            axis: .vertical
+                        )
+                        .font(.system(.caption2, design: .monospaced))
+                        .lineLimit(3...8)
+                        HStack {
+                            Button("Render") { model.loadOverlayScript(model.overlayScriptDraft) }
+                                .controlSize(.small)
+                            Button("Clear") { model.clearOverlayScript() }
+                                .controlSize(.small)
+                            Spacer()
+                        }
+                        if let log = model.overlayScriptLog {
+                            Text(log)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                }
+            }
 
             if model.microphoneTestActive {
                 InputLevelMeter(level: model.microphoneInputLevel)

@@ -63,6 +63,9 @@ final class AppModel: ObservableObject {
 
     private var pipeline: PipelineCoordinator?
     private var videoController: VideoPipelineController?
+    private var scriptRenderer: OverlayScriptRenderer?
+    @Published private(set) var overlayScriptLog: String?
+    @Published var overlayScriptDraft = ""
     /// Retained only to retry a failed feeder teardown; it is never treated as an active lane.
     private var failedVideoCleanupController: VideoPipelineController?
     private var audioController: AudioPipelineController?
@@ -123,6 +126,10 @@ final class AppModel: ObservableObject {
     var hasConfiguredAIFeatures: Bool {
         configurationController.configuration.pipeline.videoStages.contains(where: \.enabled)
             || configurationController.configuration.pipeline.conversation.enabled
+    }
+
+    var scriptOverlayEnabled: Bool {
+        configurationController.configuration.overlays.script.enabled
     }
 
     var isPurePassthrough: Bool {
@@ -506,6 +513,7 @@ final class AppModel: ObservableObject {
         cameraRunGate?.cancel()
         cameraRunGate = laneGate
         let configuration = configurationController.configuration
+        ensureScriptRenderer(for: configuration)
         let video = VideoPipelineController(
             configuration: configuration,
             onPreview: { [weak self] image in
@@ -536,7 +544,8 @@ final class AppModel: ObservableObject {
                     guard pipelineGate.isActive, laneGate.isActive else { return }
                     model?.cameraLaneError = message
                 }
-            }
+            },
+            scriptRenderer: scriptRenderer
         )
 
         do {
@@ -633,6 +642,7 @@ final class AppModel: ObservableObject {
                     model.currentSnapshot = snapshot
                     if model.cameraRunGate?.isActive == true {
                         model.videoController?.update(snapshot: snapshot)
+                        model.pushSceneData(to: snapshot)
                     }
                 }
             },
@@ -669,6 +679,84 @@ final class AppModel: ObservableObject {
         return (coordinator, gate)
     }
 
+    // MARK: - Script overlay
+
+    private func ensureScriptRenderer(for configuration: AICameraConfiguration) {
+        guard configuration.overlays.script.enabled, scriptRenderer == nil else { return }
+        let renderer = OverlayScriptRenderer(
+            scriptConfiguration: configuration.overlays.script,
+            onLog: { [weak self] line in
+                Task { @MainActor [weak self] in
+                    self?.overlayScriptLog = line
+                }
+            }
+        )
+        renderer.start()
+        scriptRenderer = renderer
+    }
+
+    private func stopScriptRenderer() {
+        scriptRenderer?.stop()
+        scriptRenderer = nil
+    }
+
+    /// Dev/acceptance entry point: run a pasted overlay script on the live
+    /// camera test. Phase 2 replaces this with the agent `render_overlay` tool.
+    func loadOverlayScript(_ script: String) {
+        let scriptConfig = configurationController.configuration.overlays.script
+        guard let renderer = scriptRenderer else {
+            overlayScriptLog = "Start the camera test first."
+            return
+        }
+        if renderer.load(script: script, ttlSeconds: scriptConfig.defaultTTLSeconds) {
+            overlayScriptLog = "Script loaded (\(Int(scriptConfig.defaultTTLSeconds))s TTL)."
+        } else {
+            overlayScriptLog = "Script rejected (max \(scriptConfig.maxScriptBytes) bytes)."
+        }
+    }
+
+    func clearOverlayScript() {
+        scriptRenderer?.clear()
+        overlayScriptLog = "Overlay cleared."
+    }
+
+    private func pushSceneData(to snapshot: SceneSnapshot) {
+        guard let renderer = scriptRenderer,
+              configurationController.configuration.overlays.script.allowSceneData else { return }
+        renderer.updateSceneData(Self.sceneDataJSON(for: snapshot))
+    }
+
+    private static func sceneDataJSON(for snapshot: SceneSnapshot) -> String {
+        struct DetectionPayload: Encodable {
+            let label: String
+            let confidence: Double
+            let box: [Double]
+        }
+        struct Payload: Encodable {
+            let detections: [DetectionPayload]
+            let gestures: [String]
+            let transcript: String?
+            let agentResponse: String?
+        }
+        let payload = Payload(
+            detections: snapshot.detections.map {
+                DetectionPayload(
+                    label: $0.label,
+                    confidence: $0.confidence,
+                    box: [$0.boundingBox.x, $0.boundingBox.y, $0.boundingBox.width, $0.boundingBox.height]
+                )
+            },
+            gestures: snapshot.gestures.map(\.kind.rawValue),
+            transcript: snapshot.transcript?.text,
+            agentResponse: snapshot.agentResponse
+        )
+        guard let data = try? JSONEncoder().encode(payload),
+              let json = String(data: data, encoding: .utf8) else {
+            return "null"
+        }
+        return json
+    }
+
     @discardableResult
     private func retryFailedCameraCleanup() -> Bool {
         guard let controller = failedVideoCleanupController else { return true }
@@ -685,6 +773,7 @@ final class AppModel: ObservableObject {
     private func stopCameraIfNeeded() {
         cameraRunGate?.cancel()
         cameraRunGate = nil
+        stopScriptRenderer()
         guard let video = videoController else {
             _ = retryFailedCameraCleanup()
             previewImage = nil
@@ -787,6 +876,7 @@ final class AppModel: ObservableObject {
         pipeline = nil
         videoController = nil
         audioController = nil
+        stopScriptRenderer()
         currentSnapshot = SceneSnapshot()
         cameraIsActive = false
         microphoneIsActive = false
@@ -847,6 +937,7 @@ final class AppModel: ObservableObject {
         cameraTestActive = false
         microphoneTestActive = false
         microphoneInputLevel = 0
+        stopScriptRenderer()
         if let pipeline {
             Task { await pipeline.stop() }
         }

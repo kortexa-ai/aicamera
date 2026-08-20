@@ -48,6 +48,8 @@ targets:
     sources:
       - path: Sources/AICameraApp
       - path: Sources/AICameraShared
+      - path: Resources/Overlay
+        buildPhase: resources
     configFiles:
       Debug: Config/Local.xcconfig
       Release: Config/Local.xcconfig

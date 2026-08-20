@@ -144,7 +144,15 @@
     "showAgentResponse": true,
     "showStatus": true,
     "resultTTLSeconds": 4,
-    "accentHex": "#59F3C2"
+    "accentHex": "#59F3C2",
+    "script": {
+      "enabled": true,
+      "maxScriptBytes": 65536,
+      "maximumFps": 30,
+      "defaultTTLSeconds": 30,
+      "maximumTTLSeconds": 60,
+      "allowSceneData": false
+    }
   },
   "privacy": {
     "networkMode": "localOnly",

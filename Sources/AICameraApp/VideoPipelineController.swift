@@ -16,6 +16,9 @@ final class VideoPipelineController: NSObject {
     private let onGestures: GestureHandler
     private let onFrame: FrameHandler
     private let onError: ErrorHandler
+    /// Optional script-overlay producer. Read synchronously on the capture
+    /// path; a stale or absent overlay never delays a frame.
+    private let scriptRenderer: OverlayScriptRenderer?
 
     private let session = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -46,13 +49,15 @@ final class VideoPipelineController: NSObject {
         onPreview: @escaping PreviewHandler,
         onGestures: @escaping GestureHandler,
         onFrame: @escaping FrameHandler,
-        onError: @escaping ErrorHandler
+        onError: @escaping ErrorHandler,
+        scriptRenderer: OverlayScriptRenderer? = nil
     ) {
         self.configuration = configuration
         self.onPreview = onPreview
         self.onGestures = onGestures
         self.onFrame = onFrame
         self.onError = onError
+        self.scriptRenderer = scriptRenderer
         super.init()
     }
 
@@ -251,11 +256,17 @@ final class VideoPipelineController: NSObject {
               let input = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         frameCounter &+= 1
         let frameID = FrameID(rawValue: frameCounter)
+        // The inference path below always uses the clean renderer; only the
+        // published frame may carry a script overlay.
+        let scriptOverlay = configuration.overlays.script.enabled
+            ? scriptRenderer?.latestFreshOverlay()
+            : nil
         guard let output = renderer.render(
             input: input,
             capture: configuration.capture,
             overlay: configuration.overlays,
-            snapshot: currentSnapshot()
+            snapshot: currentSnapshot(),
+            scriptOverlay: scriptOverlay
         ) else { return }
 
         if feeder.isRunning, let outgoing = makeSampleBuffer(pixelBuffer: output, source: sampleBuffer) {
