@@ -59,8 +59,10 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 - [ ] Add validated import and export of versioned profiles so development presets such as **Kortexa Local** can be moved between installations quickly.
 - [ ] Keep secrets out of ordinary profile exports. Export secret references by default and require a separate explicit secure flow for any secret transfer.
 - [ ] Ship an importable example OpenAI profile with OpenAI endpoint definitions and an `OPENAI_API_KEY` environment/Keychain reference. Never include a real API key in the repository or app bundle.
-- [ ] Add OpenAI Realtime API support, including compatible Realtime endpoints, as an alternative to separate ASR, LLM/agent, and TTS stages.
-- [ ] Define bounded streaming audio, cancellation, reconnect, privacy-grant, endpoint-validation, and fallback behavior for Realtime sessions.
+- [ ] Add the bounded WebRTC conversation session described in `docs/realtime-conversation.md`: canonical OpenAI Realtime, self-hosted OpenAI-compatible Realtime, and an explicitly experimental ChatGPT/Codex subscription provider; keep separate ASR, agent, and TTS stages as the selectable fallback.
+- [ ] Add one-shot **Talk** activation with server VAD and **Stop**: connect with microphone egress closed, transmit only during an explicitly armed utterance, close the gate on VAD stop/timeout/cancellation, and route decoded remote PCM through the existing bounded virtual-microphone mixer.
+- [ ] Add Realtime Settings for provider, endpoint, model, voice, and Keychain-backed credentials or OAuth; profiles store secret references only. Test the standard protocol against canonical OpenAI and `api.server`.
+- [ ] Normalize standard Realtime function calls and experimental Codex delegation calls into one local bounded tool executor; start with `render_overlay` and `clear_overlay`.
 
 ### Development and production isolation
 
@@ -87,8 +89,8 @@ Design: `docs/overlay-script-renderer.md`. The model gets a bounded `render_over
 
 - [ ] Keep the cheaper structured/SVG overlay path for simple labels; use script rendering for rich 2D/3D/animated content.
 - [x] Phase 0 spike: the `AICameraOverlaySpike` dev tool proves hidden WKWebView + three.js + `readPixels` to `CVPixelBuffer` + alpha composite at 30 fps. Results and WebKit/SDK quirks are recorded in `docs/overlay-script-renderer.md`.
-- [x] Add `OverlayScriptRenderer` (hidden below-desktop window, WKWebView, bounded `window.AICamera` bridge, no network, opaque origin, non-persistent storage) and a lock-based single-slot overlay-frame mailbox (`LatestValueSlot`); composite only fresh frames in `OverlayRenderer`; keep the inference path clean. Manual camera-test acceptance pending.
-- [ ] Extend the agent protocol with bounded tool calls; add `render_overlay(script, ttlSeconds?)` and `clear_overlay()` tools; validate script size and TTL; expire stale scripts; tear down on lane stop, barge-in, and teardown.
+- [x] Add `OverlayScriptRenderer` (on-screen at near-zero window alpha so WebKit keeps rendering invisibly, bounded `window.AICamera` bridge, non-persistent storage) and a lock-based single-slot overlay-frame mailbox (`LatestValueSlot`); composite only fresh frames in `OverlayRenderer`; keep the inference path clean. Manual camera-test acceptance confirmed the live camera, rotating cube, and ring composite correctly.
+- [ ] Add the Realtime-first bounded tool executor described in `docs/realtime-conversation.md`; expose `render_overlay(script, ttlSeconds?)` and `clear_overlay()` with the live canvas dimensions, transparency rules, bridge API, and scene-coordinate contract; retain chat-completions tool support for the legacy fallback; tear down on lane stop, cancellation, and expiry.
 - [x] Add `overlays.script` profile settings (`enabled`, `maxScriptBytes`, `maximumFps`, `defaultTTLSeconds`, `maximumTTLSeconds`, `allowSceneData`); scripts are memory-only and never persisted.
 - [x] Add a dev-only overlay script box to the control center (visible during a local camera test when script overlays are enabled) for acceptance without a model round-trip.
 - [ ] Add a web-content crash watchdog (no fresh frame means the overlay disappears), memory caps, and an end-to-end acceptance test where an independent virtual-camera client sees the composed script pixels.

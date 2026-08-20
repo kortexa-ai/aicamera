@@ -79,7 +79,12 @@ The clean `analysisRenderer` path never composites.
 
 ### 4. Agent tool protocol extension (Phase 2)
 
-Current protocol: `AgentClient.respond(to:) async throws -> String`. Proposed:
+Realtime is now the primary tool transport; see `realtime-conversation.md` for the WebRTC,
+standard function-call, experimental Codex delegation, activation, and fallback design. The
+request/response contract below remains the legacy chat-completions fallback so both paths feed the
+same bounded local tool executor.
+
+Current legacy protocol: `AgentClient.respond(to:) async throws -> String`. Proposed:
 
 ```swift
 public struct AgentTool: Equatable, Sendable {
