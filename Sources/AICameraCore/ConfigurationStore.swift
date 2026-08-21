@@ -200,6 +200,14 @@ public enum ConfigurationValidator {
             throw ConfigurationError.invalidOverlayConfiguration
         }
         if conversation.enabled {
+            if conversation.realtimeEnabled {
+                try requireEndpoint(
+                    conversation.realtimeEndpointID,
+                    for: "conversation.realtime",
+                    adapters: [.openAIRealtime],
+                    endpoints: configuration.endpoints
+                )
+            }
             if conversation.transcriptionEnabled {
                 try requireEndpoint(
                     conversation.transcriptionEndpointID,

@@ -75,6 +75,22 @@ struct ControlCenterView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
 
+            if model.realtimeConversationEnabled {
+                Button(action: model.toggleRealtimeConversation) {
+                    Label(
+                        model.realtimeConversationActive
+                            ? "Stop — \(model.realtimeConversationState.rawValue)"
+                            : "Talk — one utterance",
+                        systemImage: model.realtimeConversationActive ? "stop.fill" : "waveform.and.mic"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(model.realtimeConversationActive ? .red : .accentColor)
+                .disabled(!model.realtimeConversationActive && !model.canStartRealtimeConversation)
+                .help("Send microphone audio only for one VAD-bounded Realtime utterance.")
+            }
+
             if model.cameraTestActive, model.scriptOverlayEnabled {
                 GroupBox("Overlay script") {
                     VStack(alignment: .leading, spacing: 6) {

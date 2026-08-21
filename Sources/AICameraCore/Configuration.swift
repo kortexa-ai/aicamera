@@ -78,6 +78,7 @@ public enum AdapterKind: String, Codable, CaseIterable, Sendable {
     case openAIVision
     case openAITranscription
     case openAISpeech
+    case openAIRealtime
     case kortexaDetection
     case kortexaPCMTranscription
 }
@@ -189,6 +190,8 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
     public static let defaultWakePhrase = "Hey Kortexa"
 
     public var enabled: Bool
+    public var realtimeEnabled: Bool
+    public var realtimeEndpointID: String?
     public var transcriptionEnabled: Bool
     public var transcriptionEndpointID: String?
     public var agentEndpointID: String?
@@ -208,6 +211,8 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
 
     public init(
         enabled: Bool = false,
+        realtimeEnabled: Bool = false,
+        realtimeEndpointID: String? = nil,
         transcriptionEnabled: Bool = false,
         transcriptionEndpointID: String? = nil,
         agentEndpointID: String? = nil,
@@ -226,6 +231,8 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
         gestureCooldownSeconds: Double = 2
     ) {
         self.enabled = enabled
+        self.realtimeEnabled = realtimeEnabled
+        self.realtimeEndpointID = realtimeEndpointID
         self.transcriptionEnabled = transcriptionEnabled
         self.transcriptionEndpointID = transcriptionEndpointID
         self.agentEndpointID = agentEndpointID
@@ -246,6 +253,8 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case enabled
+        case realtimeEnabled
+        case realtimeEndpointID
         case transcriptionEnabled
         case transcriptionEndpointID
         case agentEndpointID
@@ -267,6 +276,8 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try container.decode(Bool.self, forKey: .enabled)
+        realtimeEnabled = try container.decodeIfPresent(Bool.self, forKey: .realtimeEnabled) ?? false
+        realtimeEndpointID = try container.decodeIfPresent(String.self, forKey: .realtimeEndpointID)
         transcriptionEndpointID = try container.decodeIfPresent(String.self, forKey: .transcriptionEndpointID)
         transcriptionEnabled = try container.decodeIfPresent(Bool.self, forKey: .transcriptionEnabled)
             ?? (transcriptionEndpointID != nil)

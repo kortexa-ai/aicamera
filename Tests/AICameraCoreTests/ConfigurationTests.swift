@@ -11,6 +11,8 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertTrue(configuration.endpoints.isEmpty)
         XCTAssertTrue(configuration.pipeline.videoStages.isEmpty)
         XCTAssertFalse(configuration.pipeline.conversation.enabled)
+        XCTAssertFalse(configuration.pipeline.conversation.realtimeEnabled)
+        XCTAssertNil(configuration.pipeline.conversation.realtimeEndpointID)
         XCTAssertFalse(configuration.pipeline.conversation.transcriptionEnabled)
         XCTAssertFalse(configuration.overlays.enabled)
     }
@@ -166,6 +168,8 @@ final class ConfigurationTests: XCTestCase {
         var root = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         var pipeline = try XCTUnwrap(root["pipeline"] as? [String: Any])
         var conversation = try XCTUnwrap(pipeline["conversation"] as? [String: Any])
+        conversation.removeValue(forKey: "realtimeEnabled")
+        conversation.removeValue(forKey: "realtimeEndpointID")
         conversation.removeValue(forKey: "transcriptionEnabled")
         conversation.removeValue(forKey: "activationMode")
         conversation.removeValue(forKey: "wakePhrase")
@@ -175,6 +179,8 @@ final class ConfigurationTests: XCTestCase {
 
         let legacy = try JSONSerialization.data(withJSONObject: root)
         let decoded = try JSONDecoder().decode(AICameraConfiguration.self, from: legacy)
+        XCTAssertFalse(decoded.pipeline.conversation.realtimeEnabled)
+        XCTAssertNil(decoded.pipeline.conversation.realtimeEndpointID)
         XCTAssertFalse(decoded.pipeline.conversation.transcriptionEnabled)
         XCTAssertEqual(decoded.pipeline.conversation.activationMode, .alwaysListening)
         XCTAssertEqual(decoded.pipeline.conversation.wakePhrase, ConversationConfiguration.defaultWakePhrase)
@@ -251,6 +257,95 @@ final class ConfigurationTests: XCTestCase {
         configuration.pipeline.conversation.respondToFinalTranscripts = false
         configuration.pipeline.conversation.respondToGestures = false
         XCTAssertNoThrow(try ConfigurationValidator.validate(configuration))
+    }
+
+    func testRealtimeConversationRequiresCompatibleEndpoint() {
+        var configuration = AICameraConfiguration.default
+        configuration.pipeline.conversation.enabled = true
+        configuration.pipeline.conversation.realtimeEnabled = true
+
+        XCTAssertThrowsError(try ConfigurationValidator.validate(configuration)) { error in
+            XCTAssertEqual(
+                error as? ConfigurationError,
+                .missingEndpoint(stageID: "conversation.realtime", endpointID: "<unset>")
+            )
+        }
+
+        configuration.endpoints = [
+            .init(
+                id: "not-realtime",
+                adapter: .openAIChat,
+                baseURL: URL(string: "http://127.0.0.1:2030")!
+            ),
+        ]
+        configuration.pipeline.conversation.realtimeEndpointID = "not-realtime"
+        XCTAssertThrowsError(try ConfigurationValidator.validate(configuration)) { error in
+            XCTAssertEqual(
+                error as? ConfigurationError,
+                .incompatibleEndpoint(stageID: "conversation.realtime", adapter: .openAIChat)
+            )
+        }
+    }
+
+    func testRealtimeAndLegacyConversationEndpointsCanCoexist() throws {
+        var configuration = AICameraConfiguration.default
+        configuration.endpoints = [
+            .init(
+                id: "realtime",
+                adapter: .openAIRealtime,
+                baseURL: URL(string: "https://api.example.com")!,
+                model: "gpt-realtime",
+                options: ["temperature": .number(0.8)]
+            ),
+            .init(id: "asr", adapter: .openAITranscription, baseURL: URL(string: "https://api.example.com")!),
+            .init(id: "agent", adapter: .openAIChat, baseURL: URL(string: "https://api.example.com")!),
+            .init(id: "tts", adapter: .openAISpeech, baseURL: URL(string: "https://api.example.com")!),
+        ]
+        configuration.pipeline.conversation.enabled = true
+        configuration.pipeline.conversation.realtimeEnabled = true
+        configuration.pipeline.conversation.realtimeEndpointID = "realtime"
+        configuration.pipeline.conversation.transcriptionEnabled = true
+        configuration.pipeline.conversation.transcriptionEndpointID = "asr"
+        configuration.pipeline.conversation.agentEndpointID = "agent"
+        configuration.pipeline.conversation.speechEndpointID = "tts"
+
+        XCTAssertNoThrow(try ConfigurationValidator.validate(configuration))
+        let decoded = try JSONDecoder().decode(
+            AICameraConfiguration.self,
+            from: JSONEncoder().encode(configuration)
+        )
+        XCTAssertTrue(decoded.pipeline.conversation.realtimeEnabled)
+        XCTAssertEqual(decoded.pipeline.conversation.realtimeEndpointID, "realtime")
+    }
+
+    func testDisabledConversationDoesNotRequireRealtimeEndpoint() {
+        var configuration = AICameraConfiguration.default
+        configuration.pipeline.conversation.realtimeEnabled = true
+        XCTAssertNoThrow(try ConfigurationValidator.validate(configuration))
+    }
+
+    func testRealtimeEndpointUsesExistingModelAndOptionBounds() {
+        var configuration = AICameraConfiguration.default
+        configuration.endpoints = [
+            .init(
+                id: "realtime",
+                adapter: .openAIRealtime,
+                baseURL: URL(string: "https://api.example.com")!,
+                model: String(repeating: "m", count: 513)
+            ),
+        ]
+        XCTAssertThrowsError(try ConfigurationValidator.validate(configuration)) { error in
+            XCTAssertEqual(error as? ConfigurationError, .invalidText("endpoint.realtime"))
+        }
+
+        configuration.endpoints[0].model = "gpt-realtime"
+        configuration.endpoints[0].options = ["temperature": .number(3)]
+        XCTAssertThrowsError(try ConfigurationValidator.validate(configuration)) { error in
+            XCTAssertEqual(
+                error as? ConfigurationError,
+                .invalidOption(endpointID: "realtime", option: "temperature")
+            )
+        }
     }
 
     func testRejectsInvalidWakePhraseConfiguration() {

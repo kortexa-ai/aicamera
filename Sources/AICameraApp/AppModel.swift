@@ -10,6 +10,14 @@ private struct SendableImage: @unchecked Sendable {
     let value: NSImage
 }
 
+enum RealtimeConversationState: String, Sendable {
+    case idle = "Ready to talk"
+    case connecting = "Connecting…"
+    case listening = "Listening…"
+    case responding = "Responding…"
+    case failed = "Realtime failed"
+}
+
 private final class PipelineRunGate: @unchecked Sendable {
     private let lock = NSLock()
     private var active = true
@@ -54,6 +62,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var settingsNavigationGeneration: UInt64 = 0
     @Published private(set) var cameraAuthorization = AVCaptureDevice.authorizationStatus(for: .video)
     @Published private(set) var microphoneAuthorization = AVCaptureDevice.authorizationStatus(for: .audio)
+    @Published private(set) var realtimeConversationState: RealtimeConversationState = .idle
 
     let configurationController = ConfigurationController()
     let cameraExtensionManager = CameraExtensionManager()
@@ -82,6 +91,20 @@ final class AppModel: ObservableObject {
     private var microphonePermissionGeneration: UInt64 = 0
     private var managerCancellables = Set<AnyCancellable>()
     private var lifecycleCancellables = Set<AnyCancellable>()
+    private var realtimeSession: RealtimeWebRTCSession?
+    private var realtimeEventTask: Task<Void, Never>?
+    private var realtimeConnectTask: Task<Void, Never>?
+    private var realtimeReceiveTailTask: Task<Void, Never>?
+    private var realtimeResponseDonePending = false
+    private var realtimeGeneration: UInt64 = 0
+    private var realtimeSpeechID: UUID?
+    private var realtimeAudioQueue: [Data] = []
+    private var realtimeAudioQueueBytes = 0
+    private var realtimeAudioSending = false
+    private var realtimeAudioFinishRequested = false
+    private var realtimeAudioSampleRate: Int?
+    private var realtimeToolContinuationPending = false
+    private var realtimeResponseDoneCount = 0
 
     var currentError: String? {
         lastError ?? cameraLaneError ?? microphoneLaneError
@@ -130,6 +153,22 @@ final class AppModel: ObservableObject {
 
     var scriptOverlayEnabled: Bool {
         configurationController.configuration.overlays.script.enabled
+    }
+
+    var realtimeConversationEnabled: Bool {
+        let conversation = configurationController.configuration.pipeline.conversation
+        return conversation.enabled && conversation.realtimeEnabled && conversation.realtimeEndpointID != nil
+    }
+
+    var realtimeConversationActive: Bool {
+        realtimeConversationState != .idle && realtimeConversationState != .failed
+    }
+
+    var canStartRealtimeConversation: Bool {
+        realtimeConversationEnabled
+            && !externalClientIsUsingMedia
+            && (microphoneTestActive || canStartMicrophoneTest)
+            && realtimeConnectTask == nil
     }
 
     var isPurePassthrough: Bool {
@@ -613,6 +652,7 @@ final class AppModel: ObservableObject {
         do {
             try controller.start(
                 publishToVirtualMicrophone: demandMonitor.microphoneRequested
+                    || configuration.pipeline.conversation.realtimeEnabled
             )
             audioController = controller
             microphoneIsActive = true
@@ -677,6 +717,418 @@ final class AppModel: ObservableObject {
             await coordinator.started()
         }
         return (coordinator, gate)
+    }
+
+    // MARK: - Realtime conversation
+
+    func toggleRealtimeConversation() {
+        if realtimeConversationActive {
+            stopRealtimeConversation()
+        } else {
+            startRealtimeConversation()
+        }
+    }
+
+    func startRealtimeConversation() {
+        guard canStartRealtimeConversation else {
+            lastError = "Realtime conversation is not configured or the microphone is unavailable."
+            return
+        }
+        if !microphoneTestActive {
+            microphoneTestActive = true
+            reconcileDemand()
+        }
+        guard microphoneRunGate?.isActive == true, audioController != nil else {
+            lastError = "The microphone test could not start for Realtime output."
+            return
+        }
+
+        let profile = configurationController.configuration
+        let conversation = profile.pipeline.conversation
+        guard let endpointID = conversation.realtimeEndpointID,
+              let endpoint = profile.endpoints.first(where: { $0.id == endpointID }),
+              endpoint.adapter == .openAIRealtime else {
+            lastError = "The Realtime endpoint is missing."
+            return
+        }
+        do {
+            var dataClasses: Set<MediaDataClass> = [.rawAudio, .transcript, .promptText]
+            if conversation.includeSceneSummary { dataClasses.insert(.sceneMetadata) }
+            try PrivacyGate(configuration: profile.privacy).authorize(endpoint: endpoint, data: dataClasses)
+        } catch {
+            lastError = "Realtime privacy gate: \(error.localizedDescription)"
+            return
+        }
+
+        realtimeGeneration &+= 1
+        let generation = realtimeGeneration
+        realtimeConversationState = .connecting
+        realtimeReceiveTailTask?.cancel()
+        realtimeReceiveTailTask = nil
+        realtimeResponseDonePending = false
+        realtimeToolContinuationPending = false
+        realtimeResponseDoneCount = 0
+        resetRealtimeAudio(stopPlayback: true)
+        lastError = nil
+        realtimeConnectTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                guard let secret = try await AppSecretResolver().resolve(endpoint.auth), !secret.isEmpty else {
+                    throw NSError(
+                        domain: "AICamera.Realtime",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "The Realtime credential is missing from Keychain."]
+                    )
+                }
+                guard !Task.isCancelled, generation == self.realtimeGeneration else { return }
+                let signalingURL = try Self.realtimeSignalingURL(for: endpoint)
+                let session = RealtimeWebRTCSession(
+                    signalingURL: signalingURL,
+                    credential: .init(field: endpoint.auth.header, value: endpoint.auth.prefix + secret)
+                )
+                self.realtimeSession = session
+                self.realtimeEventTask = Task { [weak self, weak session] in
+                    guard let self, let session else { return }
+                    for await event in session.events {
+                        guard !Task.isCancelled else { return }
+                        await self.handleRealtimeEvent(event, session: session, generation: generation)
+                    }
+                }
+                let request = Self.realtimeSessionRequest(
+                    endpoint: endpoint,
+                    conversation: conversation,
+                    profile: profile
+                )
+                try await session.connect(session: request)
+                guard !Task.isCancelled, generation == self.realtimeGeneration else {
+                    await session.close()
+                    return
+                }
+                try await session.armOneShotAudio()
+                self.realtimeConversationState = .listening
+                self.realtimeConnectTask = nil
+            } catch is CancellationError {
+                return
+            } catch {
+                guard generation == self.realtimeGeneration else { return }
+                self.realtimeConnectTask = nil
+                self.lastError = "Realtime: \(error.localizedDescription)"
+                self.closeRealtimeTransport(state: .failed, stopSpeech: true)
+            }
+        }
+    }
+
+    func stopRealtimeConversation() {
+        closeRealtimeTransport(state: .idle, stopSpeech: true)
+    }
+
+    private func closeRealtimeTransport(
+        state: RealtimeConversationState,
+        stopSpeech: Bool
+    ) {
+        realtimeGeneration &+= 1
+        realtimeConnectTask?.cancel()
+        realtimeConnectTask = nil
+        realtimeEventTask?.cancel()
+        realtimeEventTask = nil
+        realtimeReceiveTailTask?.cancel()
+        realtimeReceiveTailTask = nil
+        realtimeResponseDonePending = false
+        let session = realtimeSession
+        realtimeSession = nil
+        realtimeConversationState = state
+        realtimeToolContinuationPending = false
+        realtimeResponseDoneCount = 0
+        if stopSpeech {
+            resetRealtimeAudio(stopPlayback: true)
+        }
+        Task { await session?.close() }
+    }
+
+    private func handleRealtimeEvent(
+        _ event: RealtimeWebRTCSession.Event,
+        session: RealtimeWebRTCSession,
+        generation: UInt64
+    ) async {
+        guard generation == realtimeGeneration, session === realtimeSession else { return }
+        switch event {
+        case .connected:
+            break
+        case .speechStarted:
+            realtimeConversationState = .listening
+        case .speechStopped:
+            realtimeConversationState = .responding
+            await session.closeMicrophoneGate()
+        case .transcript:
+            // Keep renderer and tool diagnostics visible in the compact UI.
+            break
+        case let .functionCall(call):
+            realtimeToolContinuationPending = true
+            await executeRealtimeTool(call, session: session, generation: generation)
+        case .responseDone:
+            realtimeResponseDoneCount += 1
+            if !realtimeToolContinuationPending || realtimeResponseDoneCount >= 2 {
+                scheduleRealtimeReceiveTail(session: session, generation: generation)
+            }
+        case let .error(failure):
+            lastError = "Realtime: \(failure.rawValue)"
+            closeRealtimeTransport(state: .failed, stopSpeech: true)
+        case let .audio(chunk):
+            enqueueRealtimeAudio(chunk)
+            if realtimeResponseDonePending {
+                scheduleRealtimeReceiveTail(session: session, generation: generation)
+            }
+        }
+    }
+
+    private func scheduleRealtimeReceiveTail(
+        session: RealtimeWebRTCSession,
+        generation: UInt64
+    ) {
+        realtimeResponseDonePending = true
+        realtimeReceiveTailTask?.cancel()
+        realtimeReceiveTailTask = Task { @MainActor [weak self, weak session] in
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return
+            }
+            guard let self, let session,
+                  generation == self.realtimeGeneration,
+                  session === self.realtimeSession else { return }
+            self.realtimeReceiveTailTask = nil
+            self.realtimeResponseDonePending = false
+            guard self.realtimeSpeechID != nil else {
+                self.closeRealtimeTransport(state: .idle, stopSpeech: false)
+                return
+            }
+            self.realtimeAudioFinishRequested = true
+            self.drainRealtimeAudioQueue()
+        }
+    }
+
+    private func enqueueRealtimeAudio(_ chunk: RealtimeWebRTCSession.PCMChunk) {
+        guard let audio = audioController,
+              microphoneRunGate?.isActive == true,
+              chunk.channels == 1,
+              !chunk.data.isEmpty else { return }
+        if realtimeSpeechID != nil {
+            guard realtimeAudioSampleRate == chunk.sampleRate else {
+                lastError = "Realtime audio format changed during a response."
+                stopRealtimeConversation()
+                return
+            }
+        } else {
+            let newID = UUID()
+            realtimeSpeechID = newID
+            realtimeAudioSampleRate = chunk.sampleRate
+            audio.handleSpeech(.beginPCM(
+                speechID: newID,
+                sampleRate: chunk.sampleRate,
+                channels: chunk.channels
+            )) { [weak self] accepted in
+                guard !accepted else { return }
+                Task { @MainActor [weak self] in
+                    guard self?.realtimeSpeechID == newID else { return }
+                    self?.lastError = "Realtime audio output could not start."
+                    self?.stopRealtimeConversation()
+                }
+            }
+        }
+        let maximumPendingBytes = max(2, chunk.sampleRate * MemoryLayout<Int16>.size * 120)
+        guard chunk.data.count <= maximumPendingBytes,
+              realtimeAudioQueueBytes <= maximumPendingBytes - chunk.data.count else {
+            lastError = "Realtime audio exceeded its bounded two-minute response limit."
+            stopRealtimeConversation()
+            return
+        }
+        realtimeAudioQueue.append(chunk.data)
+        realtimeAudioQueueBytes += chunk.data.count
+        drainRealtimeAudioQueue()
+    }
+
+    private func drainRealtimeAudioQueue() {
+        guard !realtimeAudioSending,
+              let audio = audioController,
+              let speechID = realtimeSpeechID else { return }
+        guard !realtimeAudioQueue.isEmpty else {
+            if realtimeAudioFinishRequested {
+                realtimeAudioFinishRequested = false
+                realtimeAudioSending = true
+                audio.handleSpeech(.finishPCM(speechID: speechID)) { [weak self] playedToEnd in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.realtimeSpeechID == speechID else { return }
+                        self.realtimeAudioSending = false
+                        self.realtimeAudioSampleRate = nil
+                        self.realtimeSpeechID = nil
+                        guard playedToEnd else {
+                            self.lastError = "Realtime audio playback did not reach its final buffer."
+                            self.closeRealtimeTransport(state: .failed, stopSpeech: true)
+                            return
+                        }
+                        self.closeRealtimeTransport(state: .idle, stopSpeech: false)
+                    }
+                }
+            }
+            return
+        }
+        let data = realtimeAudioQueue.removeFirst()
+        realtimeAudioQueueBytes -= data.count
+        realtimeAudioSending = true
+        audio.handleSpeech(.pcm(speechID: speechID, data: data)) { [weak self] accepted in
+            Task { @MainActor [weak self] in
+                guard let self, self.realtimeSpeechID == speechID else { return }
+                self.realtimeAudioSending = false
+                guard accepted else {
+                    self.lastError = "Realtime audio output rejected a serialized chunk."
+                    self.stopRealtimeConversation()
+                    return
+                }
+                self.drainRealtimeAudioQueue()
+            }
+        }
+    }
+
+    private func resetRealtimeAudio(stopPlayback: Bool) {
+        realtimeAudioQueue.removeAll(keepingCapacity: true)
+        realtimeAudioQueueBytes = 0
+        realtimeAudioSending = false
+        realtimeAudioFinishRequested = false
+        realtimeAudioSampleRate = nil
+        realtimeSpeechID = nil
+        if stopPlayback {
+            audioController?.handleSpeech(.stop(speechID: nil)) { _ in }
+        }
+    }
+
+    private func executeRealtimeTool(
+        _ call: RealtimeWebRTCSession.FunctionCall,
+        session: RealtimeWebRTCSession,
+        generation: UInt64
+    ) async {
+        let result: [String: Any]
+        switch call.name {
+        case "render_overlay":
+            guard let arguments = call.arguments.data(using: .utf8),
+                  arguments.count <= configurationController.configuration.overlays.script.maxScriptBytes + 1_024,
+                  let object = try? JSONSerialization.jsonObject(with: arguments) as? [String: Any],
+                  let script = object["script"] as? String else {
+                result = ["ok": false, "error": "invalid render_overlay arguments"]
+                break
+            }
+            let scriptConfiguration = configurationController.configuration.overlays.script
+            let requestedTTL = (object["ttlSeconds"] as? NSNumber)?.doubleValue
+            let ttl = min(
+                scriptConfiguration.maximumTTLSeconds,
+                max(1, requestedTTL?.isFinite == true ? requestedTTL! : scriptConfiguration.maximumTTLSeconds)
+            )
+            guard let renderer = scriptRenderer, cameraRunGate?.isActive == true else {
+                result = ["ok": false, "error": "camera renderer unavailable; start the camera test"]
+                break
+            }
+            if renderer.load(script: script, ttlSeconds: ttl) {
+                overlayScriptLog = "Realtime overlay active"
+                result = ["ok": true, "width": 640, "height": 360, "ttlSeconds": ttl]
+            } else {
+                result = ["ok": false, "error": "script rejected by host limits"]
+            }
+        case "clear_overlay":
+            scriptRenderer?.clear()
+            overlayScriptLog = "Overlay cleared by Realtime"
+            result = ["ok": true]
+        default:
+            result = ["ok": false, "error": "unsupported client tool"]
+        }
+        guard generation == realtimeGeneration,
+              session === realtimeSession,
+              let outputData = try? JSONSerialization.data(withJSONObject: result),
+              let output = String(data: outputData, encoding: .utf8) else { return }
+        do {
+            try await session.completeFunctionCall(
+                callID: call.callID,
+                output: output,
+                continuation: ["tool_choice": "none"]
+            )
+        } catch {
+            lastError = "Realtime tool result: \(error.localizedDescription)"
+            closeRealtimeTransport(state: .failed, stopSpeech: true)
+        }
+    }
+
+    private static func realtimeSignalingURL(for endpoint: EndpointConfiguration) throws -> URL {
+        if let path = endpoint.path, !path.isEmpty {
+            guard let url = URL(string: path, relativeTo: endpoint.baseURL)?.absoluteURL else {
+                throw NSError(domain: "AICamera.Realtime", code: 2)
+            }
+            return url
+        }
+        if endpoint.baseURL.path.hasSuffix("/v1") {
+            return endpoint.baseURL.appendingPathComponent("realtime/calls")
+        }
+        return endpoint.baseURL.appendingPathComponent("v1/realtime/calls")
+    }
+
+    private static func realtimeSessionRequest(
+        endpoint: EndpointConfiguration,
+        conversation: ConversationConfiguration,
+        profile: AICameraConfiguration
+    ) -> [String: Any] {
+        let width = 640
+        let height = 360
+        let mirror = profile.capture.mirrorVideo ? "mirrored horizontally" : "not mirrored"
+        var instructions = conversation.systemPrompt
+        instructions += """
+
+        Keep spoken replies concise. Use one short sentence unless the user asks for detail.
+        You can control a transparent three.js overlay on the camera with the provided client tools.
+        The overlay canvas is \(width)x\(height), origin is top-left in canvas pixels, and camera output is \(mirror).
+        For every visual request, call render_overlay before claiming it is visible.
+        The script runs immediately in an already-loaded page. Do not wait for DOMContentLoaded or another page event.
+        THREE and window.AICamera are already available. Add meshes to AICamera.scene, position AICamera.camera, and use AICamera.onFrame(function(dt) { ... }) for animation.
+        Follow this known-good pattern: const mesh = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.35, 32, 96), new THREE.MeshStandardMaterial({color: 0x8b5cf6})); AICamera.scene.add(mesh); AICamera.camera.position.set(0, 0, 5); AICamera.camera.lookAt(0, 0, 0); AICamera.onFrame(function(dt) { mesh.rotation.x += dt * 0.5; mesh.rotation.y += dt; });
+        Adapt the geometry, material, position, and animation to the request, but preserve that host API structure.
+        Do not create another canvas, scene, camera, renderer, render loop, or HTML document. Do not call requestAnimationFrame.
+        Keep the existing renderer background transparent. Do not use network requests, external assets, recording, or persistence.
+        A new render replaces the old one and expires automatically.
+        """
+        if conversation.includeSceneSummary {
+            instructions += "\nCurrent clean scene context: \(profile.overlays.script.allowSceneData ? "bounded sceneData is available to the script" : "no script sceneData is enabled")."
+        }
+        let renderParameters: [String: Any] = [
+            "type": "object",
+            "properties": [
+                "script": ["type": "string", "description": "Immediate JavaScript that adds objects to AICamera.scene and optionally registers AICamera.onFrame; do not create a renderer, canvas, DOM load handler, or requestAnimationFrame loop"],
+                "ttlSeconds": ["type": "number", "minimum": 1, "maximum": profile.overlays.script.maximumTTLSeconds]
+            ],
+            "required": ["script"],
+            "additionalProperties": false
+        ]
+        let clearParameters: [String: Any] = [
+            "type": "object",
+            "properties": [:],
+            "additionalProperties": false
+        ]
+        return [
+            "type": "realtime",
+            "model": endpoint.model ?? "",
+            "instructions": instructions,
+            "audio": ["output": ["voice": endpoint.options["voice"]?.stringValue ?? ""]],
+            "tool_choice": "auto",
+            "tools": [
+                [
+                    "type": "function",
+                    "name": "render_overlay",
+                    "description": "Replace the live transparent camera overlay with bounded three.js JavaScript. Canvas is \(width)x\(height) and transparent.",
+                    "parameters": renderParameters
+                ],
+                [
+                    "type": "function",
+                    "name": "clear_overlay",
+                    "description": "Remove the current generated camera overlay.",
+                    "parameters": clearParameters
+                ]
+            ]
+        ]
     }
 
     // MARK: - Script overlay
@@ -850,6 +1302,7 @@ final class AppModel: ObservableObject {
 
     private func beginStop(after completion: (@MainActor () -> Void)? = nil) {
         guard stopTask == nil else { return }
+        stopRealtimeConversation()
         cameraTestActive = false
         microphoneTestActive = false
         microphoneInputLevel = 0
@@ -914,6 +1367,7 @@ final class AppModel: ObservableObject {
     }
 
     private func stopForTermination() {
+        stopRealtimeConversation()
         cameraPermissionGeneration &+= 1
         microphonePermissionGeneration &+= 1
         cameraPermissionTask?.cancel()

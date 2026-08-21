@@ -12,6 +12,11 @@ configs:
   Debug: debug
   Release: release
 
+packages:
+  LiveKitWebRTC:
+    url: https://github.com/livekit/webrtc-xcframework.git
+    exactVersion: 144.7559.13
+
 settings:
   base:
     SWIFT_VERSION: "5.10"
@@ -63,6 +68,8 @@ targets:
         GENERATE_INFOPLIST_FILE: false
     dependencies:
       - target: AICameraCore
+      - package: LiveKitWebRTC
+        product: LiveKitWebRTC
       - sdk: ServiceManagement.framework
       - target: AICameraCameraExtension
         embed: true

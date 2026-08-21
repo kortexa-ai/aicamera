@@ -56,6 +56,7 @@ Configuration changes are applied by stopping current lanes, replacing the immut
 | `openAIVision` | `/v1/chat/completions` | JPEG frame and prompt |
 | `openAITranscription` | `/v1/audio/transcriptions` | PCM16 WAV |
 | `openAISpeech` | `/v1/audio/speech` | response text, voice, and speech format request |
+| `openAIRealtime` | `/v1/realtime/calls` | realtime session options and live conversation media |
 | `kortexaDetection` | `/detect` | multipart JPEG and confidence/model fields |
 | `kortexaPCMTranscription` | `/transcribe/pcm?sample_rate=16000` | raw signed PCM16 mono bytes |
 
@@ -107,7 +108,9 @@ A stage keeps at most one in-flight request and one replaceable pending frame. S
 
 ## Conversation
 
-The optional conversation selects transcription, agent, and speech endpoint IDs. These roles can be omitted independently. `transcriptionEnabled` controls ASR without disabling microphone passthrough or barge-in. `utteranceSeconds` controls fixed 16 kHz ASR windows from 0.5 through 30 seconds. The current speech gate rejects all-silence windows; it is not a full VAD.
+The optional conversation selects realtime, transcription, agent, and speech endpoint IDs. Set `realtimeEnabled` and `realtimeEndpointID` to use an `openAIRealtime` endpoint. Signaling uses the endpoint's HTTP(S) base URL and `POST /v1/realtime/calls`. Existing profiles default realtime to disabled when these keys are absent.
+
+The legacy transcription, agent, and speech roles remain valid as fallback paths and can coexist with realtime. These roles can be omitted independently. `transcriptionEnabled` controls ASR without disabling microphone passthrough or barge-in. `utteranceSeconds` controls fixed 16 kHz ASR windows from 0.5 through 30 seconds. The current speech gate rejects all-silence windows; it is not a full VAD.
 
 `activationMode` is `wakePhrase` or `alwaysListening`. Checked-in profiles use `wakePhrase`. In that mode, `respondToFinalTranscripts` allows only accepted final ASR text to reach the agent: a leading, case-insensitive `wakePhrase` either prefixes a command or arms the next speech-bearing utterance for `wakeWindowSeconds` (1 through 30). The phrase must contain at least one letter or number and is limited to 128 characters. The deadline uses each utterance's monotonic capture time, so ASR latency cannot extend or shorten the physical window. Fixed ASR windows can still split a phrase at a boundary; bounded overlap is deferred.
 

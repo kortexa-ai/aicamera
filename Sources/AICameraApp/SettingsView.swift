@@ -9,6 +9,12 @@ struct SettingsView: View {
     @State private var keychainAccount = ""
     @State private var keychainSecret = ""
     @State private var keychainMessage: String?
+    @State private var realtimeProvider = "openai"
+    @State private var realtimeBaseURL = "https://api.openai.com"
+    @State private var realtimeModel = "gpt-realtime"
+    @State private var realtimeVoice = "marin"
+    @State private var realtimeCredential = ""
+    @State private var realtimeMessage: String?
     @State private var wakePhraseDraft: String
 
     init(model: AppModel) {
@@ -208,6 +214,51 @@ struct SettingsView: View {
                 }
             }
 
+            GroupBox("OpenAI Realtime") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle(
+                        "Use Realtime conversation (legacy ASR, agent, and TTS remain fallback)",
+                        isOn: conversationBoolBinding(\.realtimeEnabled)
+                    )
+                    Picker("Provider", selection: $realtimeProvider) {
+                        Text("OpenAI API").tag("openai")
+                        Text("Compatible endpoint").tag("compatible")
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: realtimeProvider) { _, provider in
+                        if provider == "openai" {
+                            realtimeBaseURL = "https://api.openai.com"
+                            if realtimeModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                realtimeModel = "gpt-realtime"
+                            }
+                        }
+                    }
+                    HStack {
+                        TextField("Base URL", text: $realtimeBaseURL)
+                        TextField("Model", text: $realtimeModel)
+                        TextField("Voice", text: $realtimeVoice)
+                    }
+                    SecureField("API key or compatible bearer token (leave blank to keep saved value)", text: $realtimeCredential)
+                    HStack {
+                        Button("Save Realtime Configuration") { saveRealtimeConfiguration() }
+                            .buttonStyle(.borderedProminent)
+                        Spacer()
+                        Text("Credential: macOS Keychain")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Saving explicitly permits this endpoint to receive microphone audio, transcripts, prompts, and bounded scene metadata. Raw camera frames are not granted.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let realtimeMessage {
+                        Text(realtimeMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+
             HStack {
                 Text("Profile JSON").font(.headline)
                 Spacer()
@@ -244,7 +295,10 @@ struct SettingsView: View {
             }
         }
         .padding()
-        .onAppear { syncWakePhraseDraft() }
+        .onAppear {
+            syncWakePhraseDraft()
+            syncRealtimeDraft()
+        }
     }
 
     private var maintenanceSettings: some View {
@@ -340,6 +394,18 @@ struct SettingsView: View {
         }
     }
 
+    private func syncRealtimeDraft() {
+        let conversation = configuration.configuration.pipeline.conversation
+        guard let endpointID = conversation.realtimeEndpointID,
+              let endpoint = configuration.configuration.endpoints.first(where: { $0.id == endpointID }) else {
+            return
+        }
+        realtimeBaseURL = endpoint.baseURL.absoluteString
+        realtimeModel = endpoint.model ?? ""
+        realtimeVoice = endpoint.options["voice"]?.stringValue ?? ""
+        realtimeProvider = endpoint.baseURL.host?.lowercased() == "api.openai.com" ? "openai" : "compatible"
+    }
+
     private func importProfile() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
@@ -348,6 +414,7 @@ struct SettingsView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         configuration.importProfile(from: url)
         syncWakePhraseDraft()
+        syncRealtimeDraft()
     }
 
     private func exportProfile() {
@@ -357,6 +424,56 @@ struct SettingsView: View {
         panel.nameFieldStringValue = "AI Camera Profile.json"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         configuration.exportProfile(to: url)
+    }
+
+    private func saveRealtimeConfiguration() {
+        let rawURL = realtimeBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let baseURL = URL(string: rawURL), baseURL.host != nil else {
+            realtimeMessage = "Enter a valid Realtime base URL."
+            return
+        }
+        let endpointID = "openai-realtime"
+        let keychainAccount = "openai-realtime"
+        do {
+            if !realtimeCredential.isEmpty {
+                try AppSecretResolver().store(realtimeCredential, account: keychainAccount)
+                realtimeCredential = ""
+            }
+            let endpoint = EndpointConfiguration(
+                id: endpointID,
+                adapter: .openAIRealtime,
+                baseURL: baseURL,
+                model: realtimeModel.trimmingCharacters(in: .whitespacesAndNewlines),
+                auth: .init(kind: .bearerKeychain, reference: keychainAccount),
+                timeoutSeconds: 30,
+                options: ["voice": .string(realtimeVoice.trimmingCharacters(in: .whitespacesAndNewlines))]
+            )
+            configuration.update { profile in
+                profile.endpoints.removeAll(where: { $0.id == endpointID })
+                profile.endpoints.append(endpoint)
+                profile.pipeline.conversation.enabled = true
+                profile.pipeline.conversation.realtimeEnabled = true
+                profile.pipeline.conversation.realtimeEndpointID = endpointID
+                if !EndpointLocation.isLoopback(baseURL), let host = baseURL.host?.lowercased() {
+                    profile.privacy.networkMode = .allowListed
+                    if !profile.privacy.allowedHosts.map({ $0.lowercased() }).contains(host) {
+                        profile.privacy.allowedHosts.append(host)
+                    }
+                    profile.privacy.grants.removeAll(where: { $0.endpointID == endpointID })
+                    profile.privacy.grants.append(.init(
+                        endpointID: endpointID,
+                        allowedData: [.rawAudio, .transcript, .promptText, .sceneMetadata]
+                    ))
+                }
+            }
+            if configuration.validationMessage == nil {
+                realtimeMessage = "Realtime configuration saved."
+            } else {
+                realtimeMessage = configuration.validationMessage
+            }
+        } catch {
+            realtimeMessage = "Realtime credential save failed: \(error.localizedDescription)"
+        }
     }
 
     private func optionalBinding(_ keyPath: WritableKeyPath<CaptureConfiguration, String?>) -> Binding<String?> {
