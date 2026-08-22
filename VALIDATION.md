@@ -139,6 +139,10 @@ After acceptance, the normal wake-phrase profile was restored. The default input
 
 ## Remaining release boundary
 
-Development-signed device acceptance is complete. Restoring the Yeti/HyperX defaults is not a new audible human check; repeat that short check for the final distribution candidate. A distributable release still needs Developer ID signing, notarization, clean-machine install/upgrade/rollback/removal checks, and the user-owned reboot that clears retired extension generations.
+Development-signed device acceptance is complete. Restoring the Yeti/HyperX defaults is not a new audible human check; repeat that short check for the final distribution candidate.
+
+Build 13 was exported with `Developer ID Application: Franci Penov (C49792BN94)` after Xcode automatic signing created the app-specific direct-distribution profile for `ai.kortexa.aicamera` with `com.apple.developer.system-extension.install`. Strict nested `codesign` verification passed for the app, frameworks, camera system extension, and HAL driver. Apple accepted notarization submission `e0e13b26-0391-44a1-84c1-33db5a34a2b8`; the ticket was stapled and validated, and Gatekeeper accepted the app with source `Notarized Developer ID`. The final stapled archive is `build/AICamera-0.1.0-build13-notarized.zip`, SHA-256 `e162962aa5f2cb3521eec28c51365700c4585f6f7f9102a92d58c25d6ccb946b`.
+
+A distributable release still needs the planned installer package, clean-machine install/upgrade/rollback/removal checks, and the user-owned reboot that clears retired extension generations.
 
 These operations can change system state or request authorization. They remain manual and approval-gated.
