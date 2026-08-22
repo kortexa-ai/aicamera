@@ -1,6 +1,6 @@
-three.min.js is vendored from https://github.com/mrdoob/three.js (release 0.149.0).
+three.min.js is bundled from https://github.com/mrdoob/three.js (npm release 0.185.1).
 
-Copyright 2010-2023 Three.js Authors
+Copyright © 2010-2026 three.js authors
 SPDX-License-Identifier: MIT
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of

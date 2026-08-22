@@ -114,7 +114,9 @@ final class FrameStats {
 
 /// Minimal loopback HTTP/1.1 server (Connection: close) for the http channel.
 /// Serves the overlay page + three.min.js and accepts raw RGBA POST /frame.
-final class LoopbackServer {
+// Mutable listener state is confined to `queue`; callbacks only enqueue work
+// back onto that same queue.
+final class LoopbackServer: @unchecked Sendable {
     struct FrameArrival {
         let data: Data
         let renderMs: Double
@@ -455,6 +457,38 @@ final class SpikeMessageHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
+final class SpikeNavigationHandler: NSObject, WKNavigationDelegate {
+    let onLog: (String) -> Void
+
+    init(onLog: @escaping (String) -> Void) {
+        self.onLog = onLog
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        webView.evaluateJavaScript(
+            "[typeof window.THREE, window.THREE && window.THREE.REVISION, typeof window.WebGL2RenderingContext].join('|')"
+        ) { [onLog] value, error in
+            if let error {
+                onLog("page ready; JavaScript probe failed: \(error.localizedDescription)")
+            } else {
+                onLog("page ready; JavaScript probe: \(value ?? "<missing>")")
+            }
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        onLog("page navigation failed: \(error.localizedDescription)")
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        onLog("page load failed: \(error.localizedDescription)")
+    }
+}
+
 final class OverlaySpike {
     private let config: SpikeConfig
     private let compositor: Compositor
@@ -463,6 +497,7 @@ final class OverlaySpike {
     private var window: NSWindow?
     private var webView: WKWebView?
     private var handler: SpikeMessageHandler?
+    private var navigationHandler: SpikeNavigationHandler?
     private var server: LoopbackServer?
     private let outDir: URL
     private let startedAt = Date()
@@ -497,6 +532,11 @@ final class OverlaySpike {
 
         let frame = NSRect(x: 0, y: 0, width: config.width, height: config.height)
         let webView = WKWebView(frame: frame, configuration: configuration)
+        let navigationHandler = SpikeNavigationHandler(
+            onLog: { [weak self] line in self?.log(line) }
+        )
+        webView.navigationDelegate = navigationHandler
+        self.navigationHandler = navigationHandler
         self.webView = webView
 
         let window = NSWindow(

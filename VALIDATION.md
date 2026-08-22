@@ -1,5 +1,18 @@
 # Validation record
 
+## Build 14 dependency refresh and notarized distribution candidate
+
+Date: 2026-08-21
+
+Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
+
+- Updated LiveKit WebRTC from `144.7559.13` to `144.7559.14` and the vendored three.js overlay runtime from r149 to npm release `0.185.1` / r185. Both three.js copies are byte-identical classic-script bundles generated from the official ESM release and retain the upstream MIT license. Added `LSApplicationCategoryType=public.app-category.video` to remove the actionable archive metadata warning.
+- The overlay spike now records the page's three.js revision and WebGL2 availability. Its development-only content security policy permits its existing inline harness script; the production overlay keeps its strict external-script policy. The final r185 spike rendered 55 frames in two seconds at 29.7 fps through WebGL2 and completed alpha-compositing samples successfully.
+- `scripts/validate.sh` passed with 89 Swift tests and a successful unsigned four-target build. The strict C11 HAL harness and its AddressSanitizer/UndefinedBehaviorSanitizer and ThreadSanitizer variants passed. `git diff --check` passed. The audio driver remains the previously validated build 12; the app and camera extension report build 14.
+- The universal Release archive and exported app, frameworks, camera system extension, and HAL driver are signed with the existing Developer ID Application identity. Strict nested verification passed, and neither the app nor extension contains `get-task-allow`.
+- Apple accepted notarization submission `a790793d-5572-4bdd-b7e5-6aedaa3936eb` with no issues. The ticket was stapled and validated, strict signature verification still passed, and Gatekeeper accepted the app with source `Notarized Developer ID`. The final stapled archive is `build/AICamera-0.1.0-build14-notarized-final.zip`, SHA-256 `514407f0369f4cc88b3184e0559b408a09dd862bfd03d0c3b3b8b733d4e42a35`.
+- This work did not install or launch build 14, request media access, activate or replace the camera extension, copy or reload the HAL driver, register a login item, or change System Settings. Installed build 13 remains active and unchanged.
+
 ## Builds 11–13 post-restart demand-delivery validation
 
 Date: 2026-08-16
@@ -141,7 +154,7 @@ After acceptance, the normal wake-phrase profile was restored. The default input
 
 Development-signed device acceptance is complete. Restoring the Yeti/HyperX defaults is not a new audible human check; repeat that short check for the final distribution candidate.
 
-Build 13 was exported with `Developer ID Application: Franci Penov (C49792BN94)` after Xcode automatic signing created the app-specific direct-distribution profile for `ai.kortexa.aicamera` with `com.apple.developer.system-extension.install`. Strict nested `codesign` verification passed for the app, frameworks, camera system extension, and HAL driver. Apple accepted notarization submission `e0e13b26-0391-44a1-84c1-33db5a34a2b8`; the ticket was stapled and validated, and Gatekeeper accepted the app with source `Notarized Developer ID`. The final stapled archive is `build/AICamera-0.1.0-build13-notarized.zip`, SHA-256 `e162962aa5f2cb3521eec28c51365700c4585f6f7f9102a92d58c25d6ccb946b`.
+Build 13 was the previously installed and accepted Developer ID build. Build 14 is now the current non-installed distribution candidate after the dependency refresh. Its exact signing, notarization, and archive evidence is recorded at the top of this file.
 
 A distributable release still needs the planned installer package, clean-machine install/upgrade/rollback/removal checks, and the user-owned reboot that clears retired extension generations.
 
