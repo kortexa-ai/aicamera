@@ -114,6 +114,32 @@ final class ConfigurationTests: XCTestCase {
             XCTAssertEqual(error as? ConfigurationError, .missingEndpoint(stageID: "objects", endpointID: "missing"))
         }
     }
+
+    func testBuiltInDetectionDoesNotRequireEndpoint() {
+        var configuration = AICameraConfiguration.default
+        configuration.pipeline.videoStages = [
+            .init(
+                id: "builtin-objects",
+                kind: .objectDetection,
+                options: ["provider": .string("builtin")]
+            )
+        ]
+        XCTAssertNoThrow(try ConfigurationValidator.validate(configuration))
+    }
+
+    func testBuiltInDetectionRejectsRemoteEndpoint() {
+        var configuration = AICameraConfiguration.default
+        configuration.pipeline.videoStages = [
+            .init(
+                id: "builtin-objects",
+                kind: .objectDetection,
+                endpointID: "unexpected",
+                options: ["provider": .string("builtin")]
+            )
+        ]
+        XCTAssertThrowsError(try ConfigurationValidator.validate(configuration))
+    }
+
     func testCheckedInExampleProfilesDecodeAndValidate() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

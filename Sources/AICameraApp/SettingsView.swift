@@ -6,6 +6,7 @@ struct SettingsView: View {
     @ObservedObject var model: AppModel
     @ObservedObject private var configuration: ConfigurationController
     @ObservedObject private var loginItem: LoginItemController
+    @ObservedObject private var builtinVision: BuiltinVisionModelController
     @State private var voicePipelineMode = VoicePipelineMode.openAIRealtime
     @State private var realtimeBaseURL = ConfigurationController.openAIRealtimeBaseURL.absoluteString
     @State private var realtimeModel = ConfigurationController.defaultRealtimeModel
@@ -20,6 +21,7 @@ struct SettingsView: View {
         self.model = model
         self.configuration = model.configurationController
         self.loginItem = model.loginItemController
+        self.builtinVision = model.builtinVisionModelController
         self._conversationDraftEnabled = State(
             initialValue: model.configurationController.configuration.pipeline.conversation.enabled
         )
@@ -271,9 +273,7 @@ struct SettingsView: View {
 
             Section {
                 if visionEnabled {
-                    LabeledContent("Built-in object detection") {
-                        Text("YOLO · Coming soon").foregroundStyle(.secondary)
-                    }
+                    builtinVisionControls
                     Toggle("Gestures", isOn: videoStageBinding(kind: .handGesture))
                     if videoStageIsEnabled(.handGesture) {
                         Toggle("Show gesture labels", isOn: overlayBoolBinding(\.showGestureLabels))
@@ -312,6 +312,46 @@ struct SettingsView: View {
         .onAppear {
             syncDrafts()
         }
+    }
+
+    @ViewBuilder
+    private var builtinVisionControls: some View {
+        switch builtinVision.state {
+        case .notDownloaded:
+            LabeledContent("Built-in object detection") {
+                Button("Download \(BuiltinVisionModelController.modelName) · 9 MB") {
+                    builtinVision.download()
+                }
+            }
+        case .downloading:
+            LabeledContent("Built-in object detection") {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("Downloading…").foregroundStyle(.secondary)
+                }
+            }
+        case .ready:
+            HStack {
+                Toggle(
+                    "Built-in object detection · \(BuiltinVisionModelController.modelName)",
+                    isOn: builtinObjectDetectionBinding
+                )
+                Spacer()
+                Button(role: .destructive) { removeBuiltinVisionModel() } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Remove downloaded model")
+            }
+        case .failed(let message):
+            LabeledContent("Built-in object detection") {
+                Button("Try Download Again") { builtinVision.download() }
+            }
+            Text(message).font(.caption).foregroundStyle(.red)
+        }
+        Text("Apple's compact YOLOv3 Tiny model runs entirely on this Mac; camera frames are not uploaded.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 
     private var maintenanceSettings: some View {
@@ -593,6 +633,50 @@ struct SettingsView: View {
         } catch {
             realtimeMessage = "API key removal failed: \(error.localizedDescription)"
         }
+    }
+
+    private var builtinObjectDetectionBinding: Binding<Bool> {
+        Binding(
+            get: {
+                configuration.configuration.pipeline.videoStages.contains {
+                    $0.kind == .objectDetection
+                        && $0.options["provider"]?.stringValue == "builtin"
+                        && $0.enabled
+                }
+            },
+            set: { enabled in
+                configuration.update { profile in
+                    if let index = profile.pipeline.videoStages.firstIndex(where: {
+                        $0.kind == .objectDetection && $0.options["provider"]?.stringValue == "builtin"
+                    }) {
+                        profile.pipeline.videoStages[index].enabled = enabled
+                    } else {
+                        profile.pipeline.videoStages.append(.init(
+                            id: "builtin-objects",
+                            kind: .objectDetection,
+                            enabled: enabled,
+                            maximumRateHz: 5,
+                            maximumFrameAgeMilliseconds: 500,
+                            options: [
+                                "provider": .string("builtin"),
+                                "confidence": .number(0.35),
+                            ]
+                        ))
+                    }
+                    if enabled {
+                        profile.overlays.enabled = true
+                        profile.overlays.showDetectionBoxes = true
+                    }
+                }
+            }
+        )
+    }
+
+    private func removeBuiltinVisionModel() {
+        if builtinObjectDetectionBinding.wrappedValue {
+            builtinObjectDetectionBinding.wrappedValue = false
+        }
+        builtinVision.remove()
     }
 
     private func videoStageIsEnabled(_ kind: VideoStageKind) -> Bool {

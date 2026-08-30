@@ -163,7 +163,13 @@ public enum ConfigurationValidator {
             case .handGesture:
                 break
             case .objectDetection:
-                try requireEndpoint(stage.endpointID, for: stage.id, adapters: [.kortexaDetection], endpoints: configuration.endpoints)
+                if stage.options["provider"]?.stringValue == "builtin" {
+                    guard stage.endpointID == nil else {
+                        throw ConfigurationError.invalidText("built-in object detection endpoint")
+                    }
+                } else {
+                    try requireEndpoint(stage.endpointID, for: stage.id, adapters: [.kortexaDetection], endpoints: configuration.endpoints)
+                }
             case .visionLanguage:
                 try requireEndpoint(stage.endpointID, for: stage.id, adapters: [.openAIVision], endpoints: configuration.endpoints)
             }

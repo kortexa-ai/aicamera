@@ -29,6 +29,7 @@ actor PipelineCoordinator {
     private let configuration: AICameraConfiguration
     private let scene = SceneState()
     private let factory: AdapterFactory
+    private let builtinDetectionClient: (any DetectionClient)?
     private let onSnapshot: SnapshotHandler
     private let onSpeech: SpeechHandler
     private let onError: ErrorHandler
@@ -52,6 +53,7 @@ actor PipelineCoordinator {
     init(
         configuration: AICameraConfiguration,
         secrets: any SecretResolver,
+        builtinDetectionClient: (any DetectionClient)? = nil,
         onSnapshot: @escaping SnapshotHandler,
         onSpeech: @escaping SpeechHandler,
         onError: @escaping ErrorHandler
@@ -61,6 +63,7 @@ actor PipelineCoordinator {
             secrets: secrets,
             privacy: PrivacyGate(configuration: configuration.privacy)
         )
+        self.builtinDetectionClient = builtinDetectionClient
         self.onSnapshot = onSnapshot
         self.onSpeech = onSpeech
         self.onError = onError
@@ -180,13 +183,25 @@ actor PipelineCoordinator {
         defer { finish(stage: stage) }
         guard isRunning else { return }
         guard Date().timeIntervalSince(packet.capturedAt) * 1_000 <= Double(stage.maximumFrameAgeMilliseconds) else { return }
-        guard let endpointID = stage.endpointID,
-              let endpoint = configuration.endpoints.first(where: { $0.id == endpointID }) else { return }
         do {
             switch stage.kind {
             case .objectDetection:
-                let confidence = stage.options["confidence"]?.numberValue ?? endpoint.options["confidence"]?.numberValue ?? 0.25
-                let client = try factory.detection(for: endpoint)
+                let endpoint = stage.endpointID.flatMap { endpointID in
+                    configuration.endpoints.first(where: { $0.id == endpointID })
+                }
+                let confidence = stage.options["confidence"]?.numberValue
+                    ?? endpoint?.options["confidence"]?.numberValue
+                    ?? 0.25
+                let client: any DetectionClient
+                if stage.options["provider"]?.stringValue == "builtin" {
+                    guard let builtinDetectionClient else {
+                        throw LocalDetectionError.modelUnavailable
+                    }
+                    client = builtinDetectionClient
+                } else {
+                    guard let endpoint else { return }
+                    client = try factory.detection(for: endpoint)
+                }
                 let detections = try await client.detect(.init(
                     jpegData: packet.jpegData,
                     imageWidth: packet.width,
@@ -198,6 +213,8 @@ actor PipelineCoordinator {
                 _ = await scene.applyDetections(detections, frameID: packet.frameID)
                 await publish()
             case .visionLanguage:
+                guard let endpointID = stage.endpointID,
+                      let endpoint = configuration.endpoints.first(where: { $0.id == endpointID }) else { return }
                 let client = try factory.vision(for: endpoint)
                 let summary = try await client.analyze(.init(
                     jpegData: packet.jpegData,
@@ -215,6 +232,12 @@ actor PipelineCoordinator {
         } catch {
             onError("\(stage.id): \(error.localizedDescription)")
         }
+    }
+
+    private enum LocalDetectionError: LocalizedError {
+        case modelUnavailable
+
+        var errorDescription: String? { "The built-in object detection model is not available." }
     }
 
     private func finish(stage: VideoStageConfiguration) {

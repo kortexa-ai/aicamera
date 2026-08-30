@@ -69,6 +69,7 @@ final class AppModel: ObservableObject {
     let audioDriverManager = AudioDriverManager()
     let demandMonitor = MediaDemandMonitor()
     let loginItemController = LoginItemController()
+    let builtinVisionModelController = BuiltinVisionModelController()
 
     private var pipeline: PipelineCoordinator?
     private var videoController: VideoPipelineController?
@@ -675,6 +676,7 @@ final class AppModel: ObservableObject {
         let coordinator = PipelineCoordinator(
             configuration: configuration,
             secrets: AppSecretResolver(),
+            builtinDetectionClient: builtinVisionModelController.makeDetectionClient(),
             onSnapshot: { [weak self] snapshot in
                 guard gate.isActive else { return }
                 Task { @MainActor [weak model = self] in
