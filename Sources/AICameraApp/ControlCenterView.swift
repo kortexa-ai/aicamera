@@ -334,6 +334,7 @@ struct ControlCenterView: View {
         lane: AICameraSettingsLane? = nil
     ) {
         if let page { model.selectSettings(page: page, lane: lane) }
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         openSettings()
     }
