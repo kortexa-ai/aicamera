@@ -10,6 +10,12 @@ struct SettingsView: View {
     @State private var smartyAPIKey = ""
     @State private var smartyMessage: String?
     @State private var selectedAgentModel = ConfigurationController.smartyAgentModels[0]
+    @State private var voicePipelineMode = VoicePipelineMode.separateModels
+    @State private var realtimeBaseURL = ConfigurationController.openAIRealtimeBaseURL.absoluteString
+    @State private var realtimeModel = ConfigurationController.defaultRealtimeModel
+    @State private var realtimeVoice = ConfigurationController.defaultRealtimeVoice
+    @State private var realtimeCredential = ""
+    @State private var realtimeMessage: String?
     @State private var wakePhraseDraft: String
 
     init(model: AppModel) {
@@ -200,10 +206,13 @@ struct SettingsView: View {
                 Picker("Conversation model", selection: $selectedAgentModel) {
                     ForEach(ConfigurationController.smartyAgentModels, id: \.self) { Text($0).tag($0) }
                 }
+                .disabled(usesRealtimeVoicePipeline)
                 LabeledContent("Scene understanding", value: ConfigurationController.smartyVisionModel)
                 LabeledContent("Object detection", value: ConfigurationController.smartyDetectionModel)
                 LabeledContent("Speech recognition", value: ConfigurationController.smartyASRModel)
+                    .disabled(usesRealtimeVoicePipeline)
                 LabeledContent("Speech synthesis", value: ConfigurationController.smartySpeechModel)
+                    .disabled(usesRealtimeVoicePipeline)
                 SecureField("Kortexa API key (leave blank to keep the saved key)", text: $smartyAPIKey)
                 HStack {
                     Button("Use Current Smarty Models") { saveSmartyConfiguration() }
@@ -232,43 +241,93 @@ struct SettingsView: View {
             }
 
             Section("Conversation") {
+                Picker("Voice pipeline", selection: $voicePipelineMode) {
+                    ForEach(VoicePipelineMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .onChange(of: voicePipelineMode) { _, mode in
+                    handleVoicePipelineSelection(mode)
+                }
                 Toggle("Enabled", isOn: conversationBoolBinding(\.enabled))
-                    .disabled(!smartyModelsConfigured)
+                    .disabled(!selectedVoicePipelineIsConfigured)
                 Toggle("Transcribe microphone", isOn: conversationBoolBinding(\.transcriptionEnabled))
-                    .disabled(!conversationEnabled)
+                    .disabled(separateVoiceControlsDisabled)
                 Toggle("Agent replies", isOn: conversationBoolBinding(\.respondToFinalTranscripts))
-                    .disabled(!conversationEnabled)
+                    .disabled(separateVoiceControlsDisabled)
                 Toggle("Respond to gestures", isOn: conversationBoolBinding(\.respondToGestures))
-                    .disabled(!conversationEnabled || !videoStageIsEnabled(.handGesture))
-                Toggle("Use bounded Realtime conversation", isOn: conversationBoolBinding(\.realtimeEnabled))
-                    .disabled(!conversationEnabled)
+                    .disabled(separateVoiceControlsDisabled || !videoStageIsEnabled(.handGesture))
                 Picker("Voice", selection: speechVoiceBinding) {
                     Text("Adrian").tag("adrian")
                     Text("Archibald").tag("archibald")
                     Text("Avery").tag("avery")
                     Text("Mira").tag("mira")
                 }
-                .disabled(!conversationEnabled)
+                .disabled(separateVoiceControlsDisabled)
                 Picker("Activation", selection: conversationActivationBinding) {
                     Text("Wake phrase").tag(ConversationActivationMode.wakePhrase)
                     Text("Always listening").tag(ConversationActivationMode.alwaysListening)
                 }
                 .pickerStyle(.segmented)
-                .disabled(!conversationEnabled)
+                .disabled(separateVoiceControlsDisabled)
                 HStack {
                     TextField("Wake phrase", text: $wakePhraseDraft)
                         .onSubmit { applyWakePhrase() }
                     Button("Apply") { applyWakePhrase() }
                         .disabled(wakePhraseDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                .disabled(!conversationEnabled || configuration.configuration.pipeline.conversation.activationMode != .wakePhrase)
+                .disabled(
+                    separateVoiceControlsDisabled
+                        || configuration.configuration.pipeline.conversation.activationMode != .wakePhrase
+                )
                 Stepper(
                     "Wake window: \(Int(configuration.configuration.pipeline.conversation.wakeWindowSeconds)) seconds",
                     value: conversationDoubleBinding(\.wakeWindowSeconds),
                     in: 1...30,
                     step: 1
                 )
-                .disabled(!conversationEnabled || configuration.configuration.pipeline.conversation.activationMode != .wakePhrase)
+                .disabled(
+                    separateVoiceControlsDisabled
+                        || configuration.configuration.pipeline.conversation.activationMode != .wakePhrase
+                )
+                if usesRealtimeVoicePipeline {
+                    Text("Realtime handles microphone input, response generation, and speech as one bounded session. The separate ASR, agent, and TTS controls are disabled.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if usesRealtimeVoicePipeline {
+                Section("Realtime Voice") {
+                    if voicePipelineMode == .openAIRealtime {
+                        LabeledContent("Endpoint", value: ConfigurationController.openAIRealtimeBaseURL.absoluteString)
+                    } else {
+                        TextField("Compatible base URL", text: $realtimeBaseURL)
+                    }
+                    TextField("Model", text: $realtimeModel)
+                    TextField("Voice", text: $realtimeVoice)
+                    SecureField(
+                        "API key or compatible bearer token (leave blank to keep the saved key)",
+                        text: $realtimeCredential
+                    )
+                    HStack {
+                        Button("Save Realtime Configuration") { saveRealtimeConfiguration() }
+                            .buttonStyle(.borderedProminent)
+                        Spacer()
+                        Text("Credential: macOS Keychain")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Saving explicitly permits microphone audio, transcripts, prompts, and bounded scene metadata for this endpoint. Raw camera frames are not granted.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let realtimeMessage {
+                        Text(realtimeMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
             }
 
             Section("Overlays") {
@@ -376,6 +435,35 @@ struct SettingsView: View {
         }
     }
 
+    private func syncRealtimeDraft() {
+        let conversation = configuration.configuration.pipeline.conversation
+        guard conversation.realtimeEnabled,
+              let endpointID = conversation.realtimeEndpointID,
+              let endpoint = configuration.configuration.endpoints.first(where: { $0.id == endpointID }) else {
+            voicePipelineMode = .separateModels
+            return
+        }
+        realtimeBaseURL = endpoint.baseURL.absoluteString
+        realtimeModel = endpoint.model ?? ConfigurationController.defaultRealtimeModel
+        realtimeVoice = endpoint.options["voice"]?.stringValue ?? ConfigurationController.defaultRealtimeVoice
+        voicePipelineMode = endpoint.baseURL.host?.lowercased() == "api.openai.com"
+            ? .openAIRealtime
+            : .compatibleRealtime
+    }
+
+    private func handleVoicePipelineSelection(_ mode: VoicePipelineMode) {
+        realtimeMessage = nil
+        if mode == .openAIRealtime {
+            realtimeBaseURL = ConfigurationController.openAIRealtimeBaseURL.absoluteString
+            if realtimeModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                realtimeModel = ConfigurationController.defaultRealtimeModel
+            }
+        } else if mode == .separateModels,
+                  configuration.configuration.pipeline.conversation.realtimeEnabled {
+            configuration.update { $0.pipeline.conversation.realtimeEnabled = false }
+        }
+    }
+
     private func importProfile() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
@@ -395,6 +483,69 @@ struct SettingsView: View {
         configuration.exportProfile(to: url)
     }
 
+    private func saveRealtimeConfiguration() {
+        let rawURL = voicePipelineMode == .openAIRealtime
+            ? ConfigurationController.openAIRealtimeBaseURL.absoluteString
+            : realtimeBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let baseURL = URL(string: rawURL), baseURL.host != nil else {
+            realtimeMessage = "Enter a valid Realtime base URL."
+            return
+        }
+        let model = realtimeModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let voice = realtimeVoice.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !model.isEmpty, !voice.isEmpty else {
+            realtimeMessage = "Enter both a Realtime model and voice."
+            return
+        }
+        let endpointID = "openai-realtime"
+        let credentialAccount = ConfigurationController.realtimeCredentialAccount(for: baseURL)
+        do {
+            if !realtimeCredential.isEmpty {
+                try AppSecretResolver().store(
+                    realtimeCredential,
+                    account: credentialAccount
+                )
+                realtimeCredential = ""
+            }
+            let endpoint = EndpointConfiguration(
+                id: endpointID,
+                adapter: .openAIRealtime,
+                baseURL: baseURL,
+                model: model,
+                auth: .init(
+                    kind: .bearerKeychain,
+                    reference: credentialAccount
+                ),
+                timeoutSeconds: 30,
+                options: ["voice": .string(voice)]
+            )
+            configuration.update { profile in
+                profile.endpoints.removeAll(where: { $0.id == endpointID })
+                profile.endpoints.append(endpoint)
+                profile.pipeline.conversation.enabled = true
+                profile.pipeline.conversation.realtimeEnabled = true
+                profile.pipeline.conversation.realtimeEndpointID = endpointID
+                profile.pipeline.conversation.transcriptionEnabled = false
+                profile.pipeline.conversation.respondToFinalTranscripts = false
+                profile.pipeline.conversation.respondToGestures = false
+                profile.privacy.grants.removeAll(where: { $0.endpointID == endpointID })
+                if !EndpointLocation.isLoopback(baseURL), let host = baseURL.host?.lowercased() {
+                    profile.privacy.networkMode = .allowListed
+                    if !profile.privacy.allowedHosts.map({ $0.lowercased() }).contains(host) {
+                        profile.privacy.allowedHosts.append(host)
+                    }
+                    profile.privacy.grants.append(.init(
+                        endpointID: endpointID,
+                        allowedData: [.rawAudio, .transcript, .promptText, .sceneMetadata]
+                    ))
+                }
+            }
+            realtimeMessage = configuration.validationMessage ?? "Realtime configuration saved."
+        } catch {
+            realtimeMessage = "Realtime credential save failed: \(error.localizedDescription)"
+        }
+    }
+
     private var profileNameBinding: Binding<String> {
         Binding(
             get: { configuration.configuration.profileName },
@@ -410,6 +561,19 @@ struct SettingsView: View {
 
     private var conversationEnabled: Bool {
         configuration.configuration.pipeline.conversation.enabled
+    }
+
+    private var usesRealtimeVoicePipeline: Bool {
+        voicePipelineMode != .separateModels
+    }
+
+    private var selectedVoicePipelineIsConfigured: Bool {
+        if voicePipelineMode == .separateModels { return smartyModelsConfigured }
+        return configuration.configuration.pipeline.conversation.realtimeEndpointID != nil
+    }
+
+    private var separateVoiceControlsDisabled: Bool {
+        !conversationEnabled || usesRealtimeVoicePipeline
     }
 
     private func videoStageIsEnabled(_ kind: VideoStageKind) -> Bool {
@@ -556,6 +720,7 @@ struct SettingsView: View {
     private func syncDrafts() {
         syncWakePhraseDraft()
         syncSmartyDraft()
+        syncRealtimeDraft()
     }
 
     private var resolutionBinding: Binding<String> {
@@ -567,6 +732,22 @@ struct SettingsView: View {
                 configuration.update { $0.capture.width = parts[0]; $0.capture.height = parts[1] }
             }
         )
+    }
+}
+
+private enum VoicePipelineMode: String, CaseIterable, Identifiable {
+    case separateModels
+    case openAIRealtime
+    case compatibleRealtime
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .separateModels: return "Separate ASR + agent + TTS"
+        case .openAIRealtime: return "OpenAI Realtime"
+        case .compatibleRealtime: return "Compatible Realtime"
+        }
     }
 }
 

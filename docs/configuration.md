@@ -23,9 +23,11 @@ using the destination system's secure credential setup. Exported files are writt
 owner-only permissions.
 
 [`Examples/openai.json`](../Examples/openai.json) remains an importable compatibility example and
-contains no credential value. The normal Settings model choices are restricted to services verified
-as running on Smarty. The **Smarty Preset** button is available only in development builds, though
-its checked example remains available for profile import.
+contains no credential value. The separate ASR, agent, vision, detection, and TTS choices currently
+use services verified as running on Smarty. Realtime voice can instead use canonical OpenAI or a
+custom OpenAI-compatible endpoint. Broader hosted and custom provider configuration is tracked
+separately. The **Smarty Preset** button is available only in development builds, though its checked
+example remains available for profile import.
 
 ## Capture
 
@@ -114,7 +116,16 @@ A stage keeps at most one in-flight request and one replaceable pending frame. S
 
 ## Conversation
 
-The optional conversation selects realtime, transcription, agent, and speech endpoint IDs. Set `realtimeEnabled` and `realtimeEndpointID` to use an `openAIRealtime` endpoint. Signaling uses the endpoint's HTTP(S) base URL and `POST /v1/realtime/calls`. Existing profiles default realtime to disabled when these keys are absent.
+The optional conversation selects realtime, transcription, agent, and speech endpoint IDs. Settings
+offers mutually exclusive **Separate ASR + agent + TTS**, **OpenAI Realtime**, and **Compatible
+Realtime** voice pipelines. Saving either Realtime choice disables transcription-driven replies and
+gesture-driven legacy replies, preventing the separate response path from running concurrently.
+Set `realtimeEnabled` and `realtimeEndpointID` to use an `openAIRealtime` endpoint. Signaling uses the
+endpoint's HTTP(S) base URL and `POST /v1/realtime/calls`. Existing profiles default realtime to
+disabled when these keys are absent.
+
+Canonical OpenAI and each compatible host use distinct Keychain account references so changing a
+base URL cannot silently send one provider's saved bearer token to another provider.
 
 The legacy transcription, agent, and speech roles remain valid as fallback paths and can coexist with realtime. These roles can be omitted independently. `transcriptionEnabled` controls ASR without disabling microphone passthrough or barge-in. `utteranceSeconds` controls fixed 16 kHz ASR windows from 0.5 through 30 seconds. The current speech gate rejects all-silence windows; it is not a full VAD.
 

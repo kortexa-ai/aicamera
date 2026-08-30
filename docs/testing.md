@@ -105,6 +105,13 @@ Use the Smarty profile and check each real changed route, not only a health endp
 
 Start local services through their project service manager. Do not start duplicate or GPU-heavy services without checking current workloads and VRAM.
 
+For voice-pipeline selection, choose **OpenAI Realtime** and confirm the canonical endpoint is fixed
+to `https://api.openai.com`; choose **Compatible Realtime** and confirm the base URL is editable.
+In both modes, confirm separate transcription, agent-reply, voice, wake-phrase, and gesture-reply
+controls are disabled. Save the Realtime configuration and confirm its bearer credential is stored
+only in Keychain. Select **Separate ASR + agent + TTS** and confirm Realtime is disabled without
+deleting its endpoint metadata or credential reference.
+
 ### Product identity and Settings lifecycle
 
 1. Confirm Finder, `/Applications`, Dock, App Switcher, Login Items, and the popup header use the same full-color production icon.

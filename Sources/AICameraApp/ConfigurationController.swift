@@ -5,11 +5,22 @@ import Foundation
 final class ConfigurationController: ObservableObject {
     static let smartyAPIBaseURL = URL(string: "https://api.kortexa.ai")!
     static let smartyCredentialAccount = "kortexa-api"
+    static let realtimeCredentialAccount = "openai-realtime"
+    static let openAIRealtimeBaseURL = URL(string: "https://api.openai.com")!
+    static let defaultRealtimeModel = "gpt-realtime"
+    static let defaultRealtimeVoice = "marin"
     static let smartyAgentModels = ["qwen-3.8-27b", "lfm2.5-8b-a1b"]
     static let smartyVisionModel = "lfm2.5-vl-3b"
     static let smartySpeechModel = "qwen3-tts-customvoice-1.7b"
     static let smartyASRModel = "Qwen/Qwen3-ASR-1.7B"
     static let smartyDetectionModel = "yolo26n.pt"
+
+    static func realtimeCredentialAccount(for baseURL: URL) -> String {
+        guard let host = baseURL.host?.lowercased(), host != "api.openai.com" else {
+            return realtimeCredentialAccount
+        }
+        return "realtime-\(host)"
+    }
 
     @Published private(set) var configuration: AICameraConfiguration
     @Published private(set) var validationMessage: String?
@@ -248,7 +259,11 @@ final class ConfigurationController: ObservableObject {
         profile.pipeline.conversation.transcriptionEndpointID = "smarty-asr"
         profile.pipeline.conversation.agentEndpointID = "smarty-agent"
         profile.pipeline.conversation.speechEndpointID = "smarty-speech"
-        profile.pipeline.conversation.realtimeEndpointID = "smarty-realtime"
+        if !profile.pipeline.conversation.realtimeEnabled
+            || profile.pipeline.conversation.realtimeEndpointID == nil
+            || profile.pipeline.conversation.realtimeEndpointID == "smarty-realtime" {
+            profile.pipeline.conversation.realtimeEndpointID = "smarty-realtime"
+        }
         profile.privacy.networkMode = .allowListed
         if !profile.privacy.allowedHosts.map({ $0.lowercased() }).contains("api.kortexa.ai") {
             profile.privacy.allowedHosts.append("api.kortexa.ai")
