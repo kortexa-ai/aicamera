@@ -117,6 +117,7 @@ deleting its endpoint metadata or credential reference.
 1. Confirm Finder, `/Applications`, Dock, App Switcher, Login Items, and the popup header use the same full-color production icon.
 2. Confirm the menu-bar item uses the matching monochrome lens-and-sparkle template at standard and Retina scale in light and dark menu bars.
 3. With only the menu-bar popup open, confirm AI Camera is absent from the Dock and App Switcher. Open Settings and confirm it appears in both. Close Settings and confirm it returns to accessory-only behavior.
+4. Open Settings and press **Command-Q**. Confirm Settings closes, AI Camera remains active in the menu bar, and a compact reminder appears for three seconds with a working **Quit** button. Confirm the menu-bar control center's deliberate **Quit** action still terminates immediately.
 
 ## Logs and errors
 

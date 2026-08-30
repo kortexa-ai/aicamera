@@ -774,6 +774,7 @@ private struct SettingsWindowLifecycle: NSViewRepresentable {
             guard let window, self.window !== window else { return }
             detach(hideDock: false)
             self.window = window
+            AppLifecycleCoordinator.shared.settingsDidOpen(window)
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
             closeObserver = NotificationCenter.default.addObserver(
@@ -789,6 +790,9 @@ private struct SettingsWindowLifecycle: NSViewRepresentable {
             if let closeObserver {
                 NotificationCenter.default.removeObserver(closeObserver)
                 self.closeObserver = nil
+            }
+            if let window {
+                AppLifecycleCoordinator.shared.settingsDidClose(window)
             }
             window = nil
             if hideDock {

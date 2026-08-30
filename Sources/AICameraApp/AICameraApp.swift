@@ -13,5 +13,13 @@ struct AICameraApp: App {
         Settings {
             SettingsView(model: model)
         }
+        .commands {
+            CommandGroup(replacing: .appTermination) {
+                Button("Close Settings") {
+                    AppLifecycleCoordinator.shared.handleSettingsQuitCommand()
+                }
+                .keyboardShortcut("q")
+            }
+        }
     }
 }

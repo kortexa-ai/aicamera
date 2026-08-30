@@ -42,6 +42,7 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 - [ ] Use the canonical production icon in the planned About window when that window is implemented.
 - [x] Derive a clear monochrome macOS template image for the menu-bar/system-tray item from the same visual identity. Verify the tray glyph and full-color app icon look like one product at standard and Retina sizes.
 - [x] Keep the menu-bar host accessory-only, but show its production icon in the Dock and App Switcher while Settings is open; return to accessory-only behavior when Settings closes.
+- [x] Treat **Command-Q** from an open Settings window as **Close Window** so the camera service remains available. Show a compact three-second reminder with an explicit **Quit** action; deliberate Quit actions must still terminate immediately.
 - [ ] Add a quick status indicator to the menu-bar icon for **attention needed**, **idle**, **camera in use**, **microphone in use**, and **error**. Define an unambiguous combined camera-and-microphone state.
 - [ ] Add GitHub release update checks for production/release builds only. Development builds must not poll for updates, and update checks must not install anything without an explicit user action.
 

@@ -232,7 +232,7 @@ struct ControlCenterView: View {
             Divider()
             HStack {
                 Spacer()
-                Button("Quit") { NSApplication.shared.terminate(nil) }
+                Button("Quit") { AppLifecycleCoordinator.shared.quit() }
                     .controlSize(.small)
             }
         }
