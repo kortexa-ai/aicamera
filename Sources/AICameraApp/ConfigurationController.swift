@@ -3,8 +3,15 @@ import Foundation
 
 @MainActor
 final class ConfigurationController: ObservableObject {
+    static let smartyAPIBaseURL = URL(string: "https://api.kortexa.ai")!
+    static let smartyCredentialAccount = "kortexa-api"
+    static let smartyAgentModels = ["qwen-3.8-27b", "lfm2.5-8b-a1b"]
+    static let smartyVisionModel = "lfm2.5-vl-3b"
+    static let smartySpeechModel = "qwen3-tts-customvoice-1.7b"
+    static let smartyASRModel = "Qwen/Qwen3-ASR-1.7B"
+    static let smartyDetectionModel = "yolo26n.pt"
+
     @Published private(set) var configuration: AICameraConfiguration
-    @Published var jsonText: String = ""
     @Published private(set) var validationMessage: String?
     @Published private(set) var profileTransferMessage: String?
     @Published private(set) var isConfigurationUsable = true
@@ -18,12 +25,9 @@ final class ConfigurationController: ObservableObject {
         if FileManager.default.fileExists(atPath: fileURL.path) {
             do {
                 self.configuration = try store.load()
-                refreshJSON()
             } catch {
-                // Preserve invalid or newer-schema profiles. Show their original text so the
-                // operator can repair or copy it instead of silently replacing it.
+                // Preserve invalid or newer-schema profiles instead of silently replacing them.
                 self.configuration = .default
-                self.jsonText = Self.readProfileTextSafely(from: fileURL)
                 self.validationMessage = "The saved profile was not changed: \(error.localizedDescription)"
                 self.isConfigurationUsable = false
             }
@@ -31,9 +35,7 @@ final class ConfigurationController: ObservableObject {
             self.configuration = .default
             do {
                 try store.save(.default)
-                refreshJSON()
             } catch {
-                refreshJSON()
                 self.validationMessage = "The default profile could not be saved: \(error.localizedDescription)"
             }
         }
@@ -52,21 +54,6 @@ final class ConfigurationController: ObservableObject {
             configuration = candidate
             isConfigurationUsable = true
             validationMessage = nil
-            refreshJSON()
-        } catch {
-            validationMessage = error.localizedDescription
-        }
-    }
-
-    func applyJSON() {
-        do {
-            let candidate = try JSONDecoder().decode(AICameraConfiguration.self, from: Data(jsonText.utf8))
-            try ConfigurationValidator.validate(candidate)
-            try store.save(candidate)
-            configuration = candidate
-            isConfigurationUsable = true
-            validationMessage = nil
-            refreshJSON()
         } catch {
             validationMessage = error.localizedDescription
         }
@@ -80,7 +67,6 @@ final class ConfigurationController: ObservableObject {
             isConfigurationUsable = true
             validationMessage = nil
             profileTransferMessage = "Imported \(candidate.profileName)."
-            refreshJSON()
         } catch {
             profileTransferMessage = "Import failed: \(error.localizedDescription)"
         }
@@ -100,40 +86,40 @@ final class ConfigurationController: ObservableObject {
             configuration = try store.load()
             isConfigurationUsable = true
             validationMessage = nil
-            refreshJSON()
         } catch {
             isConfigurationUsable = false
             validationMessage = error.localizedDescription
         }
     }
 
-    func applyKortexaLocalPreset() {
-        let local = Self.kortexaLocalPreset()
+    func resetToDefaults() {
         do {
-            try store.save(local)
-            configuration = local
+            try store.save(.default)
+            configuration = .default
             isConfigurationUsable = true
             validationMessage = nil
-            refreshJSON()
+            profileTransferMessage = "Reset to the pure-passthrough defaults."
         } catch {
             validationMessage = error.localizedDescription
         }
     }
 
-    private func refreshJSON() {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        jsonText = (try? encoder.encode(configuration)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    func applySmartyPreset() {
+        let local = Self.smartyPreset()
+        do {
+            try store.save(local)
+            configuration = local
+            isConfigurationUsable = true
+            validationMessage = nil
+        } catch {
+            validationMessage = error.localizedDescription
+        }
     }
 
-    nonisolated private static func readProfileTextSafely(from url: URL) -> String {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
-        defer { try? handle.close() }
-        let limit = ConfigurationStore.maximumProfileBytes
-        guard let data = try? handle.read(upToCount: limit + 1), data.count <= limit else {
-            return "Profile is too large to display. The original file was preserved."
+    func configureSmartyModels(agentModel: String = "qwen-3.8-27b") {
+        update { profile in
+            Self.installSmartyEndpoints(in: &profile, agentModel: agentModel)
         }
-        return String(data: data, encoding: .utf8) ?? ""
     }
 
     nonisolated private static func defaultFileURL() -> URL {
@@ -141,78 +127,140 @@ final class ConfigurationController: ObservableObject {
         return base.appendingPathComponent("AI Camera", isDirectory: true).appendingPathComponent("profile.json")
     }
 
-    private static func kortexaLocalPreset() -> AICameraConfiguration {
+    private static func smartyPreset() -> AICameraConfiguration {
+        var profile = AICameraConfiguration(
+            profileName: "Kortexa Smarty",
+            pipeline: .init(
+                videoStages: [
+                    .init(id: "hands", kind: .handGesture, maximumRateHz: 8, maximumFrameAgeMilliseconds: 250),
+                    .init(
+                        id: "objects",
+                        kind: .objectDetection,
+                        endpointID: "smarty-objects",
+                        maximumRateHz: 2,
+                        maximumFrameAgeMilliseconds: 1_000,
+                        options: ["confidence": .number(0.35)]
+                    ),
+                    .init(
+                        id: "vision",
+                        kind: .visionLanguage,
+                        enabled: false,
+                        endpointID: "smarty-vision",
+                        maximumRateHz: 0.2,
+                        maximumFrameAgeMilliseconds: 2_000,
+                        prompt: "Describe only visual facts useful to a conversational camera assistant."
+                    ),
+                ],
+                conversation: .init(
+                    enabled: true,
+                    transcriptionEnabled: true,
+                    transcriptionEndpointID: "smarty-asr",
+                    agentEndpointID: "smarty-agent",
+                    speechEndpointID: "smarty-speech",
+                    speechVoice: "adrian"
+                )
+            ),
+            overlays: .init(enabled: true)
+        )
+        installSmartyEndpoints(in: &profile, agentModel: smartyAgentModels[0])
+        return profile
+    }
+
+    private static func installSmartyEndpoints(
+        in profile: inout AICameraConfiguration,
+        agentModel: String
+    ) {
+        let selectedAgentModel = smartyAgentModels.contains(agentModel) ? agentModel : smartyAgentModels[0]
+        let auth = EndpointAuthConfiguration(
+            kind: .apiKeyKeychain,
+            reference: smartyCredentialAccount,
+            header: "x-api-key",
+            prefix: ""
+        )
         let endpoints: [EndpointConfiguration] = [
             .init(
-                id: "objects",
+                id: "smarty-objects",
                 adapter: .kortexaDetection,
-                baseURL: URL(string: "http://127.0.0.1:4001")!,
+                baseURL: smartyAPIBaseURL.appendingPathComponent("vision"),
+                model: smartyDetectionModel,
+                auth: auth,
                 timeoutSeconds: 4,
                 options: ["confidence": .number(0.35)]
             ),
             .init(
-                id: "asr",
-                adapter: .kortexaPCMTranscription,
-                baseURL: URL(string: "http://127.0.0.1:4002")!,
+                id: "smarty-asr",
+                adapter: .openAITranscription,
+                baseURL: smartyAPIBaseURL,
+                model: smartyASRModel,
+                auth: auth,
                 timeoutSeconds: 20
             ),
             .init(
-                id: "agent",
+                id: "smarty-agent",
                 adapter: .openAIChat,
-                baseURL: URL(string: "http://127.0.0.1:2030")!,
-                model: "mlx-community/Qwen3.5-2B-MLX-4bit",
+                baseURL: smartyAPIBaseURL,
+                model: selectedAgentModel,
+                auth: auth,
                 timeoutSeconds: 30,
                 options: ["temperature": .number(0.4), "max_tokens": .number(256)]
             ),
             .init(
-                id: "vision",
+                id: "smarty-vision",
                 adapter: .openAIVision,
-                baseURL: URL(string: "http://127.0.0.1:2052")!,
-                path: "/chat/completions",
-                model: "LiquidAI/LFM2.5-VL-450M-MLX-8bit",
+                baseURL: smartyAPIBaseURL,
+                model: smartyVisionModel,
+                auth: auth,
                 timeoutSeconds: 20
             ),
             .init(
-                id: "speech",
+                id: "smarty-speech",
                 adapter: .openAISpeech,
-                baseURL: URL(string: "http://127.0.0.1:4003")!,
-                model: "qwen3-tts-customvoice-1.7b",
+                baseURL: smartyAPIBaseURL,
+                model: smartySpeechModel,
+                auth: auth,
                 timeoutSeconds: 60,
-                options: ["streamingPCM": .bool(true)]
-            ),
-        ]
-        let stages: [VideoStageConfiguration] = [
-            .init(id: "hands", kind: .handGesture, maximumRateHz: 8, maximumFrameAgeMilliseconds: 250),
-            .init(
-                id: "objects",
-                kind: .objectDetection,
-                endpointID: "objects",
-                maximumRateHz: 2,
-                maximumFrameAgeMilliseconds: 1_000,
-                options: ["confidence": .number(0.35)]
+                options: ["streamingPCM": .bool(true), "pcmSampleRate": .number(24_000)]
             ),
             .init(
-                id: "vision",
-                kind: .visionLanguage,
-                enabled: false,
-                endpointID: "vision",
-                maximumRateHz: 0.2,
-                maximumFrameAgeMilliseconds: 2_000,
-                prompt: "Describe only visual facts useful to a conversational camera assistant."
+                id: "smarty-realtime",
+                adapter: .openAIRealtime,
+                baseURL: smartyAPIBaseURL,
+                model: selectedAgentModel,
+                auth: auth,
+                timeoutSeconds: 30,
+                options: ["voice": .string("adrian")]
             ),
         ]
-        return AICameraConfiguration(
-            profileName: "Kortexa local",
-            endpoints: endpoints,
-            pipeline: .init(
-                videoStages: stages,
-                conversation: .init(
-                    enabled: true,
-                    transcriptionEndpointID: "asr",
-                    agentEndpointID: "agent",
-                    speechEndpointID: "speech"
-                )
-            )
-        )
+
+        let managedIDs = Set(endpoints.map(\.id))
+        profile.endpoints.removeAll { managedIDs.contains($0.id) }
+        profile.endpoints.append(contentsOf: endpoints)
+        for index in profile.pipeline.videoStages.indices {
+            switch profile.pipeline.videoStages[index].kind {
+            case .objectDetection:
+                profile.pipeline.videoStages[index].endpointID = "smarty-objects"
+            case .visionLanguage:
+                profile.pipeline.videoStages[index].endpointID = "smarty-vision"
+            case .handGesture:
+                break
+            }
+        }
+        profile.pipeline.conversation.transcriptionEndpointID = "smarty-asr"
+        profile.pipeline.conversation.agentEndpointID = "smarty-agent"
+        profile.pipeline.conversation.speechEndpointID = "smarty-speech"
+        profile.pipeline.conversation.realtimeEndpointID = "smarty-realtime"
+        profile.privacy.networkMode = .allowListed
+        if !profile.privacy.allowedHosts.map({ $0.lowercased() }).contains("api.kortexa.ai") {
+            profile.privacy.allowedHosts.append("api.kortexa.ai")
+        }
+        profile.privacy.grants.removeAll { managedIDs.contains($0.endpointID) }
+        profile.privacy.grants.append(contentsOf: [
+            .init(endpointID: "smarty-objects", allowedData: [.rawFrame]),
+            .init(endpointID: "smarty-asr", allowedData: [.rawAudio]),
+            .init(endpointID: "smarty-agent", allowedData: [.promptText, .transcript, .sceneMetadata]),
+            .init(endpointID: "smarty-vision", allowedData: [.rawFrame, .promptText]),
+            .init(endpointID: "smarty-speech", allowedData: [.promptText]),
+            .init(endpointID: "smarty-realtime", allowedData: [.rawAudio, .transcript, .promptText, .sceneMetadata]),
+        ])
     }
 }

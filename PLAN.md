@@ -38,8 +38,10 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 ### Installation, onboarding, and product identity
 
 - [ ] Improve first-install and update guidance for enabling the media extension. Detect approval state, give an explicit step-by-step path, and offer to open the relevant System Settings/Preferences page when macOS permits it.
-- [ ] Create a production app icon and use the same canonical asset in Finder, Login Items, Extensions, the popup header, and About. The app icon shown inside the popup must not drift from the bundled application icon.
-- [ ] Derive a clear monochrome macOS template image for the menu-bar/system-tray item from the same visual identity. Verify the tray glyph and full-color app icon look like one product at standard and Retina sizes.
+- [x] Create a production app icon and use the same canonical asset in Finder, Login Items, Extensions, the popup header, Dock, App Switcher, and Settings. The app icon shown inside the popup must not drift from the bundled application icon.
+- [ ] Use the canonical production icon in the planned About window when that window is implemented.
+- [x] Derive a clear monochrome macOS template image for the menu-bar/system-tray item from the same visual identity. Verify the tray glyph and full-color app icon look like one product at standard and Retina sizes.
+- [x] Keep the menu-bar host accessory-only, but show its production icon in the Dock and App Switcher while Settings is open; return to accessory-only behavior when Settings closes.
 - [ ] Add a quick status indicator to the menu-bar icon for **attention needed**, **idle**, **camera in use**, **microphone in use**, and **error**. Define an unambiguous combined camera-and-microphone state.
 - [ ] Add GitHub release update checks for production/release builds only. Development builds must not poll for updates, and update checks must not install anything without an explicit user action.
 
@@ -60,6 +62,8 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 - [x] Add validated import and export of versioned profiles so development presets such as **Kortexa Local** can be moved between installations quickly.
 - [x] Keep secrets out of ordinary profile exports. Export secret references by default and require a separate explicit secure flow for any secret transfer.
 - [x] Ship an importable example OpenAI profile with OpenAI endpoint definitions and an `OPENAI_API_KEY` environment/Keychain reference. Never include a real API key in the repository or app bundle.
+- [x] Replace the raw Profile JSON editor with validated individual profile, model, vision, conversation, overlay, import, export, reload, and reset controls.
+- [x] Restrict normal Settings choices to models and media services verified as running on Smarty; store the Kortexa API credential beside those AI controls in Keychain and keep maintenance credential-free.
 - [ ] Add the bounded WebRTC conversation session described in `docs/realtime-conversation.md`: canonical OpenAI Realtime, self-hosted OpenAI-compatible Realtime, and an explicitly experimental ChatGPT/Codex subscription provider; keep separate ASR, agent, and TTS stages as the selectable fallback.
 - [ ] Add one-shot **Talk** activation with server VAD and **Stop**: connect with microphone egress closed, transmit only during an explicitly armed utterance, close the gate on VAD stop/timeout/cancellation, and route decoded remote PCM through the existing bounded virtual-microphone mixer.
 - [ ] Add Realtime Settings for provider, endpoint, model, voice, and Keychain-backed credentials or OAuth; profiles store secret references only. Test the standard protocol against canonical OpenAI and `api.server`.
@@ -74,6 +78,7 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 ### Natural interaction and conversation UX
 
 - [x] Expose activation mode and wake-window controls in Settings; they are currently Profile JSON options.
+- [x] Make local Apple Vision gesture classification palm-relative and rotation-independent, with deterministic open-palm, fist, point, victory, and pinch tests and an individual Settings toggle.
 - [ ] Show speaker-labelled user transcripts and agent responses in one bounded conversation view and optional overlay.
 - [ ] Let the agent choose a voice only from a configured local allowlist, with a deterministic fallback.
 

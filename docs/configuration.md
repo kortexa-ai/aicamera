@@ -6,9 +6,9 @@ AI Camera reads one schema-versioned JSON profile from:
 ~/Library/Application Support/AI Camera/profile.json
 ```
 
-Edit it in the Settings window. **Apply JSON** validates and atomically saves it. **Reload from disk** discards unsaved editor text. Device selections in Settings also update this file. A valid change stops the currently active lanes and then reconciles current client demand with new controller snapshots.
+Settings exposes the profile as individual controls and validates and atomically saves each change. **Reload** restores the last valid profile from disk. Import and export remain available for moving a complete profile. A valid change stops the currently active lanes and then reconciles current client demand with new controller snapshots.
 
-A new profile is operational without model or hardware configuration. It uses system-default inputs with mirroring, overlays, video stages, conversation, and transcription disabled. This is the pure-passthrough base mode. If an existing profile is corrupt, too new, or invalid, the app preserves its text and blocks automatic camera and microphone capture until **Validate & Save** succeeds; it never silently runs the in-memory default instead. Start with [`Examples/kortexa-local.json`](../Examples/kortexa-local.json) or [`Examples/remote-openai-compatible.json`](../Examples/remote-openai-compatible.json) only when AI processing is wanted. The local preset is an example, not a runtime requirement.
+A new profile is operational without model or hardware configuration. It uses system-default inputs with mirroring, overlays, video stages, conversation, and transcription disabled. This is the pure-passthrough base mode. If an existing profile is corrupt, too new, or invalid, the app preserves its file and blocks automatic camera and microphone capture until the user imports a valid profile or explicitly resets to defaults; it never silently runs the in-memory default instead. Start with [`Examples/kortexa-local.json`](../Examples/kortexa-local.json) only when AI processing is wanted. The Smarty preset is an example, not a runtime requirement.
 
 ## Import and export
 
@@ -22,10 +22,10 @@ does not read or copy the referenced secret values during export; move those sec
 using the destination system's secure credential setup. Exported files are written with
 owner-only permissions.
 
-[`Examples/openai.json`](../Examples/openai.json) is an importable canonical OpenAI profile. It
-references `OPENAI_API_KEY` and contains no credential value. The **Kortexa Local Preset** button
-is available only in development builds, though its checked example remains available for
-development profile import.
+[`Examples/openai.json`](../Examples/openai.json) remains an importable compatibility example and
+contains no credential value. The normal Settings model choices are restricted to services verified
+as running on Smarty. The **Smarty Preset** button is available only in development builds, though
+its checked example remains available for profile import.
 
 ## Capture
 
@@ -68,6 +68,12 @@ For streamed PCM, `x-sample-rate` on the response takes precedence over numeric 
 
 ## Authentication
 
+The Kortexa API key field appears under **Settings → AI & Advanced → Models on Smarty**, beside
+the features that use it. The key authenticates HTTPS AI requests routed by `api.kortexa.ai` to
+Smarty. Pure passthrough, local Apple Vision gesture detection, virtual-device maintenance, and
+login-item management do not need it. The value is stored under Keychain service
+`ai.kortexa.aicamera`, account `kortexa-api`; the profile stores only that account reference.
+
 `auth.kind` is one of:
 
 - `none`
@@ -87,7 +93,7 @@ For streamed PCM, `x-sample-rate` on the response takes precedence over numeric 
 }
 ```
 
-The Keychain service name is `ai.kortexa.aicamera`. Add a secret without putting it in shell history:
+For an advanced imported endpoint, add a secret without putting it in shell history:
 
 ```sh
 security add-generic-password -U \

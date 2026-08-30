@@ -22,7 +22,7 @@ settings:
     SWIFT_VERSION: "5.10"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "14"
+    CURRENT_PROJECT_VERSION: "15"
     CODE_SIGN_STYLE: Automatic
     CLANG_ENABLE_MODULES: true
   configs:
@@ -53,6 +53,8 @@ targets:
     sources:
       - path: Sources/AICameraApp
       - path: Sources/AICameraShared
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
       - path: Resources/Overlay
         buildPhase: resources
     configFiles:
@@ -64,6 +66,7 @@ targets:
         PRODUCT_NAME: AI Camera
         INFOPLIST_FILE: Resources/App/Info.plist
         CODE_SIGN_ENTITLEMENTS: Resources/App/AICamera.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_HARDENED_RUNTIME: true
         GENERATE_INFOPLIST_FILE: false
     dependencies:

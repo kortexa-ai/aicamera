@@ -25,35 +25,28 @@ final class GestureDetector {
         }
         guard let wrist = point(.wrist),
               let thumb = point(.thumbTip),
-              let index = point(.indexTip), let indexPIP = point(.indexPIP),
-              let middle = point(.middleTip), let middlePIP = point(.middlePIP),
-              let ring = point(.ringTip), let ringPIP = point(.ringPIP),
-              let little = point(.littleTip), let littlePIP = point(.littlePIP) else { return nil }
-
-        func distance(_ a: VNRecognizedPoint, _ b: VNRecognizedPoint) -> Double {
-            hypot(Double(a.location.x - b.location.x), Double(a.location.y - b.location.y))
+              let index = point(.indexTip), let indexPIP = point(.indexPIP), let indexMCP = point(.indexMCP),
+              let middle = point(.middleTip), let middlePIP = point(.middlePIP), let middleMCP = point(.middleMCP),
+              let ring = point(.ringTip), let ringPIP = point(.ringPIP), let ringMCP = point(.ringMCP),
+              let little = point(.littleTip), let littlePIP = point(.littlePIP), let littleMCP = point(.littleMCP) else {
+            return nil
         }
-        let indexUp = index.location.y > indexPIP.location.y + 0.025
-        let middleUp = middle.location.y > middlePIP.location.y + 0.025
-        let ringUp = ring.location.y > ringPIP.location.y + 0.02
-        let littleUp = little.location.y > littlePIP.location.y + 0.02
 
-        let kind: GestureKind
-        if distance(thumb, index) < 0.075 {
-            kind = .pinch
-        } else if indexUp && middleUp && !ringUp && !littleUp {
-            kind = .victory
-        } else if indexUp && !middleUp && !ringUp && !littleUp {
-            kind = .pointing
-        } else if indexUp && middleUp && ringUp && littleUp {
-            kind = .openPalm
-        } else if !indexUp && !middleUp && !ringUp && !littleUp,
-                  [index, middle, ring, little].allSatisfy({ distance($0, wrist) < 0.42 }) {
-            kind = .closedFist
-        } else {
-            kind = .unknown
+        func normalized(_ value: VNRecognizedPoint) -> AICameraCore.NormalizedPoint {
+            .init(x: Double(value.location.x), y: Double(value.location.y))
         }
-        let confidence = Double([thumb, index, middle, ring, little].map(\.confidence).min() ?? 0)
+        let landmarks: [HandJoint: AICameraCore.NormalizedPoint] = [
+            .wrist: normalized(wrist), .thumbTip: normalized(thumb),
+            .indexTip: normalized(index), .indexPIP: normalized(indexPIP), .indexMCP: normalized(indexMCP),
+            .middleTip: normalized(middle), .middlePIP: normalized(middlePIP), .middleMCP: normalized(middleMCP),
+            .ringTip: normalized(ring), .ringPIP: normalized(ringPIP), .ringMCP: normalized(ringMCP),
+            .littleTip: normalized(little), .littlePIP: normalized(littlePIP), .littleMCP: normalized(littleMCP),
+        ]
+        guard let kind = HandGestureClassifier.classify(landmarks) else { return nil }
+        let confidence = Double([
+            wrist, thumb, index, indexPIP, indexMCP, middle, middlePIP, middleMCP,
+            ring, ringPIP, ringMCP, little, littlePIP, littleMCP,
+        ].map(\.confidence).min() ?? 0)
         var x = Double(index.location.x)
         if mirrored { x = 1 - x }
         let location = NormalizedPoint(x: x, y: 1 - Double(index.location.y))

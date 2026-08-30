@@ -9,7 +9,11 @@ struct ControlCenterView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("AI Camera", systemImage: "camera.aperture")
+                Image(nsImage: NSApplication.shared.applicationIconImage)
+                    .resizable()
+                    .frame(width: 28, height: 28)
+                    .accessibilityHidden(true)
+                Text("AI Camera")
                     .font(.headline)
                 Spacer()
                 Circle()

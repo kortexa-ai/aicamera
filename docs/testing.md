@@ -30,7 +30,7 @@ This builds temporary AddressSanitizer/UndefinedBehaviorSanitizer and ThreadSani
 
 ## Unit coverage
 
-The 72 Swift tests cover pure-passthrough defaults, profile round trips and legacy migration, wake-phrase matching and capture-time expiry, nominal frame-rate matching, loop-safe physical-input selection, local-test demand priority/cancellation, normalized microphone levels, the camera custom-property address and bounded snapshot codec, remote privacy grants, adapter normalization, WAV encoding/decoding, streamed-speech metadata, cumulative and buffer limits, redirect rejection, startup and active-body cancellation, per-modality stale results, result expiry, and latest-value mailbox replacement. App media orchestration, login registration, physical-device release, and live CoreMediaIO lifecycle remain signed, manual per-release checks. Signed results and the current automated boundary are recorded in [`VALIDATION.md`](../VALIDATION.md).
+The 93 Swift tests cover pure-passthrough defaults, profile round trips and legacy migration, palm-relative rotation-independent gesture classification, wake-phrase matching and capture-time expiry, nominal frame-rate matching, loop-safe physical-input selection, local-test demand priority/cancellation, normalized microphone levels, the camera custom-property address and bounded snapshot codec, remote privacy grants, adapter normalization, WAV encoding/decoding, streamed-speech metadata, cumulative and buffer limits, redirect rejection, startup and active-body cancellation, per-modality stale results, result expiry, and latest-value mailbox replacement. App media orchestration, login registration, physical-device release, and live CoreMediaIO lifecycle remain signed, manual per-release checks. Signed results and the current automated boundary are recorded in [`VALIDATION.md`](../VALIDATION.md).
 
 ## Manual device acceptance
 
@@ -77,7 +77,7 @@ Use a signed app installed in `/Applications`.
 2. With local endpoints observed or disabled, open each virtual device and confirm no inference or network request occurs. Confirm output contains the selected input without annotations, mirroring, or generated speech.
 3. Change the system-default camera or microphone and confirm the next lane start resolves the new compatible hardware default without selecting either AI Camera virtual device as its own input.
 4. Enable **Open AI Camera at login**, log out/in for the signed acceptance pass, and confirm the host becomes available without a visible main window. Disable the item and confirm its state remains off.
-5. Replace the saved profile with a controlled invalid document. Confirm its text is preserved, both automatic lanes remain stopped, and the panel directs the user to repair and validate it. Restore a valid profile afterward.
+5. Replace the saved profile with a controlled invalid document. Confirm its file is preserved, both automatic lanes remain stopped, and Settings offers explicit import and reset choices. Restore a valid profile afterward.
 6. Force one bounded transient camera and audio start failure while demand remains active. Confirm the panel reports attention required and **Retry** can recover without closing the client.
 7. Quit the host explicitly and confirm documented host-absent behavior: animated camera placeholder and microphone silence. A client must not be claimed to relaunch the quit host.
 
@@ -92,7 +92,9 @@ Use a signed app installed in `/Applications`.
 
 ### Models
 
-Use a profile with the services you intend to test. Check each real changed route, not only a health endpoint:
+In **Settings → AI & Advanced**, confirm only the verified running Smarty choices are shown: `qwen-3.8-27b` or `lfm2.5-8b-a1b` for conversation, `lfm2.5-vl-3b` for scene understanding, `yolo26n.pt` for detection, `Qwen/Qwen3-ASR-1.7B` for ASR, and `qwen3-tts-customvoice-1.7b` for speech. Save the Kortexa API key there and confirm Privacy & Maintenance contains no unrelated generic secret editor.
+
+Use the Smarty profile and check each real changed route, not only a health endpoint:
 
 - submit one JPEG to the configured detector;
 - submit one 16 kHz PCM window to ASR;
@@ -102,6 +104,12 @@ Use a profile with the services you intend to test. Check each real changed rout
 - when `streamingPCM` is enabled, request raw mono PCM16, verify its sample-rate metadata, first nonzero virtual-microphone samples, bounded completion, and cancellation.
 
 Start local services through their project service manager. Do not start duplicate or GPU-heavy services without checking current workloads and VRAM.
+
+### Product identity and Settings lifecycle
+
+1. Confirm Finder, `/Applications`, Dock, App Switcher, Login Items, and the popup header use the same full-color production icon.
+2. Confirm the menu-bar item uses the matching monochrome lens-and-sparkle template at standard and Retina scale in light and dark menu bars.
+3. With only the menu-bar popup open, confirm AI Camera is absent from the Dock and App Switcher. Open Settings and confirm it appears in both. Close Settings and confirm it returns to accessory-only behavior.
 
 ## Logs and errors
 

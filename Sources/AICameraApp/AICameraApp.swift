@@ -5,7 +5,7 @@ struct AICameraApp: App {
     @StateObject private var model = AppModel()
 
     var body: some Scene {
-        MenuBarExtra("AI Camera", systemImage: model.isRunning ? "camera.fill" : "camera") {
+        MenuBarExtra("AI Camera", image: "MenuBarIcon") {
             ControlCenterView(model: model)
         }
         .menuBarExtraStyle(.window)
