@@ -98,6 +98,7 @@ public final class RealtimeWebRTCSession: NSObject, @unchecked Sendable {
 
     private let signalingURL: URL
     private let credential: HeaderCredential
+    private let additionalHeaders: [String: String]
     private let stateQueue = DispatchQueue(label: "ai.kortexa.aicamera.realtime-webrtc")
     private let eventContinuation: AsyncStream<Event>.Continuation
 
@@ -118,9 +119,14 @@ public final class RealtimeWebRTCSession: NSObject, @unchecked Sendable {
     private var connectedEmitted = false
     private var completedCallIDs = Set<String>()
 
-    public init(signalingURL: URL, credential: HeaderCredential) {
+    public init(
+        signalingURL: URL,
+        credential: HeaderCredential,
+        additionalHeaders: [String: String] = [:]
+    ) {
         self.signalingURL = signalingURL
         self.credential = credential
+        self.additionalHeaders = additionalHeaders
         var continuation: AsyncStream<Event>.Continuation!
         self.events = AsyncStream(bufferingPolicy: .bufferingNewest(256)) { continuation = $0 }
         self.eventContinuation = continuation
@@ -318,6 +324,9 @@ public final class RealtimeWebRTCSession: NSObject, @unchecked Sendable {
         request.httpMethod = "POST"
         request.timeoutInterval = Limit.requestSeconds
         request.setValue(credential.value, forHTTPHeaderField: credential.field)
+        for (field, value) in additionalHeaders {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.setValue("text/plain, application/sdp", forHTTPHeaderField: "Accept")
         request.httpBody = body

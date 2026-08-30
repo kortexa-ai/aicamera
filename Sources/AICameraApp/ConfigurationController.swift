@@ -7,8 +7,12 @@ final class ConfigurationController: ObservableObject {
     static let smartyCredentialAccount = "kortexa-api"
     static let realtimeCredentialAccount = "openai-realtime"
     static let openAIRealtimeBaseURL = URL(string: "https://api.openai.com")!
-    static let defaultRealtimeModel = "gpt-realtime"
+    static let kortexaRealtimeURL = URL(string: "https://api.kortexa.ai/v1/realtime/calls")!
+    static let defaultRealtimeModel = "gpt-realtime-2"
     static let defaultRealtimeVoice = "marin"
+    static let realtimeModels = ["gpt-realtime-2", "gpt-realtime-1.5", "gpt-realtime"]
+    static let realtimeVoices = ["marin", "cedar", "coral", "alloy", "ash", "ballad", "echo", "sage", "shimmer", "verse"]
+    static let hermesRealtimeModel = "lfm2.5-8b-a1b"
     static let smartyAgentModels = ["qwen-3.8-27b", "lfm2.5-8b-a1b"]
     static let smartyVisionModel = "lfm2.5-vl-3b"
     static let smartySpeechModel = "qwen3-tts-customvoice-1.7b"

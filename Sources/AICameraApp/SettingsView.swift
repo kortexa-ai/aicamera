@@ -1,29 +1,27 @@
 import AICameraCore
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @ObservedObject var model: AppModel
     @ObservedObject private var configuration: ConfigurationController
     @ObservedObject private var loginItem: LoginItemController
-    @State private var smartyAPIKey = ""
-    @State private var smartyMessage: String?
-    @State private var selectedAgentModel = ConfigurationController.smartyAgentModels[0]
-    @State private var voicePipelineMode = VoicePipelineMode.separateModels
+    @State private var voicePipelineMode = VoicePipelineMode.openAIRealtime
     @State private var realtimeBaseURL = ConfigurationController.openAIRealtimeBaseURL.absoluteString
     @State private var realtimeModel = ConfigurationController.defaultRealtimeModel
     @State private var realtimeVoice = ConfigurationController.defaultRealtimeVoice
     @State private var realtimeCredential = ""
+    @State private var realtimeCredentialSummary: String?
     @State private var realtimeMessage: String?
-    @State private var wakePhraseDraft: String
+    @State private var useHermes = false
+    @State private var conversationDraftEnabled: Bool
 
     init(model: AppModel) {
         self.model = model
         self.configuration = model.configurationController
         self.loginItem = model.loginItemController
-        self._wakePhraseDraft = State(
-            initialValue: model.configurationController.configuration.pipeline.conversation.wakePhrase
+        self._conversationDraftEnabled = State(
+            initialValue: model.configurationController.configuration.pipeline.conversation.enabled
         )
     }
 
@@ -171,154 +169,68 @@ struct SettingsView: View {
 
     private var advancedSettings: some View {
         Form {
-            Section("Profile") {
-                if !configuration.isConfigurationUsable {
-                    Text("The saved profile is invalid. Its original file was preserved.")
+            if !configuration.isConfigurationUsable {
+                Section("Configuration repair") {
+                    Text("The saved configuration is invalid. Its original file was preserved.")
                         .foregroundStyle(.red)
-                    Button("Reset to Pure Passthrough Defaults") {
+                    Button("Reset to Safe Defaults") {
                         configuration.resetToDefaults()
                         syncDrafts()
                     }
                 }
-                TextField("Name", text: profileNameBinding)
-                HStack {
-#if DEBUG
-                    Button("Smarty Preset") {
-                        configuration.applySmartyPreset()
-                        syncDrafts()
+            }
+
+            Section {
+                if conversationEnabled {
+                    Picker("Setup", selection: $voicePipelineMode) {
+                        Text("Realtime").tag(VoicePipelineMode.openAIRealtime)
+                        Text("Advanced").tag(VoicePipelineMode.compatibleRealtime)
                     }
-#endif
-                    Button("Import…") { importProfile() }
-                    Button("Export…") { exportProfile() }
-                    Button("Reload") {
-                        configuration.reload()
-                        syncDrafts()
-                    }
-                    Spacer()
-                }
-                Text(configuration.fileURL.path)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
+                    .pickerStyle(.segmented)
+                    .onChange(of: voicePipelineMode) { _, mode in handleVoicePipelineSelection(mode) }
 
-            Section("Models on Smarty") {
-                Picker("Conversation model", selection: $selectedAgentModel) {
-                    ForEach(ConfigurationController.smartyAgentModels, id: \.self) { Text($0).tag($0) }
-                }
-                .disabled(usesRealtimeVoicePipeline)
-                LabeledContent("Scene understanding", value: ConfigurationController.smartyVisionModel)
-                LabeledContent("Object detection", value: ConfigurationController.smartyDetectionModel)
-                LabeledContent("Speech recognition", value: ConfigurationController.smartyASRModel)
-                    .disabled(usesRealtimeVoicePipeline)
-                LabeledContent("Speech synthesis", value: ConfigurationController.smartySpeechModel)
-                    .disabled(usesRealtimeVoicePipeline)
-                SecureField("Kortexa API key (leave blank to keep the saved key)", text: $smartyAPIKey)
-                HStack {
-                    Button("Use Current Smarty Models") { saveSmartyConfiguration() }
-                        .buttonStyle(.borderedProminent)
-                    Spacer()
-                    Text("Credential: macOS Keychain")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Text("These are the services verified as running on Smarty. The API key is needed only to authenticate AI requests through api.kortexa.ai; it is not used by passthrough, device installation, or maintenance.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if let smartyMessage {
-                    Text(smartyMessage).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                }
-            }
-
-            Section("Vision") {
-                Toggle("Detect hand gestures locally", isOn: videoStageBinding(kind: .handGesture))
-                Toggle("Detect objects with \(ConfigurationController.smartyDetectionModel)", isOn: videoStageBinding(kind: .objectDetection))
-                    .disabled(!smartyModelsConfigured)
-                Toggle("Describe scenes with \(ConfigurationController.smartyVisionModel)", isOn: videoStageBinding(kind: .visionLanguage))
-                    .disabled(!smartyModelsConfigured)
-                Toggle("Show gesture labels", isOn: overlayBoolBinding(\.showGestureLabels))
-                Toggle("Show detection boxes", isOn: overlayBoolBinding(\.showDetectionBoxes))
-            }
-
-            Section("Conversation") {
-                Picker("Voice pipeline", selection: $voicePipelineMode) {
-                    ForEach(VoicePipelineMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .onChange(of: voicePipelineMode) { _, mode in
-                    handleVoicePipelineSelection(mode)
-                }
-                Toggle("Enabled", isOn: conversationBoolBinding(\.enabled))
-                    .disabled(!selectedVoicePipelineIsConfigured)
-                Toggle("Transcribe microphone", isOn: conversationBoolBinding(\.transcriptionEnabled))
-                    .disabled(separateVoiceControlsDisabled)
-                Toggle("Agent replies", isOn: conversationBoolBinding(\.respondToFinalTranscripts))
-                    .disabled(separateVoiceControlsDisabled)
-                Toggle("Respond to gestures", isOn: conversationBoolBinding(\.respondToGestures))
-                    .disabled(separateVoiceControlsDisabled || !videoStageIsEnabled(.handGesture))
-                Picker("Voice", selection: speechVoiceBinding) {
-                    Text("Adrian").tag("adrian")
-                    Text("Archibald").tag("archibald")
-                    Text("Avery").tag("avery")
-                    Text("Mira").tag("mira")
-                }
-                .disabled(separateVoiceControlsDisabled)
-                Picker("Activation", selection: conversationActivationBinding) {
-                    Text("Wake phrase").tag(ConversationActivationMode.wakePhrase)
-                    Text("Always listening").tag(ConversationActivationMode.alwaysListening)
-                }
-                .pickerStyle(.segmented)
-                .disabled(separateVoiceControlsDisabled)
-                HStack {
-                    TextField("Wake phrase", text: $wakePhraseDraft)
-                        .onSubmit { applyWakePhrase() }
-                    Button("Apply") { applyWakePhrase() }
-                        .disabled(wakePhraseDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                .disabled(
-                    separateVoiceControlsDisabled
-                        || configuration.configuration.pipeline.conversation.activationMode != .wakePhrase
-                )
-                Stepper(
-                    "Wake window: \(Int(configuration.configuration.pipeline.conversation.wakeWindowSeconds)) seconds",
-                    value: conversationDoubleBinding(\.wakeWindowSeconds),
-                    in: 1...30,
-                    step: 1
-                )
-                .disabled(
-                    separateVoiceControlsDisabled
-                        || configuration.configuration.pipeline.conversation.activationMode != .wakePhrase
-                )
-                if usesRealtimeVoicePipeline {
-                    Text("Realtime handles microphone input, response generation, and speech as one bounded session. The separate ASR, agent, and TTS controls are disabled.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if usesRealtimeVoicePipeline {
-                Section("Realtime Voice") {
                     if voicePipelineMode == .openAIRealtime {
-                        LabeledContent("Endpoint", value: ConfigurationController.openAIRealtimeBaseURL.absoluteString)
+                        LabeledContent("Service", value: "OpenAI Realtime")
                     } else {
                         TextField("Compatible base URL", text: $realtimeBaseURL)
+                        Toggle("Use Hermes", isOn: $useHermes)
+                            .onChange(of: useHermes) { _, enabled in
+                                if enabled { realtimeModel = ConfigurationController.hermesRealtimeModel }
+                            }
                     }
-                    TextField("Model", text: $realtimeModel)
-                    TextField("Voice", text: $realtimeVoice)
+                    Picker("Model", selection: $realtimeModel) {
+                        ForEach(realtimeModelChoices, id: \.self) { Text($0).tag($0) }
+                    }
+                    Picker("Voice", selection: $realtimeVoice) {
+                        ForEach(realtimeVoiceChoices, id: \.self) { Text($0.capitalized).tag($0) }
+                    }
+                    if let realtimeCredentialSummary {
+                        LabeledContent("API key") {
+                            HStack(spacing: 8) {
+                                Text(realtimeCredentialSummary).monospaced()
+                                Button(role: .destructive) { removeRealtimeCredential() } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Remove saved API key")
+                            }
+                        }
+                    }
                     SecureField(
-                        "API key or compatible bearer token (leave blank to keep the saved key)",
+                        realtimeCredentialSummary == nil ? "Add API key" : "Replace API key",
                         text: $realtimeCredential
                     )
                     HStack {
-                        Button("Save Realtime Configuration") { saveRealtimeConfiguration() }
+                        Button(realtimeCredentialSummary == nil ? "Save & Enable" : "Save Changes") {
+                            saveRealtimeConfiguration()
+                        }
                             .buttonStyle(.borderedProminent)
                         Spacer()
-                        Text("Credential: macOS Keychain")
+                        Text("Stored in macOS Keychain")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    Text("Saving explicitly permits microphone audio, transcripts, prompts, and bounded scene metadata for this endpoint. Raw camera frames are not granted.")
+                    Text("Realtime handles listening and spoken replies in one low-latency session. Raw camera frames are never sent by this configuration.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if let realtimeMessage {
@@ -328,13 +240,64 @@ struct SettingsView: View {
                             .textSelection(.enabled)
                     }
                 }
+            } header: {
+                settingsHeader("Conversation", enabled: conversationEnabledBinding)
             }
 
-            Section("Overlays") {
-                Toggle("Enabled", isOn: overlayBoolBinding(\.enabled))
-                Toggle("Show transcript", isOn: overlayBoolBinding(\.showTranscript))
-                Toggle("Show agent response", isOn: overlayBoolBinding(\.showAgentResponse))
-                Toggle("Show status", isOn: overlayBoolBinding(\.showStatus))
+            if conversationEnabled {
+                Section("Transcription") {
+                    Toggle("Show live transcript", isOn: overlayBoolBinding(\.showTranscript))
+                    Toggle("Translate", isOn: .constant(false))
+                        .disabled(true)
+                    Picker("Language", selection: .constant("Auto")) {
+                        Text("Auto-detect").tag("Auto")
+                    }
+                    .disabled(true)
+                    Text("Translation options are coming in a later update.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                if toolsEnabled {
+                    Text("Realtime can currently draw and clear bounded overlays. Screenshot and camera controls will appear here as they become available.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                settingsHeader("Tools", enabled: toolsEnabledBinding)
+            }
+
+            Section {
+                if visionEnabled {
+                    LabeledContent("Built-in object detection") {
+                        Text("YOLO · Coming soon").foregroundStyle(.secondary)
+                    }
+                    Toggle("Gestures", isOn: videoStageBinding(kind: .handGesture))
+                    if videoStageIsEnabled(.handGesture) {
+                        Toggle("Show gesture labels", isOn: overlayBoolBinding(\.showGestureLabels))
+                    }
+                    DisclosureGroup("Advanced endpoint") {
+                        Text("Custom vision endpoint, model, and Keychain credential settings are coming in a later update.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                settingsHeader("Vision & Gestures", enabled: visionEnabledBinding)
+            }
+
+            Section {
+                if overlaysEnabled {
+                    Toggle("Show transcript", isOn: overlayBoolBinding(\.showTranscript))
+                    Toggle("Show agent response", isOn: overlayBoolBinding(\.showAgentResponse))
+                    Toggle("Show status", isOn: overlayBoolBinding(\.showStatus))
+                    Toggle("Show detection boxes", isOn: overlayBoolBinding(\.showDetectionBoxes))
+                    Toggle("Show gesture labels", isOn: overlayBoolBinding(\.showGestureLabels))
+                }
+            } header: {
+                settingsHeader("Overlays", enabled: overlayBoolBinding(\.enabled))
             }
 
             if let message = configuration.validationMessage {
@@ -352,8 +315,8 @@ struct SettingsView: View {
     }
 
     private var maintenanceSettings: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Installed virtual devices").font(.headline)
+        Form {
+            Section("Virtual Devices") {
             DeviceStatusRow(
                 title: "AI Camera",
                 status: model.cameraExtensionManager.status.label,
@@ -380,15 +343,16 @@ struct SettingsView: View {
                 }
                 .controlSize(.small)
             }
-
-            Divider()
+            }
+            Section("Privacy") {
             Text("Camera and microphone buffers stay in memory. The default profile performs pure passthrough and permits only loopback endpoints. Remote endpoints require HTTPS, an allowed host, and explicit data grants.")
                 .foregroundStyle(.secondary)
             Text("AI credentials are managed beside the AI features that use them in AI & Advanced. Device maintenance does not need an endpoint secret.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Spacer()
+            }
         }
+        .formStyle(.grouped)
         .padding()
     }
 
@@ -411,44 +375,30 @@ struct SettingsView: View {
         }
     }
 
-    private func saveSmartyConfiguration() {
-        do {
-            if !smartyAPIKey.isEmpty {
-                try AppSecretResolver().store(
-                    smartyAPIKey,
-                    account: ConfigurationController.smartyCredentialAccount
-                )
-                smartyAPIKey = ""
-            }
-            configuration.configureSmartyModels(agentModel: selectedAgentModel)
-            smartyMessage = configuration.validationMessage ?? "Smarty model configuration saved."
-        } catch {
-            smartyMessage = "Kortexa API credential save failed: \(error.localizedDescription)"
-        }
-    }
-
-    private func syncSmartyDraft() {
-        if let model = configuration.configuration.endpoints
-            .first(where: { $0.id == "smarty-agent" })?.model,
-           ConfigurationController.smartyAgentModels.contains(model) {
-            selectedAgentModel = model
-        }
-    }
-
     private func syncRealtimeDraft() {
         let conversation = configuration.configuration.pipeline.conversation
         guard conversation.realtimeEnabled,
               let endpointID = conversation.realtimeEndpointID,
               let endpoint = configuration.configuration.endpoints.first(where: { $0.id == endpointID }) else {
-            voicePipelineMode = .separateModels
+            voicePipelineMode = .openAIRealtime
+            realtimeBaseURL = ConfigurationController.openAIRealtimeBaseURL.absoluteString
+            realtimeCredentialSummary = AppSecretResolver().maskedSecret(
+                account: ConfigurationController.realtimeCredentialAccount
+            )
+            conversationDraftEnabled = conversation.enabled
             return
         }
         realtimeBaseURL = endpoint.baseURL.absoluteString
         realtimeModel = endpoint.model ?? ConfigurationController.defaultRealtimeModel
         realtimeVoice = endpoint.options["voice"]?.stringValue ?? ConfigurationController.defaultRealtimeVoice
+        useHermes = endpoint.options["kortexaAgent"]?.stringValue == "hermes"
         voicePipelineMode = endpoint.baseURL.host?.lowercased() == "api.openai.com"
             ? .openAIRealtime
             : .compatibleRealtime
+        realtimeCredentialSummary = AppSecretResolver().maskedSecret(
+            account: ConfigurationController.realtimeCredentialAccount(for: endpoint.baseURL)
+        )
+        conversationDraftEnabled = conversation.enabled
     }
 
     private func handleVoicePipelineSelection(_ mode: VoicePipelineMode) {
@@ -458,29 +408,12 @@ struct SettingsView: View {
             if realtimeModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 realtimeModel = ConfigurationController.defaultRealtimeModel
             }
-        } else if mode == .separateModels,
-                  configuration.configuration.pipeline.conversation.realtimeEnabled {
-            configuration.update { $0.pipeline.conversation.realtimeEnabled = false }
+            useHermes = false
+        } else if realtimeBaseURL == ConfigurationController.openAIRealtimeBaseURL.absoluteString {
+            realtimeBaseURL = ConfigurationController.kortexaRealtimeURL.absoluteString
+            realtimeModel = ConfigurationController.hermesRealtimeModel
         }
-    }
-
-    private func importProfile() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        configuration.importProfile(from: url)
-        syncDrafts()
-    }
-
-    private func exportProfile() {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.json]
-        panel.canCreateDirectories = true
-        panel.nameFieldStringValue = "AI Camera Profile.json"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        configuration.exportProfile(to: url)
+        refreshRealtimeCredentialSummary()
     }
 
     private func saveRealtimeConfiguration() {
@@ -499,6 +432,10 @@ struct SettingsView: View {
         }
         let endpointID = "openai-realtime"
         let credentialAccount = ConfigurationController.realtimeCredentialAccount(for: baseURL)
+        guard realtimeCredentialSummary != nil || !realtimeCredential.isEmpty else {
+            realtimeMessage = "Add an API key to enable Realtime."
+            return
+        }
         do {
             if !realtimeCredential.isEmpty {
                 try AppSecretResolver().store(
@@ -506,6 +443,11 @@ struct SettingsView: View {
                     account: credentialAccount
                 )
                 realtimeCredential = ""
+            }
+            var options: [String: JSONValue] = ["voice": .string(voice)]
+            if voicePipelineMode == .compatibleRealtime,
+               baseURL.host?.lowercased() == "api.kortexa.ai" {
+                options["kortexaAgent"] = .string(useHermes ? "hermes" : "api")
             }
             let endpoint = EndpointConfiguration(
                 id: endpointID,
@@ -517,7 +459,7 @@ struct SettingsView: View {
                     reference: credentialAccount
                 ),
                 timeoutSeconds: 30,
-                options: ["voice": .string(voice)]
+                options: options
             )
             configuration.update { profile in
                 profile.endpoints.removeAll(where: { $0.id == endpointID })
@@ -540,40 +482,117 @@ struct SettingsView: View {
                     ))
                 }
             }
+            realtimeCredentialSummary = AppSecretResolver().maskedSecret(account: credentialAccount)
+            conversationDraftEnabled = true
             realtimeMessage = configuration.validationMessage ?? "Realtime configuration saved."
         } catch {
             realtimeMessage = "Realtime credential save failed: \(error.localizedDescription)"
         }
     }
 
-    private var profileNameBinding: Binding<String> {
+    private var conversationEnabled: Bool { conversationDraftEnabled }
+
+
+    private var realtimeModelChoices: [String] {
+        ([realtimeModel] + ConfigurationController.realtimeModels).reduce(into: []) {
+            if !$0.contains($1) { $0.append($1) }
+        }
+    }
+
+    private var realtimeVoiceChoices: [String] {
+        ([realtimeVoice] + ConfigurationController.realtimeVoices).reduce(into: []) {
+            if !$0.contains($1) { $0.append($1) }
+        }
+    }
+
+    private var overlaysEnabled: Bool { configuration.configuration.overlays.enabled }
+    private var toolsEnabled: Bool { configuration.configuration.overlays.script.enabled }
+    private var visionEnabled: Bool {
+        configuration.configuration.pipeline.videoStages.contains(where: \.enabled)
+    }
+
+    private var conversationEnabledBinding: Binding<Bool> {
         Binding(
-            get: { configuration.configuration.profileName },
-            set: { value in configuration.update { $0.profileName = value } }
+            get: { conversationDraftEnabled },
+            set: { enabled in
+                conversationDraftEnabled = enabled
+                if !enabled {
+                    configuration.update { $0.pipeline.conversation.enabled = false }
+                }
+            }
         )
     }
 
-    private var smartyModelsConfigured: Bool {
-        let ids = Set(configuration.configuration.endpoints.map(\.id))
-        return ["smarty-objects", "smarty-asr", "smarty-agent", "smarty-vision", "smarty-speech", "smarty-realtime"]
-            .allSatisfy(ids.contains)
+    private var toolsEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { toolsEnabled },
+            set: { value in configuration.update { $0.overlays.script.enabled = value } }
+        )
     }
 
-    private var conversationEnabled: Bool {
-        configuration.configuration.pipeline.conversation.enabled
+    private var visionEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { visionEnabled },
+            set: { enabled in
+                configuration.update { profile in
+                    if enabled {
+                        if let index = profile.pipeline.videoStages.firstIndex(where: { $0.kind == .handGesture }) {
+                            profile.pipeline.videoStages[index].enabled = true
+                        } else {
+                            profile.pipeline.videoStages.append(.init(
+                                id: "hands", kind: .handGesture, maximumRateHz: 8,
+                                maximumFrameAgeMilliseconds: 250
+                            ))
+                        }
+                    } else {
+                        for index in profile.pipeline.videoStages.indices {
+                            profile.pipeline.videoStages[index].enabled = false
+                        }
+                    }
+                }
+            }
+        )
     }
 
-    private var usesRealtimeVoicePipeline: Bool {
-        voicePipelineMode != .separateModels
+    private func settingsHeader(_ title: String, enabled: Binding<Bool>) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Toggle("Enabled", isOn: enabled)
+                .labelsHidden()
+                .controlSize(.small)
+        }
     }
 
-    private var selectedVoicePipelineIsConfigured: Bool {
-        if voicePipelineMode == .separateModels { return smartyModelsConfigured }
-        return configuration.configuration.pipeline.conversation.realtimeEndpointID != nil
+    private func refreshRealtimeCredentialSummary() {
+        let url = voicePipelineMode == .openAIRealtime
+            ? ConfigurationController.openAIRealtimeBaseURL
+            : URL(string: realtimeBaseURL)
+        guard let url else {
+            realtimeCredentialSummary = nil
+            return
+        }
+        realtimeCredentialSummary = AppSecretResolver().maskedSecret(
+            account: ConfigurationController.realtimeCredentialAccount(for: url)
+        )
     }
 
-    private var separateVoiceControlsDisabled: Bool {
-        !conversationEnabled || usesRealtimeVoicePipeline
+    private func removeRealtimeCredential() {
+        let url = voicePipelineMode == .openAIRealtime
+            ? ConfigurationController.openAIRealtimeBaseURL
+            : URL(string: realtimeBaseURL)
+        guard let url else { return }
+        do {
+            try AppSecretResolver().remove(
+                account: ConfigurationController.realtimeCredentialAccount(for: url)
+            )
+            realtimeCredentialSummary = nil
+            configuration.update { $0.pipeline.conversation.enabled = false }
+            conversationDraftEnabled = false
+            realtimeMessage = "API key removed. Conversation was disabled."
+        } catch {
+            realtimeMessage = "API key removal failed: \(error.localizedDescription)"
+        }
     }
 
     private func videoStageIsEnabled(_ kind: VideoStageKind) -> Bool {
@@ -633,20 +652,6 @@ struct SettingsView: View {
         )
     }
 
-    private var speechVoiceBinding: Binding<String> {
-        Binding(
-            get: { configuration.configuration.pipeline.conversation.speechVoice },
-            set: { value in
-                configuration.update { profile in
-                    profile.pipeline.conversation.speechVoice = value
-                    if let index = profile.endpoints.firstIndex(where: { $0.id == "smarty-realtime" }) {
-                        profile.endpoints[index].options["voice"] = .string(value)
-                    }
-                }
-            }
-        )
-    }
-
     private func optionalBinding(_ keyPath: WritableKeyPath<CaptureConfiguration, String?>) -> Binding<String?> {
         Binding(
             get: { configuration.configuration.capture[keyPath: keyPath] },
@@ -686,40 +691,7 @@ struct SettingsView: View {
         )
     }
 
-    private var conversationActivationBinding: Binding<ConversationActivationMode> {
-        Binding(
-            get: { configuration.configuration.pipeline.conversation.activationMode },
-            set: { value in
-                configuration.update { $0.pipeline.conversation.activationMode = value }
-            }
-        )
-    }
-
-    private func conversationDoubleBinding(
-        _ keyPath: WritableKeyPath<ConversationConfiguration, Double>
-    ) -> Binding<Double> {
-        Binding(
-            get: { configuration.configuration.pipeline.conversation[keyPath: keyPath] },
-            set: { value in
-                configuration.update { $0.pipeline.conversation[keyPath: keyPath] = value }
-            }
-        )
-    }
-
-    private func applyWakePhrase() {
-        let phrase = wakePhraseDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !phrase.isEmpty else { return }
-        configuration.update { $0.pipeline.conversation.wakePhrase = phrase }
-        syncWakePhraseDraft()
-    }
-
-    private func syncWakePhraseDraft() {
-        wakePhraseDraft = configuration.configuration.pipeline.conversation.wakePhrase
-    }
-
     private func syncDrafts() {
-        syncWakePhraseDraft()
-        syncSmartyDraft()
         syncRealtimeDraft()
     }
 
@@ -736,7 +708,6 @@ struct SettingsView: View {
 }
 
 private enum VoicePipelineMode: String, CaseIterable, Identifiable {
-    case separateModels
     case openAIRealtime
     case compatibleRealtime
 
@@ -744,7 +715,6 @@ private enum VoicePipelineMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .separateModels: return "Separate ASR + agent + TTS"
         case .openAIRealtime: return "OpenAI Realtime"
         case .compatibleRealtime: return "Compatible Realtime"
         }

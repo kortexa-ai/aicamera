@@ -32,7 +32,7 @@ sleep 1
 
 # The privileged transaction invalidates the prior generation marker before the app swap and
 # confirms that no old AI Camera process survives before committing the new marker.
-osascript - "$SOURCE" "$DESTINATION" "$EXPECTED_ID" "$EXPECTED_EXTENSION_ID" <<'APPLESCRIPT'
+INSTALL_COMMAND="$(osascript - "$SOURCE" "$DESTINATION" "$EXPECTED_ID" "$EXPECTED_EXTENSION_ID" render <<'APPLESCRIPT'
 on run argv
     set sourcePath to item 1 of argv
     set destinationPath to item 2 of argv
@@ -55,7 +55,19 @@ on run argv
     set commandText to commandText & "; if test -e \"$dst\"; then /usr/bin/chflags -R nouchg \"$dst\"; /bin/mv \"$dst\" \"$bak\"; had=1; destination_changed=1; fi; /bin/mv -h \"$tmp\" \"$dst\"; destination_changed=1; /usr/bin/chflags -h uchg \"$dst\"; test ! -L \"$dst\"; test \"$(/usr/bin/stat -f '%d:%i' \"$dst\")\" = \"$staged_identity\"; final_ext=\"$dst/Contents/Library/SystemExtensions/$expected_ext.systemextension\"; verify_product \"$dst\" \"$final_ext\"; test \"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \"$dst/Contents/Info.plist\")\" = \"$expected\"; test \"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \"$dst/Contents/Info.plist\")\" = \"$version\""
     set commandText to commandText & "; companion_pids () { for candidate in $(/usr/bin/pgrep -x 'AI Camera' 2>/dev/null || true); do case \"$candidate\" in ''|*[!0-9]*) continue ;; esac; executable=$(/bin/ps -p \"$candidate\" -o comm= 2>/dev/null | /usr/bin/sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'); if test \"$executable\" = \"$dst/Contents/MacOS/AI Camera\" || test \"$executable\" = \"$bak/Contents/MacOS/AI Camera\"; then /usr/bin/printf '%s\\n' \"$candidate\"; fi; done; }; pids=$(companion_pids); if test -n \"$pids\"; then /bin/kill -TERM $pids 2>/dev/null || true; fi; /bin/sleep 1; pids=$(companion_pids); if test -n \"$pids\"; then /bin/kill -KILL $pids 2>/dev/null || true; fi; /bin/sleep 1; test -z \"$(companion_pids)\""
     set commandText to commandText & "; /usr/bin/printf '%s\\n' \"$version\" > \"$marker_tmp\"; /usr/sbin/chown root:wheel \"$marker_tmp\"; /bin/chmod -N \"$marker_tmp\"; /bin/chmod 0444 \"$marker_tmp\"; /bin/mv \"$marker_tmp\" \"$marker\"; /usr/bin/chflags uchg \"$marker\"; committed=1; marker_invalidated=0; /usr/bin/chflags nouchg \"$marker_bak\" \"$bak\" 2>/dev/null || true; /bin/rm -f \"$marker_bak\"; /bin/rm -rf \"$bak\""
+    if (count argv) > 4 and item 5 of argv is "render" then return commandText
     do shell script commandText with administrator privileges
 end run
 APPLESCRIPT
+)"
+
+if sudo -n true >/dev/null 2>&1; then
+    /usr/bin/printf '%s\n' "$INSTALL_COMMAND" | sudo -n /bin/sh
+else
+    osascript \
+        -e 'on run argv' \
+        -e 'do shell script (item 1 of argv) with administrator privileges' \
+        -e 'end run' \
+        "$INSTALL_COMMAND"
+fi
 open "$DESTINATION"

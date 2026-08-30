@@ -47,6 +47,36 @@ struct AppSecretResolver: SecretResolver {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
         }
     }
+
+    func maskedSecret(account: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data,
+              let secret = String(data: data, encoding: .utf8),
+              !secret.isEmpty else { return nil }
+        return Self.mask(secret)
+    }
+
+    static func mask(_ secret: String) -> String {
+        let characters = Array(secret)
+        let visibleCount: Int
+        if let dash = characters.lastIndex(of: "-") {
+            visibleCount = min(characters.count, dash + 1 + 4)
+        } else {
+            visibleCount = min(characters.count, 6)
+        }
+        guard visibleCount < characters.count else { return secret }
+        return String(characters.prefix(visibleCount))
+            + String(repeating: "*", count: characters.count - visibleCount)
+    }
+
     func remove(account: String) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -58,5 +88,4 @@ struct AppSecretResolver: SecretResolver {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
         }
     }
-
 }

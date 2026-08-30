@@ -782,9 +782,14 @@ final class AppModel: ObservableObject {
                 }
                 guard !Task.isCancelled, generation == self.realtimeGeneration else { return }
                 let signalingURL = try Self.realtimeSignalingURL(for: endpoint)
+                let kortexaAgent = endpoint.options["kortexaAgent"]?.stringValue
+                let additionalHeaders = kortexaAgent.flatMap { agent in
+                    ["api", "hermes"].contains(agent) ? ["X-Kortexa-Agent": agent] : nil
+                } ?? [:]
                 let session = RealtimeWebRTCSession(
                     signalingURL: signalingURL,
-                    credential: .init(field: endpoint.auth.header, value: endpoint.auth.prefix + secret)
+                    credential: .init(field: endpoint.auth.header, value: endpoint.auth.prefix + secret),
+                    additionalHeaders: additionalHeaders
                 )
                 self.realtimeSession = session
                 self.realtimeEventTask = Task { [weak self, weak session] in
@@ -1061,6 +1066,9 @@ final class AppModel: ObservableObject {
                 throw NSError(domain: "AICamera.Realtime", code: 2)
             }
             return url
+        }
+        if endpoint.baseURL.path.hasSuffix("/v1/realtime/calls") {
+            return endpoint.baseURL
         }
         if endpoint.baseURL.path.hasSuffix("/v1") {
             return endpoint.baseURL.appendingPathComponent("realtime/calls")

@@ -70,6 +70,9 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 - [ ] Add one-shot **Talk** activation with server VAD and **Stop**: connect with microphone egress closed, transmit only during an explicitly armed utterance, close the gate on VAD stop/timeout/cancellation, and route decoded remote PCM through the existing bounded virtual-microphone mixer.
 - [ ] Add Realtime Settings for provider, endpoint, model, voice, and Keychain-backed credentials or OAuth; profiles store secret references only. Test the standard protocol against canonical OpenAI and `api.server`.
 - [ ] Normalize standard Realtime function calls and experimental Codex delegation calls into one local bounded tool executor; start with `render_overlay` and `clear_overlay`.
+- [x] Redesign AI & Advanced around an OpenAI-first Conversation flow with masked Keychain credentials, current Realtime model/voice choices, collapsible Tools, Vision & Gestures, and Overlays groups; hide profile and Smarty-specific controls from the normal UI.
+- [x] Add an advanced compatible Realtime path, including the public Kortexa `/v1/realtime/calls` endpoint and an isolated Hermes selector that sends `X-Kortexa-Agent: hermes` only when explicitly enabled.
+- [ ] Bundle or securely download a license-compatible Core ML YOLO model, verify its artifact integrity, and run bounded in-process object detection without network inference before enabling the Built-in control.
 
 ### Development and production isolation
 
