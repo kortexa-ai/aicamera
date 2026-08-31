@@ -185,6 +185,15 @@ public enum ConfigurationValidator {
                 || (!wakePhrase.isEmpty && WakePhraseGate.hasMatchableTokens(wakePhrase)) else {
             throw ConfigurationError.invalidText("conversation")
         }
+        let translation = configuration.pipeline.translation
+        guard translation.model.count <= AICameraContentLimits.labelCharacters,
+              translation.sourceLanguage.count <= AICameraContentLimits.labelCharacters,
+              translation.targetLanguage.count <= AICameraContentLimits.labelCharacters,
+              !translation.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !translation.sourceLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !translation.targetLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ConfigurationError.invalidText("translation")
+        }
         guard conversation.utteranceSeconds.isFinite,
               conversation.gestureCooldownSeconds.isFinite,
               conversation.wakeWindowSeconds.isFinite,

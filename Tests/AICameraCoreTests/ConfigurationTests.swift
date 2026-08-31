@@ -14,7 +14,37 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertFalse(configuration.pipeline.conversation.realtimeEnabled)
         XCTAssertNil(configuration.pipeline.conversation.realtimeEndpointID)
         XCTAssertFalse(configuration.pipeline.conversation.transcriptionEnabled)
+        XCTAssertFalse(configuration.pipeline.translation.enabled)
+        XCTAssertEqual(configuration.pipeline.translation.model, "hy-mt2-1.8b-q4-k-m")
+        XCTAssertEqual(configuration.pipeline.translation.sourceLanguage, "auto")
+        XCTAssertEqual(configuration.pipeline.translation.targetLanguage, "system")
         XCTAssertFalse(configuration.overlays.enabled)
+    }
+
+    func testDecodesProfileWithoutTranslationBlock() throws {
+        let data = try JSONEncoder().encode(AICameraConfiguration.default)
+        var root = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        var pipeline = root["pipeline"] as! [String: Any]
+        pipeline.removeValue(forKey: "translation")
+        root["pipeline"] = pipeline
+        let legacy = try JSONSerialization.data(withJSONObject: root)
+        let decoded = try JSONDecoder().decode(AICameraConfiguration.self, from: legacy)
+        XCTAssertEqual(decoded.pipeline.translation, TranslationConfiguration())
+    }
+
+    func testTranslationConfigurationRoundTripsAndValidates() throws {
+        var configuration = AICameraConfiguration.default
+        configuration.pipeline.translation = .init(
+            enabled: true,
+            sourceLanguage: "auto",
+            targetLanguage: "fr"
+        )
+        try ConfigurationValidator.validate(configuration)
+        let decoded = try JSONDecoder().decode(
+            AICameraConfiguration.self,
+            from: JSONEncoder().encode(configuration)
+        )
+        XCTAssertEqual(decoded.pipeline.translation, configuration.pipeline.translation)
     }
 
     func testRoundTripsThroughStore() throws {

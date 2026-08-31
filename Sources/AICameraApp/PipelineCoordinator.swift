@@ -30,6 +30,7 @@ actor PipelineCoordinator {
     private let scene = SceneState()
     private let factory: AdapterFactory
     private let builtinDetectionClient: (any DetectionClient)?
+    private let builtinTranslationClient: (any TranslationClient)?
     private let onSnapshot: SnapshotHandler
     private let onSpeech: SpeechHandler
     private let onError: ErrorHandler
@@ -54,6 +55,7 @@ actor PipelineCoordinator {
         configuration: AICameraConfiguration,
         secrets: any SecretResolver,
         builtinDetectionClient: (any DetectionClient)? = nil,
+        builtinTranslationClient: (any TranslationClient)? = nil,
         onSnapshot: @escaping SnapshotHandler,
         onSpeech: @escaping SpeechHandler,
         onError: @escaping ErrorHandler
@@ -64,6 +66,7 @@ actor PipelineCoordinator {
             privacy: PrivacyGate(configuration: configuration.privacy)
         )
         self.builtinDetectionClient = builtinDetectionClient
+        self.builtinTranslationClient = builtinTranslationClient
         self.onSnapshot = onSnapshot
         self.onSpeech = onSpeech
         self.onError = onError
@@ -116,6 +119,14 @@ actor PipelineCoordinator {
                 start(stage: stage, packet: packet)
             }
         }
+    }
+
+    func submitRealtimeTranscript(text: String, isFinal: Bool) async {
+        guard isRunning, configuration.overlays.showTranscript else { return }
+        let event = TranscriptEvent(text: text, mode: isFinal ? .final : .partial)
+        let displayed = await translated(event)
+        await scene.applyTranscript(displayed)
+        await publish()
     }
 
     func submit(gestures: [GestureObservation], frameID: FrameID) async {
@@ -351,7 +362,8 @@ actor PipelineCoordinator {
             let transcript = try await client.transcribe(.init(wavData: utterance.wavData))
             try Task.checkCancellation()
             guard !transcript.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            await scene.applyTranscript(transcript)
+            let displayedTranscript = await translated(transcript)
+            await scene.applyTranscript(displayedTranscript)
             await publish()
             if let command = agentCommand(
                 for: transcript,
@@ -364,6 +376,31 @@ actor PipelineCoordinator {
             return
         } catch {
             onError("transcription: \(error.localizedDescription)")
+        }
+    }
+
+    private func translated(_ transcript: TranscriptEvent) async -> TranscriptEvent {
+        let translation = configuration.pipeline.translation
+        guard translation.enabled, transcript.mode == .final, let builtinTranslationClient else {
+            return transcript
+        }
+        do {
+            let text = try await builtinTranslationClient.translate(.init(
+                text: transcript.text,
+                sourceLanguage: translation.sourceLanguage,
+                targetLanguage: translation.targetLanguage
+            ))
+            return TranscriptEvent(
+                text: text,
+                mode: transcript.mode,
+                startSeconds: transcript.startSeconds,
+                endSeconds: transcript.endSeconds
+            )
+        } catch is CancellationError {
+            return transcript
+        } catch {
+            onError("translation: \(error.localizedDescription)")
+            return transcript
         }
     }
 

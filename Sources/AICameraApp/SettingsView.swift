@@ -7,6 +7,7 @@ struct SettingsView: View {
     @ObservedObject private var configuration: ConfigurationController
     @ObservedObject private var loginItem: LoginItemController
     @ObservedObject private var builtinVision: BuiltinVisionModelController
+    @ObservedObject private var builtinTranslation: BuiltinTranslationModelController
     @State private var voicePipelineMode = VoicePipelineMode.openAIRealtime
     @State private var realtimeBaseURL = ConfigurationController.openAIRealtimeBaseURL.absoluteString
     @State private var realtimeModel = ConfigurationController.defaultRealtimeModel
@@ -22,6 +23,7 @@ struct SettingsView: View {
         self.configuration = model.configurationController
         self.loginItem = model.loginItemController
         self.builtinVision = model.builtinVisionModelController
+        self.builtinTranslation = model.builtinTranslationModelController
         self._conversationDraftEnabled = State(
             initialValue: model.configurationController.configuration.pipeline.conversation.enabled
         )
@@ -34,11 +36,11 @@ struct SettingsView: View {
                 .tag(AICameraSettingsPage.general)
 
             advancedSettings
-                .tabItem { Label("AI & Advanced", systemImage: "sparkles") }
+                .tabItem { Label("AI", systemImage: "sparkles") }
                 .tag(AICameraSettingsPage.advanced)
 
             maintenanceSettings
-                .tabItem { Label("Privacy & Maintenance", systemImage: "hand.raised") }
+                .tabItem { Label("Privacy", systemImage: "hand.raised") }
                 .tag(AICameraSettingsPage.maintenance)
         }
         .frame(width: 740, height: 540)
@@ -52,7 +54,7 @@ struct SettingsView: View {
                     Section("Profile repair required") {
                         Text(configuration.validationMessage ?? "The saved profile is invalid.")
                             .foregroundStyle(.red)
-                        Text("Open AI & Advanced, then import a valid profile or reset to defaults. Automatic camera and microphone capture is blocked until the profile is valid.")
+                        Text("Open AI, then reset to safe defaults. Automatic camera and microphone capture is blocked until the profile is valid.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -139,21 +141,12 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Processing") {
-                    LabeledContent("Mode") {
-                        Label(
-                            model.hasConfiguredAIFeatures
-                                ? "AI features configured"
-                                : (model.isPurePassthrough ? "Pure passthrough" : "AI off — local effects configured"),
-                            systemImage: model.hasConfiguredAIFeatures ? "sparkles" : "arrow.left.arrow.right"
-                        )
-                    }
-                    Text("Capture starts while another app uses the matching virtual device or while you run its local test. Valid changes apply automatically.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Section("Virtual Devices") {
+                    virtualDeviceControls
                 }
         }
             .formStyle(.grouped)
+            .toggleStyle(.switch)
             .padding()
             .onAppear {
                 model.refreshDevicesAndDrivers()
@@ -246,19 +239,29 @@ struct SettingsView: View {
                 settingsHeader("Conversation", enabled: conversationEnabledBinding)
             }
 
-            if conversationEnabled {
-                Section("Transcription") {
-                    Toggle("Show live transcript", isOn: overlayBoolBinding(\.showTranscript))
-                    Toggle("Translate", isOn: .constant(false))
-                        .disabled(true)
-                    Picker("Language", selection: .constant("Auto")) {
-                        Text("Auto-detect").tag("Auto")
+            Section {
+                if transcriptionDisplayEnabled {
+                    Toggle("Translate", isOn: translationEnabledBinding)
+                        .disabled(!builtinTranslation.isReady)
+                    builtinTranslationControls
+                    if translationEnabled {
+                        Picker("From", selection: translationStringBinding(\.sourceLanguage)) {
+                            ForEach(Self.sourceLanguages, id: \.code) { language in
+                                Text(language.name).tag(language.code)
+                            }
+                        }
+                        Picker("To", selection: translationStringBinding(\.targetLanguage)) {
+                            ForEach(Self.targetLanguages, id: \.code) { language in
+                                Text(language.name).tag(language.code)
+                            }
+                        }
+                        Text("Translation runs on finalized transcript text and never blocks the live audio path.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .disabled(true)
-                    Text("Translation options are coming in a later update.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
+            } header: {
+                settingsHeader("Transcription", enabled: transcriptionDisplayEnabledBinding)
             }
 
             Section {
@@ -309,6 +312,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .toggleStyle(.switch)
         .onAppear {
             syncDrafts()
         }
@@ -354,42 +358,122 @@ struct SettingsView: View {
             .foregroundStyle(.secondary)
     }
 
-    private var maintenanceSettings: some View {
-        Form {
-            Section("Virtual Devices") {
-            DeviceStatusRow(
-                title: "AI Camera",
-                status: model.cameraExtensionManager.status.label,
-                ready: model.cameraExtensionManager.status == .active,
-                busy: model.deviceOperationInProgress,
-                actionTitle: cameraMaintenanceActionTitle,
-                action: model.cameraExtensionManager.status == .active
-                    ? model.deactivateCameraExtension
-                    : model.activateCameraExtension
-            )
-            DeviceStatusRow(
-                title: "AI Camera Microphone",
-                status: model.audioDriverManager.status.label,
-                ready: model.audioDriverManager.status == .installed,
-                busy: model.deviceOperationInProgress,
-                actionTitle: audioMaintenanceActionTitle,
-                action: model.audioDriverManager.status == .installed
-                    ? model.uninstallAudioDriver
-                    : model.installAudioDriver
-            )
-            if model.cameraExtensionManager.status == .needsApproval {
-                Button("Open Extension Settings") {
-                    model.cameraExtensionManager.openApprovalSettings()
+    @ViewBuilder
+    private var builtinTranslationControls: some View {
+        switch builtinTranslation.state {
+        case .notDownloaded:
+            LabeledContent("Local model") {
+                Button("Download \(BuiltinTranslationModelController.modelName) · \(BuiltinTranslationModelController.downloadSize)") {
+                    builtinTranslation.download()
                 }
-                .controlSize(.small)
             }
-            }
-            Section("Privacy") {
-            Text("Camera and microphone buffers stay in memory. The default profile performs pure passthrough and permits only loopback endpoints. Remote endpoints require HTTPS, an allowed host, and explicit data grants.")
-                .foregroundStyle(.secondary)
-            Text("AI credentials are managed beside the AI features that use them in AI & Advanced. Device maintenance does not need an endpoint secret.")
+            Text("The model weights are downloaded only when requested. Tencent HY-MT2 is Apache 2.0 licensed, supports multilingual translation, and runs locally.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        case .downloading:
+            LabeledContent("Local model") {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Downloading \(BuiltinTranslationModelController.downloadSize)…")
+                        .foregroundStyle(.secondary)
+                    Button("Cancel") { builtinTranslation.cancelDownload() }
+                        .controlSize(.small)
+                }
+            }
+        case .ready:
+            LabeledContent("Local model") {
+                HStack(spacing: 8) {
+                    Label(BuiltinTranslationModelController.modelName, systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Button(role: .destructive) { removeBuiltinTranslationModel() } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Remove downloaded model")
+                }
+            }
+        case .failed(let message):
+            LabeledContent("Local model") {
+                Button("Try Download Again") { builtinTranslation.download() }
+            }
+            Text(message).font(.caption).foregroundStyle(.red)
+        }
+    }
+
+    @ViewBuilder
+    private var virtualDeviceControls: some View {
+        DeviceStatusRow(
+            title: "AI Camera",
+            status: model.cameraExtensionManager.status.label,
+            ready: model.cameraExtensionManager.status == .active,
+            busy: model.deviceOperationInProgress,
+            actionTitle: cameraMaintenanceActionTitle,
+            action: model.cameraExtensionManager.status == .active
+                ? model.deactivateCameraExtension
+                : model.activateCameraExtension
+        )
+        DeviceStatusRow(
+            title: "AI Camera Microphone",
+            status: model.audioDriverManager.status.label,
+            ready: model.audioDriverManager.status == .installed,
+            busy: model.deviceOperationInProgress,
+            actionTitle: audioMaintenanceActionTitle,
+            action: model.audioDriverManager.status == .installed
+                ? model.uninstallAudioDriver
+                : model.installAudioDriver
+        )
+        if model.cameraExtensionManager.status == .needsApproval {
+            Button("Open Extension Settings") {
+                model.cameraExtensionManager.openApprovalSettings()
+            }
+            .controlSize(.small)
+        }
+    }
+
+    @ViewBuilder
+    private var privacyContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Data processing").font(.headline)
+            Text("AI Camera keeps camera and microphone data in memory while it is in use. It passes media from your selected hardware devices to the AI Camera virtual devices and does not save recordings.")
+            if activeLocalProcessingDescriptions.isEmpty && configuredDataRoutes.isEmpty {
+                Text("No AI features are currently processing camera or microphone data.")
+            } else {
+                ForEach(activeLocalProcessingDescriptions, id: \.self) { description in
+                    Label(description, systemImage: "desktopcomputer")
+                }
+                ForEach(activeLoopbackRoutes, id: \.description) { route in
+                    Label(route.description, systemImage: "desktopcomputer")
+                }
+                ForEach(activeExternalRoutes, id: \.description) { route in
+                    Label(route.description, systemImage: "network")
+                }
+            }
+        }
+
+        Divider()
+
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Data collection and AI training").font(.headline)
+            Text("AI Camera does not collect analytics or user data. Camera frames, microphone audio, transcripts, AI prompts and responses, and API keys are not collected by AI Camera or used for AI training.")
+            Text("External services configured in AI may have their own data collection, retention, and AI training policies.")
+        }
+
+        if !advancedExternalRoutes.isEmpty {
+            DisclosureGroup("Advanced data routes") {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(advancedExternalRoutes, id: \.description) { route in
+                        LabeledContent(route.feature, value: route.destination)
+                    }
+                }
+                .padding(.top, 4)
+            }
+        }
+    }
+
+    private var maintenanceSettings: some View {
+        Form {
+            Section {
+                privacyContent
             }
         }
         .formStyle(.grouped)
@@ -547,8 +631,39 @@ struct SettingsView: View {
 
     private var overlaysEnabled: Bool { configuration.configuration.overlays.enabled }
     private var toolsEnabled: Bool { configuration.configuration.overlays.script.enabled }
+    private var transcriptionDisplayEnabled: Bool {
+        configuration.configuration.overlays.enabled
+            && configuration.configuration.overlays.showTranscript
+    }
+    private var translationEnabled: Bool { configuration.configuration.pipeline.translation.enabled }
     private var visionEnabled: Bool {
         configuration.configuration.pipeline.videoStages.contains(where: \.enabled)
+    }
+
+    private var transcriptionDisplayEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { transcriptionDisplayEnabled },
+            set: { enabled in
+                configuration.update { profile in
+                    profile.overlays.showTranscript = enabled
+                    if enabled {
+                        profile.overlays.enabled = true
+                    } else {
+                        profile.pipeline.translation.enabled = false
+                    }
+                }
+            }
+        )
+    }
+
+    private var translationEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { translationEnabled },
+            set: { enabled in
+                guard !enabled || builtinTranslation.isReady else { return }
+                configuration.update { $0.pipeline.translation.enabled = enabled }
+            }
+        )
     }
 
     private var conversationEnabledBinding: Binding<Bool> {
@@ -601,6 +716,7 @@ struct SettingsView: View {
             Toggle("Enabled", isOn: enabled)
                 .labelsHidden()
                 .controlSize(.small)
+                .toggleStyle(.switch)
         }
     }
 
@@ -677,6 +793,13 @@ struct SettingsView: View {
             builtinObjectDetectionBinding.wrappedValue = false
         }
         builtinVision.remove()
+    }
+
+    private func removeBuiltinTranslationModel() {
+        if translationEnabled {
+            translationEnabledBinding.wrappedValue = false
+        }
+        builtinTranslation.remove()
     }
 
     private func videoStageIsEnabled(_ kind: VideoStageKind) -> Bool {
@@ -775,6 +898,113 @@ struct SettingsView: View {
         )
     }
 
+    private func translationStringBinding(
+        _ keyPath: WritableKeyPath<TranslationConfiguration, String>
+    ) -> Binding<String> {
+        Binding(
+            get: { configuration.configuration.pipeline.translation[keyPath: keyPath] },
+            set: { value in
+                configuration.update { $0.pipeline.translation[keyPath: keyPath] = value }
+            }
+        )
+    }
+
+    private var activeLocalProcessingDescriptions: [String] {
+        var descriptions: [String] = []
+        let stages = configuration.configuration.pipeline.videoStages
+        if stages.contains(where: {
+            $0.enabled && $0.kind == .objectDetection && $0.options["provider"]?.stringValue == "builtin"
+        }) {
+            descriptions.append("Built-in vision processes video frames in app memory. Frames are not sent to an external service.")
+        }
+        if stages.contains(where: { $0.enabled && $0.kind == .handGesture }) {
+            descriptions.append("Gesture recognition processes video frames in app memory. Frames are not sent to an external service.")
+        }
+        if translationEnabled {
+            descriptions.append("Built-in translation processes finalized transcript text in app memory. Text is not sent to an external service.")
+        }
+        return descriptions
+    }
+
+    private var activeExternalRoutes: [PrivacyRoute] {
+        configuredDataRoutes.filter { !$0.isLoopback }
+    }
+
+    private var activeLoopbackRoutes: [PrivacyRoute] {
+        configuredDataRoutes.filter(\.isLoopback)
+    }
+
+    private var advancedExternalRoutes: [PrivacyRoute] {
+        configuredDataRoutes.filter { $0.host != "api.openai.com" }
+    }
+
+    private var configuredDataRoutes: [PrivacyRoute] {
+        let profile = configuration.configuration
+        var routes: [PrivacyRoute] = []
+        let conversation = profile.pipeline.conversation
+        if conversation.enabled, conversation.realtimeEnabled,
+           let endpoint = endpoint(withID: conversation.realtimeEndpointID) {
+            let destination = endpoint.hostDisplayName
+            let description = endpoint.baseURL.host?.lowercased() == "api.openai.com"
+                ? "Conversation sends microphone audio to OpenAI Realtime. OpenAI processes it under the API data controls for the organization and project associated with your API key."
+                : "Conversation sends microphone audio to \(destination), using the service configured in AI."
+            routes.append(.init(
+                feature: "Conversation",
+                destination: destination,
+                description: description,
+                host: endpoint.baseURL.host?.lowercased(),
+                isLoopback: EndpointLocation.isLoopback(endpoint.baseURL)
+            ))
+        }
+        if conversation.enabled, conversation.transcriptionEnabled,
+           let endpoint = endpoint(withID: conversation.transcriptionEndpointID) {
+            routes.append(.init(
+                feature: "Transcription",
+                destination: endpoint.hostDisplayName,
+                description: "Transcription sends microphone audio to \(endpoint.hostDisplayName).",
+                host: endpoint.baseURL.host?.lowercased(),
+                isLoopback: EndpointLocation.isLoopback(endpoint.baseURL)
+            ))
+        }
+        if conversation.enabled, let endpoint = endpoint(withID: conversation.agentEndpointID) {
+            routes.append(.init(
+                feature: "Advanced conversation agent",
+                destination: endpoint.hostDisplayName,
+                description: "The advanced conversation agent sends transcript text and enabled scene context to \(endpoint.hostDisplayName).",
+                host: endpoint.baseURL.host?.lowercased(),
+                isLoopback: EndpointLocation.isLoopback(endpoint.baseURL)
+            ))
+        }
+        if conversation.enabled, let endpoint = endpoint(withID: conversation.speechEndpointID) {
+            routes.append(.init(
+                feature: "Advanced speech",
+                destination: endpoint.hostDisplayName,
+                description: "Advanced speech sends agent response text to \(endpoint.hostDisplayName).",
+                host: endpoint.baseURL.host?.lowercased(),
+                isLoopback: EndpointLocation.isLoopback(endpoint.baseURL)
+            ))
+        }
+        for stage in profile.pipeline.videoStages where stage.enabled && stage.endpointID != nil {
+            guard stage.options["provider"]?.stringValue != "builtin",
+                  let endpoint = endpoint(withID: stage.endpointID) else { continue }
+            let feature = stage.kind == .visionLanguage ? "Vision" : "Object detection"
+            routes.append(.init(
+                feature: feature,
+                destination: endpoint.hostDisplayName,
+                description: "\(feature) sends video frames to \(endpoint.hostDisplayName).",
+                host: endpoint.baseURL.host?.lowercased(),
+                isLoopback: EndpointLocation.isLoopback(endpoint.baseURL)
+            ))
+        }
+        var seen = Set<String>()
+        return routes.filter { seen.insert("\($0.feature)|\($0.destination)").inserted }
+    }
+
+    private func endpoint(withID id: String?) -> EndpointConfiguration? {
+        guard let id else { return nil }
+        return configuration.configuration.endpoints.first(where: { $0.id == id })
+    }
+
     private func syncDrafts() {
         syncRealtimeDraft()
     }
@@ -788,6 +1018,50 @@ struct SettingsView: View {
                 configuration.update { $0.capture.width = parts[0]; $0.capture.height = parts[1] }
             }
         )
+    }
+
+    private static let sourceLanguages = [LanguageChoice(code: "auto", name: "Auto-detect")] + modelLanguages
+    private static let targetLanguages = [LanguageChoice(code: "system", name: "System Language")] + modelLanguages
+    private static let modelLanguages = [
+        LanguageChoice(code: "en", name: "English"), LanguageChoice(code: "zh", name: "Chinese"),
+        LanguageChoice(code: "zh-Hant", name: "Traditional Chinese"), LanguageChoice(code: "es", name: "Spanish"),
+        LanguageChoice(code: "fr", name: "French"), LanguageChoice(code: "de", name: "German"),
+        LanguageChoice(code: "it", name: "Italian"), LanguageChoice(code: "pt", name: "Portuguese"),
+        LanguageChoice(code: "ja", name: "Japanese"), LanguageChoice(code: "ko", name: "Korean"),
+        LanguageChoice(code: "ar", name: "Arabic"), LanguageChoice(code: "ru", name: "Russian"),
+        LanguageChoice(code: "uk", name: "Ukrainian"), LanguageChoice(code: "tr", name: "Turkish"),
+        LanguageChoice(code: "hi", name: "Hindi"), LanguageChoice(code: "vi", name: "Vietnamese"),
+        LanguageChoice(code: "th", name: "Thai"), LanguageChoice(code: "id", name: "Indonesian"),
+        LanguageChoice(code: "ms", name: "Malay"), LanguageChoice(code: "tl", name: "Filipino"),
+        LanguageChoice(code: "pl", name: "Polish"), LanguageChoice(code: "cs", name: "Czech"),
+        LanguageChoice(code: "nl", name: "Dutch"), LanguageChoice(code: "he", name: "Hebrew"),
+        LanguageChoice(code: "fa", name: "Persian"), LanguageChoice(code: "ur", name: "Urdu"),
+        LanguageChoice(code: "bn", name: "Bengali"), LanguageChoice(code: "ta", name: "Tamil"),
+        LanguageChoice(code: "te", name: "Telugu"), LanguageChoice(code: "mr", name: "Marathi"),
+        LanguageChoice(code: "gu", name: "Gujarati"), LanguageChoice(code: "km", name: "Khmer"),
+        LanguageChoice(code: "my", name: "Burmese"), LanguageChoice(code: "bo", name: "Tibetan"),
+        LanguageChoice(code: "kk", name: "Kazakh"), LanguageChoice(code: "mn", name: "Mongolian"),
+        LanguageChoice(code: "ug", name: "Uyghur"), LanguageChoice(code: "yue", name: "Cantonese"),
+    ]
+}
+
+private struct LanguageChoice {
+    let code: String
+    let name: String
+}
+
+private struct PrivacyRoute {
+    let feature: String
+    let destination: String
+    let description: String
+    let host: String?
+    let isLoopback: Bool
+}
+
+private extension EndpointConfiguration {
+    var hostDisplayName: String {
+        if EndpointLocation.isLoopback(baseURL) { return "a local service on this Mac" }
+        return baseURL.host ?? baseURL.absoluteString
     }
 }
 

@@ -303,13 +303,48 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
 public struct PipelineConfiguration: Codable, Equatable, Sendable {
     public var videoStages: [VideoStageConfiguration]
     public var conversation: ConversationConfiguration
+    public var translation: TranslationConfiguration
 
     public init(
         videoStages: [VideoStageConfiguration] = [],
-        conversation: ConversationConfiguration = .init()
+        conversation: ConversationConfiguration = .init(),
+        translation: TranslationConfiguration = .init()
     ) {
         self.videoStages = videoStages
         self.conversation = conversation
+        self.translation = translation
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case videoStages
+        case conversation
+        case translation
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        videoStages = try container.decode([VideoStageConfiguration].self, forKey: .videoStages)
+        conversation = try container.decode(ConversationConfiguration.self, forKey: .conversation)
+        translation = try container.decodeIfPresent(TranslationConfiguration.self, forKey: .translation) ?? .init()
+    }
+}
+
+public struct TranslationConfiguration: Codable, Equatable, Sendable {
+    public var enabled: Bool
+    public var model: String
+    public var sourceLanguage: String
+    public var targetLanguage: String
+
+    public init(
+        enabled: Bool = false,
+        model: String = "hy-mt2-1.8b-q4-k-m",
+        sourceLanguage: String = "auto",
+        targetLanguage: String = "system"
+    ) {
+        self.enabled = enabled
+        self.model = model
+        self.sourceLanguage = sourceLanguage
+        self.targetLanguage = targetLanguage
     }
 }
 

@@ -41,6 +41,18 @@ public struct TranscriptionRequest: Equatable, Sendable {
     public init(wavData: Data, language: String? = nil) { self.wavData = wavData; self.language = language }
 }
 
+public struct TranslationRequest: Equatable, Sendable {
+    public var text: String
+    public var sourceLanguage: String
+    public var targetLanguage: String
+
+    public init(text: String, sourceLanguage: String = "auto", targetLanguage: String) {
+        self.text = text
+        self.sourceLanguage = sourceLanguage
+        self.targetLanguage = targetLanguage
+    }
+}
+
 public struct SpeechRequest: Equatable, Sendable {
     public var text: String
     public var voice: String
@@ -126,6 +138,10 @@ public protocol DetectionClient: Sendable {
 
 public protocol TranscriptionClient: Sendable {
     func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptEvent
+}
+
+public protocol TranslationClient: Sendable {
+    func translate(_ request: TranslationRequest) async throws -> String
 }
 
 public protocol SpeechClient: Sendable {

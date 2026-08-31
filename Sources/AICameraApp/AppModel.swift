@@ -70,6 +70,7 @@ final class AppModel: ObservableObject {
     let demandMonitor = MediaDemandMonitor()
     let loginItemController = LoginItemController()
     let builtinVisionModelController = BuiltinVisionModelController()
+    let builtinTranslationModelController = BuiltinTranslationModelController()
 
     private var pipeline: PipelineCoordinator?
     private var videoController: VideoPipelineController?
@@ -677,6 +678,9 @@ final class AppModel: ObservableObject {
             configuration: configuration,
             secrets: AppSecretResolver(),
             builtinDetectionClient: builtinVisionModelController.makeDetectionClient(),
+            builtinTranslationClient: configuration.pipeline.translation.enabled
+                ? builtinTranslationModelController.makeTranslationClient()
+                : nil,
             onSnapshot: { [weak self] snapshot in
                 guard gate.isActive else { return }
                 Task { @MainActor [weak model = self] in
@@ -866,9 +870,8 @@ final class AppModel: ObservableObject {
         case .speechStopped:
             realtimeConversationState = .responding
             await session.closeMicrophoneGate()
-        case .transcript:
-            // Keep renderer and tool diagnostics visible in the compact UI.
-            break
+        case let .transcript(_, text, isFinal):
+            await pipeline?.submitRealtimeTranscript(text: text, isFinal: isFinal)
         case let .functionCall(call):
             realtimeToolContinuationPending = true
             await executeRealtimeTool(call, session: session, generation: generation)

@@ -16,13 +16,15 @@ packages:
   LiveKitWebRTC:
     url: https://github.com/livekit/webrtc-xcframework.git
     exactVersion: 144.7559.14
+  LlamaFramework:
+    path: Packages/LlamaFramework
 
 settings:
   base:
     SWIFT_VERSION: "5.10"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "16"
+    CURRENT_PROJECT_VERSION: "17"
     CODE_SIGN_STYLE: Automatic
     CLANG_ENABLE_MODULES: true
   configs:
@@ -57,6 +59,8 @@ targets:
         buildPhase: resources
       - path: Resources/Overlay
         buildPhase: resources
+      - path: Resources/ThirdParty
+        buildPhase: resources
     configFiles:
       Debug: Config/Local.xcconfig
       Release: Config/Local.xcconfig
@@ -73,6 +77,8 @@ targets:
       - target: AICameraCore
       - package: LiveKitWebRTC
         product: LiveKitWebRTC
+      - package: LlamaFramework
+        product: LlamaFramework
       - sdk: ServiceManagement.framework
       - target: AICameraCameraExtension
         embed: true
