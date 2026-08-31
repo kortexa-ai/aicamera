@@ -175,7 +175,11 @@ struct SettingsView: View {
                 }
             }
 
-            Section {
+            settingsSection(
+                "Conversation",
+                enabled: conversationEnabledBinding,
+                disabledText: "Conversational features are disabled."
+            ) {
                 if conversationEnabled {
                     Picker("Setup", selection: $voicePipelineMode) {
                         Text("Realtime").tag(VoicePipelineMode.openAIRealtime)
@@ -235,11 +239,13 @@ struct SettingsView: View {
                             .textSelection(.enabled)
                     }
                 }
-            } header: {
-                settingsHeader("Conversation", enabled: conversationEnabledBinding)
             }
 
-            Section {
+            settingsSection(
+                "Transcription",
+                enabled: transcriptionDisplayEnabledBinding,
+                disabledText: "Transcript display and local translation are disabled."
+            ) {
                 if transcriptionDisplayEnabled {
                     Toggle("Translate", isOn: translationEnabledBinding)
                         .disabled(!builtinTranslation.isReady)
@@ -260,21 +266,25 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-            } header: {
-                settingsHeader("Transcription", enabled: transcriptionDisplayEnabledBinding)
             }
 
-            Section {
+            settingsSection(
+                "Tools",
+                enabled: toolsEnabledBinding,
+                disabledText: "Realtime tools are disabled."
+            ) {
                 if toolsEnabled {
                     Text("Realtime can currently draw and clear bounded overlays. Screenshot and camera controls will appear here as they become available.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-            } header: {
-                settingsHeader("Tools", enabled: toolsEnabledBinding)
             }
 
-            Section {
+            settingsSection(
+                "Vision & Gestures",
+                enabled: visionEnabledBinding,
+                disabledText: "Vision and gesture processing are disabled."
+            ) {
                 if visionEnabled {
                     builtinVisionControls
                     Toggle("Gestures", isOn: videoStageBinding(kind: .handGesture))
@@ -287,11 +297,13 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-            } header: {
-                settingsHeader("Vision & Gestures", enabled: visionEnabledBinding)
             }
 
-            Section {
+            settingsSection(
+                "Overlays",
+                enabled: overlayBoolBinding(\.enabled),
+                disabledText: "Camera overlays are disabled."
+            ) {
                 if overlaysEnabled {
                     Toggle("Show transcript", isOn: overlayBoolBinding(\.showTranscript))
                     Toggle("Show agent response", isOn: overlayBoolBinding(\.showAgentResponse))
@@ -299,8 +311,6 @@ struct SettingsView: View {
                     Toggle("Show detection boxes", isOn: overlayBoolBinding(\.showDetectionBoxes))
                     Toggle("Show gesture labels", isOn: overlayBoolBinding(\.showGestureLabels))
                 }
-            } header: {
-                settingsHeader("Overlays", enabled: overlayBoolBinding(\.enabled))
             }
 
             if let message = configuration.validationMessage {
@@ -320,35 +330,37 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var builtinVisionControls: some View {
+        Toggle("Built-in object detection", isOn: builtinObjectDetectionBinding)
+            .disabled(!builtinVision.isReady)
+
         switch builtinVision.state {
         case .notDownloaded:
-            LabeledContent("Built-in object detection") {
+            LabeledContent("Local model") {
                 Button("Download \(BuiltinVisionModelController.modelName) · 9 MB") {
                     builtinVision.download()
                 }
             }
         case .downloading:
-            LabeledContent("Built-in object detection") {
+            LabeledContent("Local model") {
                 HStack {
                     ProgressView().controlSize(.small)
                     Text("Downloading…").foregroundStyle(.secondary)
                 }
             }
         case .ready:
-            HStack {
-                Toggle(
-                    "Built-in object detection · \(BuiltinVisionModelController.modelName)",
-                    isOn: builtinObjectDetectionBinding
-                )
-                Spacer()
-                Button(role: .destructive) { removeBuiltinVisionModel() } label: {
-                    Image(systemName: "trash")
+            LabeledContent("Local model") {
+                HStack(spacing: 8) {
+                    Label(BuiltinVisionModelController.modelName, systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Button(role: .destructive) { removeBuiltinVisionModel() } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Remove downloaded model")
                 }
-                .buttonStyle(.borderless)
-                .help("Remove downloaded model")
             }
         case .failed(let message):
-            LabeledContent("Built-in object detection") {
+            LabeledContent("Local model") {
                 Button("Try Download Again") { builtinVision.download() }
             }
             Text(message).font(.caption).foregroundStyle(.red)
@@ -717,6 +729,28 @@ struct SettingsView: View {
                 .labelsHidden()
                 .controlSize(.small)
                 .toggleStyle(.switch)
+        }
+    }
+
+    private func settingsSection<Content: View>(
+        _ title: String,
+        enabled: Binding<Bool>,
+        disabledText: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        Section {
+            settingsHeader(title, enabled: enabled)
+                .font(.headline)
+                .listRowInsets(EdgeInsets(top: 8, leading: 10, bottom: 8, trailing: 10))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            if enabled.wrappedValue {
+                content()
+            } else {
+                Text(disabledText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
