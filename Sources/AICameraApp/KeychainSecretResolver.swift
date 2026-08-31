@@ -66,15 +66,15 @@ struct AppSecretResolver: SecretResolver {
 
     static func mask(_ secret: String) -> String {
         let characters = Array(secret)
-        let visibleCount: Int
-        if let dash = characters.lastIndex(of: "-") {
-            visibleCount = min(characters.count, dash + 1 + 4)
-        } else {
-            visibleCount = min(characters.count, 6)
-        }
-        guard visibleCount < characters.count else { return secret }
-        return String(characters.prefix(visibleCount))
-            + String(repeating: "*", count: characters.count - visibleCount)
+        let recognizedPrefixes = ["sk-svcacct-", "sk-proj-", "sk-"]
+        let requestedVisibleCount = recognizedPrefixes
+            .first(where: { secret.hasPrefix($0) })
+            .map { $0.count + 4 } ?? 6
+
+        // Keep at least four characters hidden even for malformed or unusually
+        // short values, and use a fixed mask so the UI does not disclose length.
+        let visibleCount = min(requestedVisibleCount, max(0, characters.count - 4))
+        return String(characters.prefix(visibleCount)) + "********"
     }
 
     func remove(account: String) throws {
