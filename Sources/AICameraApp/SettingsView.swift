@@ -452,12 +452,10 @@ struct SettingsView: View {
                 ? model.uninstallAudioDriver
                 : model.installAudioDriver
         )
-        if model.cameraExtensionManager.status == .needsApproval {
-            Button("Open Extension Settings") {
-                model.cameraExtensionManager.openApprovalSettings()
-            }
-            .controlSize(.small)
+        Button("Open Camera Extensions") {
+            model.cameraExtensionManager.openApprovalSettings()
         }
+        .controlSize(.small)
     }
 
     @ViewBuilder

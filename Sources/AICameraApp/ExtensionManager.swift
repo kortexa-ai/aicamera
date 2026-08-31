@@ -92,7 +92,9 @@ final class CameraExtensionManager: NSObject, ObservableObject {
     }
 
     func openApprovalSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") {
+        if let url = URL(
+            string: "x-apple.systempreferences:com.apple.ExtensionsPreferences?com.apple.system_extension.cmio"
+        ) {
             NSWorkspace.shared.open(url)
         }
     }

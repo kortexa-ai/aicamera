@@ -6,8 +6,8 @@ Detailed test evidence belongs in [`VALIDATION.md`](VALIDATION.md). Manual accep
 
 ## Current status
 
-- Current development target: build 19. It adds downloadable RF-DETR Medium and Large Core ML object detection beside lightweight YOLOv3 Tiny, with Medium as the default recommendation and Large identified for higher-performance Apple silicon. Its bundled audio driver remains build 12 because this host-only change does not alter the validated HAL binary.
-- The installed host is signed build 19 in `/Applications`. Its validated HAL driver remains build 12 because this host-only change does not alter or reinstall the driver.
+- Current development target: build 21. It keeps a direct Camera Extensions shortcut visible beside the virtual-device controls so users can quickly re-enable the media extension after installing an updated signed build. Its bundled audio driver remains build 12 because this host-only change does not alter the validated HAL binary.
+- The installed host is signed build 21 in `/Applications`. Its validated HAL driver remains build 12 because this host-only change does not alter or reinstall the driver.
 - Build-12 microphone acceptance passed four normal cycles, short-lived clients, two simultaneous clients with `0 → 1 → 2 → 1 → 0` demand, forced client exit, local-test takeover, and host quit/relaunch while demand remained active. Callback flow, physical Yeti acquisition, prompt teardown, and return to idle all passed without recording media.
 - A bounded QuickTime check exposed and selected **AI Camera** without recording, but the build-10 extension could not deliver camera demand to the host. The extension runs inside `cmiodalassistant`, whose service container is isolated from the GUI user's app-group container; sandbox logs confirmed that the shared JSON-file transport is not usable across those processes.
 - Build 13 replaces that file transport with a bounded timestamped `NSData` snapshot on the read-only CoreMediaIO custom device property `4cc_aicd_glob_0000`. The host resolves the camera by stable UID, reads the raw property bytes through the legacy C API, and rejects missing, malformed, future-dated, or stale snapshots. Build 14 preserves that behavior and passes 89 Swift tests, full non-installing validation, the strict and sanitizer HAL harnesses, an unsigned four-target build, strict Release signing without `get-task-allow`, and `git diff --check`.
@@ -37,7 +37,7 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 
 ### Installation, onboarding, and product identity
 
-- [ ] Improve first-install and update guidance for enabling the media extension. Detect approval state, give an explicit step-by-step path, and offer to open the relevant System Settings/Preferences page when macOS permits it.
+- [x] Improve first-install and update guidance for enabling the media extension. Detect approval state, give an explicit step-by-step path, and always offer to open the relevant System Settings/Preferences page when macOS permits it.
 - [x] Create a production app icon and use the same canonical asset in Finder, Login Items, Extensions, the popup header, Dock, App Switcher, and Settings. The app icon shown inside the popup must not drift from the bundled application icon.
 - [ ] Use the canonical production icon in the planned About window when that window is implemented.
 - [x] Derive a clear monochrome macOS template image for the menu-bar/system-tray item from the same visual identity. Verify the tray glyph and full-color app icon look like one product at standard and Retina sizes.
