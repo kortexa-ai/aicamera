@@ -330,29 +330,39 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var builtinVisionControls: some View {
-        Toggle("Built-in object detection", isOn: builtinObjectDetectionBinding)
-            .disabled(!builtinVision.isReady)
+        Toggle("Object detection", isOn: builtinObjectDetectionBinding)
+            .disabled(!builtinVision.isReady(selectedBuiltinVisionModel))
 
-        switch builtinVision.state {
+        Picker("Detector", selection: builtinVisionModelBinding) {
+            ForEach(BuiltinVisionModel.allCases) { visionModel in
+                Text("\(visionModel.name) — \(visionModel.summary)").tag(visionModel)
+            }
+        }
+        .disabled(builtinVision.hasActiveDownload)
+
+        switch builtinVision.state(for: selectedBuiltinVisionModel) {
         case .notDownloaded:
             LabeledContent("Local model") {
-                Button("Download \(BuiltinVisionModelController.modelName) · 9 MB") {
-                    builtinVision.download()
+                Button("Download \(selectedBuiltinVisionModel.name) · \(selectedBuiltinVisionModel.downloadSize)") {
+                    builtinVision.download(selectedBuiltinVisionModel)
                 }
             }
         case .downloading:
             LabeledContent("Local model") {
-                HStack {
+                HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Downloading…").foregroundStyle(.secondary)
+                    Text("Downloading \(selectedBuiltinVisionModel.downloadSize)…")
+                        .foregroundStyle(.secondary)
+                    Button("Cancel") { builtinVision.cancelDownload(selectedBuiltinVisionModel) }
+                        .controlSize(.small)
                 }
             }
         case .ready:
             LabeledContent("Local model") {
                 HStack(spacing: 8) {
-                    Label(BuiltinVisionModelController.modelName, systemImage: "checkmark.circle.fill")
+                    Label(selectedBuiltinVisionModel.name, systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
-                    Button(role: .destructive) { removeBuiltinVisionModel() } label: {
+                    Button(role: .destructive) { removeBuiltinVisionModel(selectedBuiltinVisionModel) } label: {
                         Image(systemName: "trash")
                     }
                     .buttonStyle(.borderless)
@@ -361,11 +371,19 @@ struct SettingsView: View {
             }
         case .failed(let message):
             LabeledContent("Local model") {
-                Button("Try Download Again") { builtinVision.download() }
+                Button("Try Download Again") { builtinVision.download(selectedBuiltinVisionModel) }
             }
             Text(message).font(.caption).foregroundStyle(.red)
         }
-        Text("Apple's compact YOLOv3 Tiny model runs entirely on this Mac; camera frames are not uploaded.")
+        Text(selectedBuiltinVisionModel.detail)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        if selectedBuiltinVisionModel != .yoloV3Tiny {
+            Text("RF-DETR by Roboflow · Apache 2.0")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        Text("Detection runs entirely in this app's memory; camera frames are not uploaded.")
             .font(.caption)
             .foregroundStyle(.secondary)
     }
@@ -789,9 +807,11 @@ struct SettingsView: View {
         Binding(
             get: {
                 configuration.configuration.pipeline.videoStages.contains {
-                    $0.kind == .objectDetection
-                        && $0.options["provider"]?.stringValue == "builtin"
-                        && $0.enabled
+                        $0.kind == .objectDetection
+                            && $0.options["provider"]?.stringValue == "builtin"
+                            && ($0.options["model"]?.stringValue ?? BuiltinVisionModel.yoloV3Tiny.rawValue)
+                                == selectedBuiltinVisionModel.rawValue
+                            && $0.enabled
                 }
             },
             set: { enabled in
@@ -800,6 +820,7 @@ struct SettingsView: View {
                         $0.kind == .objectDetection && $0.options["provider"]?.stringValue == "builtin"
                     }) {
                         profile.pipeline.videoStages[index].enabled = enabled
+                        profile.pipeline.videoStages[index].options["model"] = .string(selectedBuiltinVisionModel.rawValue)
                     } else {
                         profile.pipeline.videoStages.append(.init(
                             id: "builtin-objects",
@@ -809,6 +830,7 @@ struct SettingsView: View {
                             maximumFrameAgeMilliseconds: 500,
                             options: [
                                 "provider": .string("builtin"),
+                                "model": .string(selectedBuiltinVisionModel.rawValue),
                                 "confidence": .number(0.35),
                             ]
                         ))
@@ -822,11 +844,52 @@ struct SettingsView: View {
         )
     }
 
-    private func removeBuiltinVisionModel() {
+    private var selectedBuiltinVisionModel: BuiltinVisionModel {
+        if let rawValue = configuration.configuration.pipeline.videoStages.first(where: {
+            $0.kind == .objectDetection && $0.options["provider"]?.stringValue == "builtin"
+        })?.options["model"]?.stringValue,
+           let selected = BuiltinVisionModel(rawValue: rawValue) {
+            return selected
+        }
+        return builtinVision.isReady(.yoloV3Tiny) ? .yoloV3Tiny : BuiltinVisionModelController.defaultModel
+    }
+
+    private var builtinVisionModelBinding: Binding<BuiltinVisionModel> {
+        Binding(
+            get: { selectedBuiltinVisionModel },
+            set: { selected in
+                configuration.update { profile in
+                    if let index = profile.pipeline.videoStages.firstIndex(where: {
+                        $0.kind == .objectDetection && $0.options["provider"]?.stringValue == "builtin"
+                    }) {
+                        profile.pipeline.videoStages[index].options["model"] = .string(selected.rawValue)
+                        if !builtinVision.isReady(selected) {
+                            profile.pipeline.videoStages[index].enabled = false
+                        }
+                    } else {
+                        profile.pipeline.videoStages.append(.init(
+                            id: "builtin-objects",
+                            kind: .objectDetection,
+                            enabled: false,
+                            maximumRateHz: 5,
+                            maximumFrameAgeMilliseconds: 500,
+                            options: [
+                                "provider": .string("builtin"),
+                                "model": .string(selected.rawValue),
+                                "confidence": .number(0.35),
+                            ]
+                        ))
+                    }
+                }
+            }
+        )
+    }
+
+    private func removeBuiltinVisionModel(_ visionModel: BuiltinVisionModel) {
         if builtinObjectDetectionBinding.wrappedValue {
             builtinObjectDetectionBinding.wrappedValue = false
         }
-        builtinVision.remove()
+        builtinVision.remove(visionModel)
     }
 
     private func removeBuiltinTranslationModel() {

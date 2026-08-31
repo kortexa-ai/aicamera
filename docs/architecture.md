@@ -7,7 +7,7 @@ hardware camera ──AVCaptureVideoDataOutput──> render/overlay ──> pre
           │                                      │
           │ sampled latest frames                └──> CMIO sink queue (capacity 1)
           ├──> Apple Vision hand gestures                 │
-          ├──> detector adapter                            v
+          ├──> bounded Core ML / detector adapter          v
           └──> VLM adapter                       camera system extension
                                                          │
                                                          └──> AI Camera source
@@ -76,7 +76,7 @@ The host captures BGRA frames. `OverlayRenderer` aspect-fills and optionally mir
 
 The sink fails closed to other writers. If the CMIO service can resolve the client, Security.framework validates the live host against the exact identifier, Apple generic anchor, extension-derived team, and no-`get-task-allow` requirement. Every authorization also takes two matching kernel code-signing snapshots through PID-version-bound `csops_audittoken`. These snapshots require the installed path, exact identifier and team, an allowed Apple validation category, hardened runtime and library validation, and no ad-hoc, debugged, invalid-page, or `get-task-allow` state. The accepted execution binding and `CMIOExtensionClient.clientID` are checked again at start. A bounded watchdog checks the binding while consumption waits, and every forwarded sample gets an immediate check. Stop or identity change clears or revokes the binding; authorization is never cached by numeric PID.
 
-Apple Vision hand pose processing runs locally. Network frame JPEGs have a maximum edge of 1024 pixels. Stage age and rate settings are part of the profile.
+Apple Vision hand pose processing runs locally. Optional Core ML object detection uses an integrity-checked downloaded YOLOv3 Tiny, RF-DETR Medium, or RF-DETR Large model. RF-DETR preprocessing resizes into a bounded square RGB tensor, applies ImageNet normalization, and decodes at most 300 query/class candidates into the shared detection limit. Network frame JPEGs have a maximum edge of 1024 pixels. Stage age and rate settings are part of the profile.
 
 ## Audio path
 

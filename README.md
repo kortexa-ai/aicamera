@@ -10,7 +10,7 @@ A fresh profile uses the system-default hardware inputs and pure passthrough: no
 - Pure passthrough defaults; configurable physical inputs, resolution, frame rate, mirroring, overlays, gains, and AI stages remain optional.
 - Idle-only local camera and microphone tests show the processed preview and a bounded live input meter. Real client demand cancels testing immediately; inline settings buttons open the matching in-app device controls.
 - Optional launch at login so the menu-bar host is available before a virtual-device client opens.
-- Bounded gesture, object-detection, VLM, ASR, agent, and TTS stages with an ASR toggle and an independent transcription lane.
+- Bounded gesture, object-detection, VLM, ASR, agent, and TTS stages with an ASR toggle and an independent transcription lane. Local detection offers lightweight YOLOv3 Tiny plus downloadable Apache-2.0 RF-DETR Medium and Large Core ML models.
 - OpenAI-compatible chat, vision, transcription, and speech adapters.
 - Kortexa `/detect` and raw-PCM `/transcribe/pcm` adapters.
 - Hand gesture recognition with Apple Vision. Gesture events can trigger an agent response.

@@ -109,10 +109,12 @@ security add-generic-password -U \
 Each stage has a stable `id`, `kind`, enable switch, optional endpoint, maximum request rate, maximum accepted frame age, prompt, and options.
 
 - `handGesture` uses Apple Vision locally and needs no endpoint.
-- `objectDetection` requires a `kortexaDetection` endpoint.
+- `objectDetection` normally requires a `kortexaDetection` endpoint. A local stage instead sets `options.provider` to `builtin` and `options.model` to `yolov3-tiny`, `rfdetr-medium`, or `rfdetr-large`; it needs no endpoint.
 - `visionLanguage` requires an `openAIVision` endpoint.
 
 A stage keeps at most one in-flight request and one replaceable pending frame. Slow results that exceed `maximumFrameAgeMilliseconds` are discarded.
+
+Local object-detection weights are explicit downloads. The app verifies pinned SHA-256 hashes, compiles the selected Core ML package once, and stores only the compiled model in the user's Application Support directory. RF-DETR Medium is the default recommendation; Large is the higher-accuracy option for M4 Pro / M3 Max-class hardware and above. The generic macOS Core ML packages and provenance are published at [`kortexa-ai/rf-detr-coreml`](https://huggingface.co/kortexa-ai/rf-detr-coreml). Removing a model disables its active stage before deleting the compiled asset.
 
 ## Conversation
 

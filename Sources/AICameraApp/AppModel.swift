@@ -673,11 +673,16 @@ final class AppModel: ObservableObject {
         if let pipeline, let runGate { return (pipeline, runGate) }
 
         let configuration = configurationController.configuration
+        let builtinDetectionModelID = configuration.pipeline.videoStages.first(where: {
+            $0.kind == .objectDetection && $0.options["provider"]?.stringValue == "builtin"
+        })?.options["model"]?.stringValue
         let gate = PipelineRunGate()
         let coordinator = PipelineCoordinator(
             configuration: configuration,
             secrets: AppSecretResolver(),
-            builtinDetectionClient: builtinVisionModelController.makeDetectionClient(),
+            builtinDetectionClient: builtinVisionModelController.makeDetectionClient(
+                modelID: builtinDetectionModelID
+            ),
             builtinTranslationClient: configuration.pipeline.translation.enabled
                 ? builtinTranslationModelController.makeTranslationClient()
                 : nil,
