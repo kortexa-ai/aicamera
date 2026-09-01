@@ -12,7 +12,7 @@ A new profile is operational without model or hardware configuration. It uses sy
 
 ## Import and export
 
-Use **Settings → AI & Advanced → Import…** or **Export…** to move a profile between
+Use **Settings → AI → Import…** or **Export…** to move a profile between
 installations. Imports are limited to 1 MiB and must pass the same schema, endpoint, privacy,
 and credential-reference validation as the active profile before they replace it. A rejected
 import leaves the active profile unchanged.
@@ -70,7 +70,7 @@ For streamed PCM, `x-sample-rate` on the response takes precedence over numeric 
 
 ## Authentication
 
-The Kortexa API key field appears under **Settings → AI & Advanced → Models on Smarty**, beside
+The Kortexa API key field appears under the development-only Smarty controls, beside
 the features that use it. The key authenticates HTTPS AI requests routed by `api.kortexa.ai` to
 Smarty. Pure passthrough, local Apple Vision gesture detection, virtual-device maintenance, and
 login-item management do not need it. The value is stored under Keychain service
@@ -116,12 +116,20 @@ A stage keeps at most one in-flight request and one replaceable pending frame. S
 
 Local object-detection weights are explicit downloads. The app verifies pinned SHA-256 hashes, compiles the selected Core ML package once, and stores only the compiled model in the user's Application Support directory. RF-DETR Medium is the default recommendation; Large is the higher-accuracy option for M4 Pro / M3 Max-class hardware and above. The generic macOS Core ML packages and provenance are published at [`kortexa-ai/rf-detr-coreml`](https://huggingface.co/kortexa-ai/rf-detr-coreml). Removing a model disables its active stage before deleting the compiled asset.
 
-## Conversation
+## Transcription and conversation
 
-The optional conversation selects realtime, transcription, agent, and speech endpoint IDs. Settings
-offers mutually exclusive **Separate ASR + agent + TTS**, **OpenAI Realtime**, and **Compatible
-Realtime** voice pipelines. Saving either Realtime choice disables transcription-driven replies and
-gesture-driven legacy replies, preventing the separate response path from running concurrently.
+Transcription is an independent AI feature. It can remain enabled when Conversation is disabled,
+and finalized microphone windows are then sent to the selected ASR endpoint for transcript display
+and optional local translation. Settings configures OpenAI first, uses `gpt-transcribe` by default,
+and stores the shared OpenAI API key in Keychain. Disabling Transcription also disables translation
+and transcript display; it does not affect microphone passthrough.
+
+Conversation selects realtime, agent, and speech endpoint IDs. Settings offers mutually exclusive
+**Separate ASR + agent + TTS**, **OpenAI Realtime**, and **Compatible Realtime** voice pipelines.
+Saving either Realtime choice disables transcription-driven replies and gesture-driven legacy
+replies, preventing the separate response path from running concurrently. Independent Transcription
+may remain enabled; while a Realtime session is active, its transcript is reused and batch ASR is
+suppressed so the same audio is not uploaded twice.
 Set `realtimeEnabled` and `realtimeEndpointID` to use an `openAIRealtime` endpoint. Signaling uses the
 endpoint's HTTP(S) base URL and `POST /v1/realtime/calls`. Existing profiles default realtime to
 disabled when these keys are absent.
@@ -129,7 +137,7 @@ disabled when these keys are absent.
 Canonical OpenAI and each compatible host use distinct Keychain account references so changing a
 base URL cannot silently send one provider's saved bearer token to another provider.
 
-The legacy transcription, agent, and speech roles remain valid as fallback paths and can coexist with realtime. These roles can be omitted independently. `transcriptionEnabled` controls ASR without disabling microphone passthrough or barge-in. `utteranceSeconds` controls fixed 16 kHz ASR windows from 0.5 through 30 seconds. The current speech gate rejects all-silence windows; it is not a full VAD.
+The legacy transcription, agent, and speech roles remain valid as fallback paths and can coexist with realtime. These roles can be omitted independently. `transcriptionEnabled` controls ASR independently of `conversation.enabled`, without disabling microphone passthrough or barge-in. `utteranceSeconds` controls fixed 16 kHz ASR windows from 0.5 through 30 seconds. The current speech gate rejects all-silence windows; it is not a full VAD.
 
 `activationMode` is `wakePhrase` or `alwaysListening`. Checked-in profiles use `wakePhrase`. In that mode, `respondToFinalTranscripts` allows only accepted final ASR text to reach the agent: a leading, case-insensitive `wakePhrase` either prefixes a command or arms the next speech-bearing utterance for `wakeWindowSeconds` (1 through 30). The phrase must contain at least one letter or number and is limited to 128 characters. The deadline uses each utterance's monotonic capture time, so ASR latency cannot extend or shorten the physical window. Fixed ASR windows can still split a phrase at a boundary; bounded overlap is deferred.
 

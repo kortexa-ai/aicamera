@@ -298,9 +298,8 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(AICameraConfiguration.self, from: malformed))
     }
 
-    func testEffectiveTranscriptionRequiresEndpoint() {
+    func testIndependentTranscriptionRequiresEndpointWhenConversationIsDisabled() {
         var configuration = AICameraConfiguration.default
-        configuration.pipeline.conversation.enabled = true
         configuration.pipeline.conversation.transcriptionEnabled = true
         XCTAssertThrowsError(try ConfigurationValidator.validate(configuration)) { error in
             XCTAssertEqual(
@@ -309,9 +308,15 @@ final class ConfigurationTests: XCTestCase {
             )
         }
 
-        configuration.pipeline.conversation.transcriptionEnabled = false
-        configuration.pipeline.conversation.respondToFinalTranscripts = false
-        configuration.pipeline.conversation.respondToGestures = false
+        configuration.endpoints = [
+            .init(
+                id: "asr",
+                adapter: .openAITranscription,
+                baseURL: URL(string: "https://api.openai.com")!,
+                model: "gpt-transcribe"
+            ),
+        ]
+        configuration.pipeline.conversation.transcriptionEndpointID = "asr"
         XCTAssertNoThrow(try ConfigurationValidator.validate(configuration))
     }
 

@@ -30,7 +30,7 @@ This builds temporary AddressSanitizer/UndefinedBehaviorSanitizer and ThreadSani
 
 ## Unit coverage
 
-The 93 Swift tests cover pure-passthrough defaults, profile round trips and legacy migration, palm-relative rotation-independent gesture classification, wake-phrase matching and capture-time expiry, nominal frame-rate matching, loop-safe physical-input selection, local-test demand priority/cancellation, normalized microphone levels, the camera custom-property address and bounded snapshot codec, remote privacy grants, adapter normalization, WAV encoding/decoding, streamed-speech metadata, cumulative and buffer limits, redirect rejection, startup and active-body cancellation, per-modality stale results, result expiry, and latest-value mailbox replacement. App media orchestration, login registration, physical-device release, and live CoreMediaIO lifecycle remain signed, manual per-release checks. Signed results and the current automated boundary are recorded in [`VALIDATION.md`](../VALIDATION.md).
+The Swift tests cover pure-passthrough defaults, profile round trips and legacy migration, independent transcription validation, OpenAI transcription request construction, palm-relative rotation-independent gesture classification, wake-phrase matching and capture-time expiry, nominal frame-rate matching, loop-safe physical-input selection, local-test demand priority/cancellation, normalized microphone levels, the camera custom-property address and bounded snapshot codec, remote privacy grants, adapter normalization, WAV encoding/decoding, streamed-speech metadata, cumulative and buffer limits, redirect rejection, startup and active-body cancellation, per-modality stale results, result expiry, and latest-value mailbox replacement. App media orchestration, login registration, physical-device release, and live CoreMediaIO lifecycle remain signed, manual per-release checks. Signed results and the current automated boundary are recorded in [`VALIDATION.md`](../VALIDATION.md).
 
 ## Manual device acceptance
 
@@ -83,16 +83,19 @@ Use a signed app installed in `/Applications`.
 
 ### Conversation
 
-1. Confirm a wake phrase and command in one final transcript starts one agent turn.
-2. Speak the wake phrase alone, then a command in the next window. Confirm the capture-time window is honored even with ASR latency.
-3. Confirm interim or unrelated ambient transcripts do not start a turn in wake mode.
-4. Confirm a gesture starts a turn without arming or consuming the voice gate.
-5. During streamed speech, barge in and confirm that the HTTP body and every queued audio buffer stop. Then start another turn and confirm no stale speech resumes.
-6. Load a legacy profile without `activationMode` and confirm its intentional always-listening behavior before migrating it.
+1. Disable Conversation, enable Transcription, save an OpenAI API key, and confirm finalized speech appears as transcript without starting an agent turn. Confirm the key remains masked and is stored only in Keychain.
+2. Enable local translation and confirm it consumes the transcript while Conversation remains disabled.
+3. Enable OpenAI Realtime while Transcription remains enabled. Confirm the Realtime transcript is displayed and no separate `/v1/audio/transcriptions` request is made during the active session.
+4. Confirm a wake phrase and command in one final transcript starts one agent turn in the separate pipeline.
+5. Speak the wake phrase alone, then a command in the next window. Confirm the capture-time window is honored even with ASR latency.
+6. Confirm interim or unrelated ambient transcripts do not start a turn in wake mode.
+7. Confirm a gesture starts a turn without arming or consuming the voice gate.
+8. During streamed speech, barge in and confirm that the HTTP body and every queued audio buffer stop. Then start another turn and confirm no stale speech resumes.
+9. Load a legacy profile without `activationMode` and confirm its intentional always-listening behavior before migrating it.
 
 ### Models
 
-In **Settings → AI & Advanced**, confirm only the verified running Smarty choices are shown: `qwen-3.8-27b` or `lfm2.5-8b-a1b` for conversation, `lfm2.5-vl-3b` for scene understanding, `yolo26n.pt` for detection, `Qwen/Qwen3-ASR-1.7B` for ASR, and `qwen3-tts-customvoice-1.7b` for speech. Save the Kortexa API key there and confirm Privacy & Maintenance contains no unrelated generic secret editor.
+In development builds, confirm the Smarty preset still exposes only verified running choices. Production Settings should present OpenAI-first transcription and Realtime controls, built-in model downloads, and no unrelated generic secret editor.
 
 Use the Smarty profile and check each real changed route, not only a health endpoint:
 

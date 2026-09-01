@@ -15,6 +15,11 @@ struct SettingsView: View {
     @State private var realtimeCredential = ""
     @State private var realtimeCredentialSummary: String?
     @State private var realtimeMessage: String?
+    @State private var transcriptionModel = ConfigurationController.defaultTranscriptionModel
+    @State private var transcriptionLanguage = "auto"
+    @State private var transcriptionCredential = ""
+    @State private var transcriptionCredentialSummary: String?
+    @State private var transcriptionMessage: String?
     @State private var useHermes = false
     @State private var conversationDraftEnabled: Bool
 
@@ -243,10 +248,55 @@ struct SettingsView: View {
 
             settingsSection(
                 "Transcription",
-                enabled: transcriptionDisplayEnabledBinding,
-                disabledText: "Transcript display and local translation are disabled."
+                enabled: transcriptionEnabledBinding,
+                disabledText: "Transcription and translation are disabled."
             ) {
-                if transcriptionDisplayEnabled {
+                if transcriptionEnabled {
+                    LabeledContent("Service", value: transcriptionServiceName)
+                    Picker("Model", selection: $transcriptionModel) {
+                        ForEach(transcriptionModelChoices, id: \.self) { Text($0).tag($0) }
+                    }
+                    Picker("Language", selection: $transcriptionLanguage) {
+                        ForEach(Self.transcriptionLanguages, id: \.code) { language in
+                            Text(language.name).tag(language.code)
+                        }
+                    }
+                    if let transcriptionCredentialSummary {
+                        LabeledContent("API key") {
+                            HStack(spacing: 8) {
+                                Text(transcriptionCredentialSummary).monospaced()
+                                Button(role: .destructive) { removeOpenAICredential() } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Remove the shared OpenAI API key")
+                            }
+                        }
+                    }
+                    SecureField(
+                        transcriptionCredentialSummary == nil ? "Add API key" : "Replace API key",
+                        text: $transcriptionCredential
+                    )
+                    HStack {
+                        Button(transcriptionCredentialSummary == nil ? "Save & Enable" : "Save Changes") {
+                            saveTranscriptionConfiguration()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Spacer()
+                        Text("Shared with OpenAI Realtime · Stored in Keychain")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Finalized audio windows are sent to OpenAI only while Transcription is enabled. An active Realtime conversation supplies its own transcript, so audio is not uploaded twice.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let transcriptionMessage {
+                        Text(transcriptionMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+
                     Toggle("Translate", isOn: translationEnabledBinding)
                         .disabled(!builtinTranslation.isReady)
                     builtinTranslationControls
@@ -553,6 +603,27 @@ struct SettingsView: View {
         conversationDraftEnabled = conversation.enabled
     }
 
+    private func syncTranscriptionDraft() {
+        transcriptionCredentialSummary = AppSecretResolver().maskedSecret(
+            account: ConfigurationController.openAICredentialAccount
+        )
+        guard let endpoint = transcriptionEndpoint,
+              endpoint.baseURL.host?.lowercased() == "api.openai.com" else {
+            transcriptionModel = ConfigurationController.defaultTranscriptionModel
+            transcriptionLanguage = "auto"
+            transcriptionMessage = transcriptionEndpoint == nil
+                ? nil
+                : "A compatible transcription endpoint is active. Save to switch this lane to OpenAI."
+            return
+        }
+        transcriptionModel = endpoint.model ?? ConfigurationController.defaultTranscriptionModel
+        let language = endpoint.options["language"]?.stringValue ?? "auto"
+        transcriptionLanguage = Self.transcriptionLanguages.contains(where: { $0.code == language })
+            ? language
+            : "auto"
+        transcriptionMessage = nil
+    }
+
     private func handleVoicePipelineSelection(_ mode: VoicePipelineMode) {
         realtimeMessage = nil
         if mode == .openAIRealtime {
@@ -619,7 +690,6 @@ struct SettingsView: View {
                 profile.pipeline.conversation.enabled = true
                 profile.pipeline.conversation.realtimeEnabled = true
                 profile.pipeline.conversation.realtimeEndpointID = endpointID
-                profile.pipeline.conversation.transcriptionEnabled = false
                 profile.pipeline.conversation.respondToFinalTranscripts = false
                 profile.pipeline.conversation.respondToGestures = false
                 profile.privacy.grants.removeAll(where: { $0.endpointID == endpointID })
@@ -635,10 +705,102 @@ struct SettingsView: View {
                 }
             }
             realtimeCredentialSummary = AppSecretResolver().maskedSecret(account: credentialAccount)
+            if credentialAccount == ConfigurationController.openAICredentialAccount {
+                transcriptionCredentialSummary = realtimeCredentialSummary
+            }
             conversationDraftEnabled = true
             realtimeMessage = configuration.validationMessage ?? "Realtime configuration saved."
         } catch {
             realtimeMessage = "Realtime credential save failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func saveTranscriptionConfiguration() {
+        let model = transcriptionModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !model.isEmpty else {
+            transcriptionMessage = "Choose a transcription model."
+            return
+        }
+        guard Self.transcriptionLanguages.contains(where: { $0.code == transcriptionLanguage }) else {
+            transcriptionMessage = "Choose a supported transcription language."
+            return
+        }
+        guard transcriptionCredentialSummary != nil || !transcriptionCredential.isEmpty else {
+            transcriptionMessage = "Add an OpenAI API key to enable Transcription."
+            return
+        }
+        do {
+            if !transcriptionCredential.isEmpty {
+                try AppSecretResolver().store(
+                    transcriptionCredential,
+                    account: ConfigurationController.openAICredentialAccount
+                )
+                transcriptionCredential = ""
+            }
+            configuration.update { profile in
+                installOpenAITranscriptionConfiguration(
+                    in: &profile,
+                    model: model,
+                    language: transcriptionLanguage
+                )
+                profile.overlays.enabled = true
+                profile.overlays.showTranscript = true
+            }
+            let summary = AppSecretResolver().maskedSecret(
+                account: ConfigurationController.openAICredentialAccount
+            )
+            transcriptionCredentialSummary = summary
+            realtimeCredentialSummary = summary
+            transcriptionMessage = configuration.validationMessage ?? "OpenAI transcription configuration saved."
+        } catch {
+            transcriptionMessage = "OpenAI credential save failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func installOpenAITranscriptionConfiguration(
+        in profile: inout AICameraConfiguration,
+        model: String,
+        language: String
+    ) {
+        let endpointID = ConfigurationController.openAITranscriptionEndpointID
+        let endpoint = EndpointConfiguration(
+            id: endpointID,
+            adapter: .openAITranscription,
+            baseURL: ConfigurationController.openAIAPIBaseURL,
+            model: model,
+            auth: .init(
+                kind: .bearerKeychain,
+                reference: ConfigurationController.openAICredentialAccount
+            ),
+            timeoutSeconds: 30,
+            options: ["language": .string(language)]
+        )
+        profile.endpoints.removeAll(where: { $0.id == endpointID })
+        profile.endpoints.append(endpoint)
+        profile.pipeline.conversation.transcriptionEnabled = true
+        profile.pipeline.conversation.transcriptionEndpointID = endpointID
+        profile.privacy.networkMode = .allowListed
+        if !profile.privacy.allowedHosts.map({ $0.lowercased() }).contains("api.openai.com") {
+            profile.privacy.allowedHosts.append("api.openai.com")
+        }
+        profile.privacy.grants.removeAll(where: { $0.endpointID == endpointID })
+        profile.privacy.grants.append(.init(endpointID: endpointID, allowedData: [.rawAudio]))
+    }
+
+    private var transcriptionEndpoint: EndpointConfiguration? {
+        endpoint(withID: configuration.configuration.pipeline.conversation.transcriptionEndpointID)
+    }
+
+    private var transcriptionServiceName: String {
+        guard let endpoint = transcriptionEndpoint else { return "OpenAI" }
+        return endpoint.baseURL.host?.lowercased() == "api.openai.com"
+            ? "OpenAI"
+            : endpoint.hostDisplayName
+    }
+
+    private var transcriptionModelChoices: [String] {
+        ([transcriptionModel] + ConfigurationController.transcriptionModels).reduce(into: []) {
+            if !$0.contains($1) { $0.append($1) }
         }
     }
 
@@ -659,27 +821,45 @@ struct SettingsView: View {
 
     private var overlaysEnabled: Bool { configuration.configuration.overlays.enabled }
     private var toolsEnabled: Bool { configuration.configuration.overlays.script.enabled }
-    private var transcriptionDisplayEnabled: Bool {
-        configuration.configuration.overlays.enabled
-            && configuration.configuration.overlays.showTranscript
+    private var transcriptionEnabled: Bool {
+        configuration.configuration.pipeline.conversation.transcriptionEnabled
     }
     private var translationEnabled: Bool { configuration.configuration.pipeline.translation.enabled }
     private var visionEnabled: Bool {
         configuration.configuration.pipeline.videoStages.contains(where: \.enabled)
     }
 
-    private var transcriptionDisplayEnabledBinding: Binding<Bool> {
+    private var transcriptionEnabledBinding: Binding<Bool> {
         Binding(
-            get: { transcriptionDisplayEnabled },
+            get: { transcriptionEnabled },
             set: { enabled in
                 configuration.update { profile in
-                    profile.overlays.showTranscript = enabled
                     if enabled {
+                        let endpointID = profile.pipeline.conversation.transcriptionEndpointID
+                        let hasCompatibleEndpoint = profile.endpoints.contains { endpoint in
+                            endpoint.id == endpointID
+                                && [.openAITranscription, .kortexaPCMTranscription].contains(endpoint.adapter)
+                        }
+                        if hasCompatibleEndpoint {
+                            profile.pipeline.conversation.transcriptionEnabled = true
+                        } else {
+                            installOpenAITranscriptionConfiguration(
+                                in: &profile,
+                                model: transcriptionModel,
+                                language: transcriptionLanguage
+                            )
+                        }
                         profile.overlays.enabled = true
+                        profile.overlays.showTranscript = true
                     } else {
+                        profile.pipeline.conversation.transcriptionEnabled = false
                         profile.pipeline.translation.enabled = false
+                        profile.overlays.showTranscript = false
                     }
                 }
+                transcriptionMessage = enabled && transcriptionCredentialSummary == nil
+                    ? "Add an OpenAI API key before transcription can start."
+                    : nil
             }
         )
     }
@@ -788,9 +968,14 @@ struct SettingsView: View {
             ? ConfigurationController.openAIRealtimeBaseURL
             : URL(string: realtimeBaseURL)
         guard let url else { return }
+        let account = ConfigurationController.realtimeCredentialAccount(for: url)
+        if account == ConfigurationController.openAICredentialAccount {
+            removeOpenAICredential()
+            return
+        }
         do {
             try AppSecretResolver().remove(
-                account: ConfigurationController.realtimeCredentialAccount(for: url)
+                account: account
             )
             realtimeCredentialSummary = nil
             configuration.update { $0.pipeline.conversation.enabled = false }
@@ -798,6 +983,35 @@ struct SettingsView: View {
             realtimeMessage = "API key removed. Conversation was disabled."
         } catch {
             realtimeMessage = "API key removal failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func removeOpenAICredential() {
+        do {
+            try AppSecretResolver().remove(account: ConfigurationController.openAICredentialAccount)
+            realtimeCredentialSummary = nil
+            transcriptionCredentialSummary = nil
+            configuration.update { profile in
+                if let endpoint = profile.endpoints.first(where: {
+                    $0.id == profile.pipeline.conversation.transcriptionEndpointID
+                }),
+                   endpoint.auth.reference == ConfigurationController.openAICredentialAccount {
+                    profile.pipeline.conversation.transcriptionEnabled = false
+                    profile.pipeline.translation.enabled = false
+                    profile.overlays.showTranscript = false
+                }
+                if let endpoint = profile.endpoints.first(where: {
+                    $0.id == profile.pipeline.conversation.realtimeEndpointID
+                }),
+                   endpoint.auth.reference == ConfigurationController.openAICredentialAccount {
+                    profile.pipeline.conversation.enabled = false
+                }
+            }
+            conversationDraftEnabled = configuration.configuration.pipeline.conversation.enabled
+            realtimeMessage = "Shared OpenAI API key removed. OpenAI features were disabled."
+            transcriptionMessage = realtimeMessage
+        } catch {
+            transcriptionMessage = "API key removal failed: \(error.localizedDescription)"
         }
     }
 
@@ -1051,12 +1265,15 @@ struct SettingsView: View {
                 isLoopback: EndpointLocation.isLoopback(endpoint.baseURL)
             ))
         }
-        if conversation.enabled, conversation.transcriptionEnabled,
+        if conversation.transcriptionEnabled,
            let endpoint = endpoint(withID: conversation.transcriptionEndpointID) {
+            let description = endpoint.baseURL.host?.lowercased() == "api.openai.com"
+                ? "Transcription sends microphone audio to OpenAI. OpenAI processes it under the API data controls for the organization and project associated with your API key."
+                : "Transcription sends microphone audio to \(endpoint.hostDisplayName)."
             routes.append(.init(
                 feature: "Transcription",
                 destination: endpoint.hostDisplayName,
-                description: "Transcription sends microphone audio to \(endpoint.hostDisplayName).",
+                description: description,
                 host: endpoint.baseURL.host?.lowercased(),
                 isLoopback: EndpointLocation.isLoopback(endpoint.baseURL)
             ))
@@ -1102,6 +1319,7 @@ struct SettingsView: View {
 
     private func syncDrafts() {
         syncRealtimeDraft()
+        syncTranscriptionDraft()
     }
 
     private var resolutionBinding: Binding<String> {
@@ -1117,6 +1335,8 @@ struct SettingsView: View {
 
     private static let sourceLanguages = [LanguageChoice(code: "auto", name: "Auto-detect")] + modelLanguages
     private static let targetLanguages = [LanguageChoice(code: "system", name: "System Language")] + modelLanguages
+    private static let transcriptionLanguages = [LanguageChoice(code: "auto", name: "Auto-detect")]
+        + modelLanguages.filter { $0.code.count == 2 }
     private static let modelLanguages = [
         LanguageChoice(code: "en", name: "English"), LanguageChoice(code: "zh", name: "Chinese"),
         LanguageChoice(code: "zh-Hant", name: "Traditional Chinese"), LanguageChoice(code: "es", name: "Spanish"),

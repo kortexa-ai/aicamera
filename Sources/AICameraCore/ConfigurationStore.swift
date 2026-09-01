@@ -214,20 +214,20 @@ public enum ConfigurationValidator {
               scriptOverlay.defaultTTLSeconds <= scriptOverlay.maximumTTLSeconds else {
             throw ConfigurationError.invalidOverlayConfiguration
         }
+        if conversation.transcriptionEnabled {
+            try requireEndpoint(
+                conversation.transcriptionEndpointID,
+                for: "conversation.asr",
+                adapters: [.openAITranscription, .kortexaPCMTranscription],
+                endpoints: configuration.endpoints
+            )
+        }
         if conversation.enabled {
             if conversation.realtimeEnabled {
                 try requireEndpoint(
                     conversation.realtimeEndpointID,
                     for: "conversation.realtime",
                     adapters: [.openAIRealtime],
-                    endpoints: configuration.endpoints
-                )
-            }
-            if conversation.transcriptionEnabled {
-                try requireEndpoint(
-                    conversation.transcriptionEndpointID,
-                    for: "conversation.asr",
-                    adapters: [.openAITranscription, .kortexaPCMTranscription],
                     endpoints: configuration.endpoints
                 )
             }

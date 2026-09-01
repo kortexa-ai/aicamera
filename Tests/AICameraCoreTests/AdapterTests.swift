@@ -136,6 +136,41 @@ private final class HangingStreamingURLProtocol: URLProtocol {
 }
 
 final class AdapterTests: XCTestCase {
+    func testOpenAITranscriptionUsesConfiguredModelAndLanguage() async throws {
+        let endpoint = EndpointConfiguration(
+            id: "asr",
+            adapter: .openAITranscription,
+            baseURL: URL(string: "https://api.openai.com")!,
+            model: "gpt-transcribe"
+        )
+        let transport = StubTransport { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://api.openai.com/v1/audio/transcriptions")
+            let body = try XCTUnwrap(request.httpBody)
+            let text = try XCTUnwrap(String(data: body, encoding: .utf8))
+            XCTAssertTrue(text.contains("name=\"model\"\r\n\r\ngpt-transcribe"))
+            XCTAssertTrue(text.contains("name=\"language\"\r\n\r\nen"))
+            XCTAssertTrue(text.contains("name=\"file\"; filename=\"audio.wav\""))
+            let data = try JSONSerialization.data(withJSONObject: ["text": "Hello from the void."])
+            return (
+                data,
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            )
+        }
+        let client = OpenAITranscriptionClient(
+            endpoint: endpoint,
+            transport: transport,
+            privacy: PrivacyGate(configuration: .init(
+                networkMode: .allowListed,
+                allowedHosts: ["api.openai.com"],
+                grants: [.init(endpointID: "asr", allowedData: [.rawAudio])]
+            ))
+        )
+
+        let transcript = try await client.transcribe(.init(wavData: Data([1, 2, 3]), language: "en"))
+        XCTAssertEqual(transcript.text, "Hello from the void.")
+        XCTAssertEqual(transcript.mode, .final)
+    }
+
     func testOpenAIChatRequestAndResponse() async throws {
         let endpoint = EndpointConfiguration(
             id: "agent",

@@ -1,5 +1,18 @@
 # Validation record
 
+## Build 22 independent OpenAI transcription
+
+Date: 2026-08-31
+
+Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
+
+- Transcription now runs independently of Conversation. Its OpenAI-first Settings card configures service, model, language, and a masked Keychain credential shared with canonical OpenAI Realtime; `gpt-transcribe` is the default model. Translation remains nested under Transcription.
+- Compatible imported ASR endpoints remain selected when Transcription is toggled back on. An explicit save switches that lane to OpenAI. Active Realtime sessions suppress and cancel batch ASR while continuing to publish Realtime transcripts, so the same microphone audio is not uploaded twice.
+- Configuration validation now requires a compatible transcription endpoint whenever Transcription itself is enabled, even if Conversation is disabled. Unit coverage verifies the independent configuration and the OpenAI multipart model, language, audio, route, and response contract.
+- `swift test` passed 101 tests with zero failures. `scripts/validate.sh` passed the full safe suite, unsigned four-target Xcode build, strict C checks, installer rendering checks, and HAL harness. `git diff --check` passed. Validation installed or activated no driver or system extension.
+- The approved protected installer built and installed Apple Development-signed Release build 22 at `/Applications/AI Camera.app`, then relaunched it. Strict deep signature verification passed and the installed host reports build 22. The intentionally unchanged HAL driver remains build 12.
+- Signed UI acceptance showed Conversation disabled while Transcription remained enabled, the service/model/language controls, correctly masked shared OpenAI key, and nested Translate controls. The existing compatible local endpoint remained active with an explicit offer to switch to OpenAI. No microphone test, transcription request, recording, or media persistence was started during UI acceptance.
+
 ## Build 14 dependency refresh and notarized distribution candidate
 
 Date: 2026-08-21

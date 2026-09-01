@@ -43,6 +43,7 @@ actor PipelineCoordinator {
     private var transcriptionTask: Task<Void, Never>?
     private var pendingUtterance: AudioUtterance?
     private var transcriptionGeneration: UInt64 = 0
+    private var realtimeTranscriptionActive = false
     private var conversationTask: Task<Void, Never>?
     private var pendingConversationInput: ConversationInput?
     private var conversationGeneration: UInt64 = 0
@@ -152,7 +153,7 @@ actor PipelineCoordinator {
 
     func submit(utterance: AudioUtterance) {
         let conversation = configuration.pipeline.conversation
-        guard isRunning, conversation.enabled, conversation.transcriptionEnabled else { return }
+        guard isRunning, conversation.transcriptionEnabled, !realtimeTranscriptionActive else { return }
         if transcriptionTask != nil {
             if conversation.activationMode == .alwaysListening || pendingUtterance == nil {
                 // Always-listening favors the latest ambient window. Wake mode preserves the first
@@ -163,6 +164,15 @@ actor PipelineCoordinator {
             return
         }
         startTranscription(utterance)
+    }
+
+    func setRealtimeTranscriptionActive(_ active: Bool) {
+        realtimeTranscriptionActive = active
+        guard active else { return }
+        transcriptionGeneration &+= 1
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        pendingUtterance = nil
     }
 
     @discardableResult
@@ -359,13 +369,18 @@ actor PipelineCoordinator {
               let endpoint = configuration.endpoints.first(where: { $0.id == endpointID }) else { return }
         do {
             let client = try factory.transcription(for: endpoint)
-            let transcript = try await client.transcribe(.init(wavData: utterance.wavData))
+            let configuredLanguage = endpoint.options["language"]?.stringValue
+            let language = configuredLanguage == "auto" ? nil : configuredLanguage
+            let transcript = try await client.transcribe(.init(
+                wavData: utterance.wavData,
+                language: language
+            ))
             try Task.checkCancellation()
             guard !transcript.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             let displayedTranscript = await translated(transcript)
             await scene.applyTranscript(displayedTranscript)
             await publish()
-            if let command = agentCommand(
+            if conversation.enabled, let command = agentCommand(
                 for: transcript,
                 endedAtUptime: utterance.endedAtUptime,
                 conversation: conversation

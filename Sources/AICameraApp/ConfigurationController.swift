@@ -5,8 +5,15 @@ import Foundation
 final class ConfigurationController: ObservableObject {
     static let smartyAPIBaseURL = URL(string: "https://api.kortexa.ai")!
     static let smartyCredentialAccount = "kortexa-api"
-    static let realtimeCredentialAccount = "openai-realtime"
-    static let openAIRealtimeBaseURL = URL(string: "https://api.openai.com")!
+    // Preserve the original Keychain account name while sharing one OpenAI API key
+    // across Realtime and transcription.
+    static let openAICredentialAccount = "openai-realtime"
+    static let realtimeCredentialAccount = openAICredentialAccount
+    static let openAIAPIBaseURL = URL(string: "https://api.openai.com")!
+    static let openAIRealtimeBaseURL = openAIAPIBaseURL
+    static let openAITranscriptionEndpointID = "openai-transcription"
+    static let defaultTranscriptionModel = "gpt-transcribe"
+    static let transcriptionModels = ["gpt-transcribe", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
     static let kortexaRealtimeURL = URL(string: "https://api.kortexa.ai/v1/realtime/calls")!
     static let defaultRealtimeModel = "gpt-realtime-2"
     static let defaultRealtimeVoice = "marin"

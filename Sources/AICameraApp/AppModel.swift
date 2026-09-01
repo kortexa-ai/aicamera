@@ -151,6 +151,8 @@ final class AppModel: ObservableObject {
     var hasConfiguredAIFeatures: Bool {
         configurationController.configuration.pipeline.videoStages.contains(where: \.enabled)
             || configurationController.configuration.pipeline.conversation.enabled
+            || configurationController.configuration.pipeline.conversation.transcriptionEnabled
+            || configurationController.configuration.pipeline.translation.enabled
     }
 
     var scriptOverlayEnabled: Bool {
@@ -626,8 +628,7 @@ final class AppModel: ObservableObject {
         let controller = AudioPipelineController(
             configuration: configuration.capture,
             utteranceSeconds: configuration.pipeline.conversation.utteranceSeconds,
-            transcriptionEnabled: configuration.pipeline.conversation.enabled
-                && configuration.pipeline.conversation.transcriptionEnabled
+            transcriptionEnabled: configuration.pipeline.conversation.transcriptionEnabled
                 && configuration.pipeline.conversation.transcriptionEndpointID != nil,
             onUtterance: { utterance in
                 guard pipelineGate.isActive, laneGate.isActive else { return }
@@ -753,7 +754,6 @@ final class AppModel: ObservableObject {
             lastError = "The microphone test could not start for Realtime output."
             return
         }
-
         let profile = configurationController.configuration
         let conversation = profile.pipeline.conversation
         guard let endpointID = conversation.realtimeEndpointID,
@@ -770,6 +770,8 @@ final class AppModel: ObservableObject {
             lastError = "Realtime privacy gate: \(error.localizedDescription)"
             return
         }
+        let coordinator = pipeline
+        Task { await coordinator?.setRealtimeTranscriptionActive(true) }
 
         realtimeGeneration &+= 1
         let generation = realtimeGeneration
@@ -858,7 +860,11 @@ final class AppModel: ObservableObject {
         if stopSpeech {
             resetRealtimeAudio(stopPlayback: true)
         }
-        Task { await session?.close() }
+        let coordinator = pipeline
+        Task {
+            await coordinator?.setRealtimeTranscriptionActive(false)
+            await session?.close()
+        }
     }
 
     private func handleRealtimeEvent(
