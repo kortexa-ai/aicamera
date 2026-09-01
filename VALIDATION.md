@@ -1,5 +1,17 @@
 # Validation record
 
+## Build 23 OpenAI-only transcription provider UX
+
+Date: 2026-08-31
+
+Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
+
+- Normal Transcription Settings now identifies OpenAI directly and exposes no custom or nominally embedded provider. Embedded Whisper remains a separate milestone and will appear only with a real integrity-checked model download, readiness, and removal lifecycle.
+- At launch, import, and reload, an enabled non-OpenAI transcription endpoint is replaced by canonical OpenAI when the shared Keychain credential exists. Without that credential, the unsupported lane, translation, and transcript overlay are disabled. The prior endpoint definition remains inert so profile round trips do not destroy advanced metadata.
+- `swift test` passed 101 tests with zero failures. `scripts/validate.sh` passed the complete safe suite, unsigned four-target build, strict C checks, installer rendering, and HAL harness without installing or activating a system component.
+- The protected installer installed and relaunched signed Release build 23 at `/Applications/AI Camera.app`; strict deep signature verification passed. The saved active lane migrated from `http://127.0.0.1:4002` to `https://api.openai.com` with adapter `openAITranscription`, model `gpt-transcribe`, automatic language selection, and the existing Keychain account reference. The old `asr` endpoint remains inert.
+- Signed UI acceptance showed Conversation off, Transcription on, Provider **OpenAI**, model/language controls, the correctly masked shared key, and nested local translation. No custom or embedded provider was offered. No microphone test, transcription request, recording, or media persistence was started.
+
 ## Build 22 independent OpenAI transcription
 
 Date: 2026-08-31

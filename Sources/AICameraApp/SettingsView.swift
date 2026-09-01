@@ -252,7 +252,7 @@ struct SettingsView: View {
                 disabledText: "Transcription and translation are disabled."
             ) {
                 if transcriptionEnabled {
-                    LabeledContent("Service", value: transcriptionServiceName)
+                    LabeledContent("Provider", value: "OpenAI")
                     Picker("Model", selection: $transcriptionModel) {
                         ForEach(transcriptionModelChoices, id: \.self) { Text($0).tag($0) }
                     }
@@ -607,13 +607,16 @@ struct SettingsView: View {
         transcriptionCredentialSummary = AppSecretResolver().maskedSecret(
             account: ConfigurationController.openAICredentialAccount
         )
-        guard let endpoint = transcriptionEndpoint,
-              endpoint.baseURL.host?.lowercased() == "api.openai.com" else {
+        guard let endpoint = transcriptionEndpoint else {
             transcriptionModel = ConfigurationController.defaultTranscriptionModel
             transcriptionLanguage = "auto"
-            transcriptionMessage = transcriptionEndpoint == nil
-                ? nil
-                : "A compatible transcription endpoint is active. Save to switch this lane to OpenAI."
+            transcriptionMessage = nil
+            return
+        }
+        guard endpoint.baseURL.host?.lowercased() == "api.openai.com" else {
+            transcriptionModel = ConfigurationController.defaultTranscriptionModel
+            transcriptionLanguage = "auto"
+            transcriptionMessage = "Unsupported legacy transcription configuration. Toggle Transcription off and on to replace it with OpenAI."
             return
         }
         transcriptionModel = endpoint.model ?? ConfigurationController.defaultTranscriptionModel
@@ -738,7 +741,7 @@ struct SettingsView: View {
                 transcriptionCredential = ""
             }
             configuration.update { profile in
-                installOpenAITranscriptionConfiguration(
+                ConfigurationController.installOpenAITranscriptionConfiguration(
                     in: &profile,
                     model: model,
                     language: transcriptionLanguage
@@ -757,45 +760,8 @@ struct SettingsView: View {
         }
     }
 
-    private func installOpenAITranscriptionConfiguration(
-        in profile: inout AICameraConfiguration,
-        model: String,
-        language: String
-    ) {
-        let endpointID = ConfigurationController.openAITranscriptionEndpointID
-        let endpoint = EndpointConfiguration(
-            id: endpointID,
-            adapter: .openAITranscription,
-            baseURL: ConfigurationController.openAIAPIBaseURL,
-            model: model,
-            auth: .init(
-                kind: .bearerKeychain,
-                reference: ConfigurationController.openAICredentialAccount
-            ),
-            timeoutSeconds: 30,
-            options: ["language": .string(language)]
-        )
-        profile.endpoints.removeAll(where: { $0.id == endpointID })
-        profile.endpoints.append(endpoint)
-        profile.pipeline.conversation.transcriptionEnabled = true
-        profile.pipeline.conversation.transcriptionEndpointID = endpointID
-        profile.privacy.networkMode = .allowListed
-        if !profile.privacy.allowedHosts.map({ $0.lowercased() }).contains("api.openai.com") {
-            profile.privacy.allowedHosts.append("api.openai.com")
-        }
-        profile.privacy.grants.removeAll(where: { $0.endpointID == endpointID })
-        profile.privacy.grants.append(.init(endpointID: endpointID, allowedData: [.rawAudio]))
-    }
-
     private var transcriptionEndpoint: EndpointConfiguration? {
         endpoint(withID: configuration.configuration.pipeline.conversation.transcriptionEndpointID)
-    }
-
-    private var transcriptionServiceName: String {
-        guard let endpoint = transcriptionEndpoint else { return "OpenAI" }
-        return endpoint.baseURL.host?.lowercased() == "api.openai.com"
-            ? "OpenAI"
-            : endpoint.hostDisplayName
     }
 
     private var transcriptionModelChoices: [String] {
@@ -835,20 +801,11 @@ struct SettingsView: View {
             set: { enabled in
                 configuration.update { profile in
                     if enabled {
-                        let endpointID = profile.pipeline.conversation.transcriptionEndpointID
-                        let hasCompatibleEndpoint = profile.endpoints.contains { endpoint in
-                            endpoint.id == endpointID
-                                && [.openAITranscription, .kortexaPCMTranscription].contains(endpoint.adapter)
-                        }
-                        if hasCompatibleEndpoint {
-                            profile.pipeline.conversation.transcriptionEnabled = true
-                        } else {
-                            installOpenAITranscriptionConfiguration(
-                                in: &profile,
-                                model: transcriptionModel,
-                                language: transcriptionLanguage
-                            )
-                        }
+                        ConfigurationController.installOpenAITranscriptionConfiguration(
+                            in: &profile,
+                            model: transcriptionModel,
+                            language: transcriptionLanguage
+                        )
                         profile.overlays.enabled = true
                         profile.overlays.showTranscript = true
                     } else {

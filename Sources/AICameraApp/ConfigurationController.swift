@@ -61,6 +61,68 @@ final class ConfigurationController: ObservableObject {
                 self.validationMessage = "The default profile could not be saved: \(error.localizedDescription)"
             }
         }
+        migrateUnsupportedTranscriptionConfiguration()
+    }
+
+    static func installOpenAITranscriptionConfiguration(
+        in profile: inout AICameraConfiguration,
+        model: String = defaultTranscriptionModel,
+        language: String = "auto"
+    ) {
+        let endpointID = openAITranscriptionEndpointID
+        let endpoint = EndpointConfiguration(
+            id: endpointID,
+            adapter: .openAITranscription,
+            baseURL: openAIAPIBaseURL,
+            model: model,
+            auth: .init(kind: .bearerKeychain, reference: openAICredentialAccount),
+            timeoutSeconds: 30,
+            options: ["language": .string(language)]
+        )
+        profile.endpoints.removeAll(where: { $0.id == endpointID })
+        profile.endpoints.append(endpoint)
+        profile.pipeline.conversation.transcriptionEnabled = true
+        profile.pipeline.conversation.transcriptionEndpointID = endpointID
+        profile.privacy.networkMode = .allowListed
+        if !profile.privacy.allowedHosts.map({ $0.lowercased() }).contains("api.openai.com") {
+            profile.privacy.allowedHosts.append("api.openai.com")
+        }
+        profile.privacy.grants.removeAll(where: { $0.endpointID == endpointID })
+        profile.privacy.grants.append(.init(endpointID: endpointID, allowedData: [.rawAudio]))
+    }
+
+    private func migrateUnsupportedTranscriptionConfiguration() {
+        guard isConfigurationUsable else { return }
+        var candidate = configuration
+        guard let migrationMessage = normalizeSupportedTranscriptionConfiguration(in: &candidate) else { return }
+        do {
+            try ConfigurationValidator.validate(candidate)
+            try store.save(candidate)
+            configuration = candidate
+            profileTransferMessage = migrationMessage
+        } catch {
+            validationMessage = "The legacy transcription configuration could not be migrated: \(error.localizedDescription)"
+        }
+    }
+
+    private func normalizeSupportedTranscriptionConfiguration(
+        in candidate: inout AICameraConfiguration
+    ) -> String? {
+        guard candidate.pipeline.conversation.transcriptionEnabled,
+              let endpointID = candidate.pipeline.conversation.transcriptionEndpointID,
+              let endpoint = candidate.endpoints.first(where: { $0.id == endpointID }),
+              endpoint.baseURL.host?.lowercased() != "api.openai.com" else { return nil }
+
+        if AppSecretResolver().maskedSecret(account: Self.openAICredentialAccount) != nil {
+            Self.installOpenAITranscriptionConfiguration(in: &candidate)
+            return "Replaced the unsupported legacy transcription service with OpenAI."
+        } else {
+            candidate.pipeline.conversation.transcriptionEnabled = false
+            candidate.pipeline.conversation.transcriptionEndpointID = nil
+            candidate.pipeline.translation.enabled = false
+            candidate.overlays.showTranscript = false
+            return "Disabled an unsupported legacy transcription service. Add an OpenAI API key to enable Transcription."
+        }
     }
 
     func update(_ change: (inout AICameraConfiguration) -> Void) {
@@ -83,12 +145,13 @@ final class ConfigurationController: ObservableObject {
 
     func importProfile(from url: URL) {
         do {
-            let candidate = try ProfileTransfer.read(from: url)
+            var candidate = try ProfileTransfer.read(from: url)
+            let migrationMessage = normalizeSupportedTranscriptionConfiguration(in: &candidate)
             try store.save(candidate)
             configuration = candidate
             isConfigurationUsable = true
             validationMessage = nil
-            profileTransferMessage = "Imported \(candidate.profileName)."
+            profileTransferMessage = migrationMessage ?? "Imported \(candidate.profileName)."
         } catch {
             profileTransferMessage = "Import failed: \(error.localizedDescription)"
         }
@@ -105,9 +168,13 @@ final class ConfigurationController: ObservableObject {
 
     func reload() {
         do {
-            configuration = try store.load()
+            var candidate = try store.load()
+            let migrationMessage = normalizeSupportedTranscriptionConfiguration(in: &candidate)
+            if migrationMessage != nil { try store.save(candidate) }
+            configuration = candidate
             isConfigurationUsable = true
             validationMessage = nil
+            profileTransferMessage = migrationMessage
         } catch {
             isConfigurationUsable = false
             validationMessage = error.localizedDescription
@@ -127,12 +194,14 @@ final class ConfigurationController: ObservableObject {
     }
 
     func applySmartyPreset() {
-        let local = Self.smartyPreset()
+        var local = Self.smartyPreset()
+        let migrationMessage = normalizeSupportedTranscriptionConfiguration(in: &local)
         do {
             try store.save(local)
             configuration = local
             isConfigurationUsable = true
             validationMessage = nil
+            profileTransferMessage = migrationMessage
         } catch {
             validationMessage = error.localizedDescription
         }

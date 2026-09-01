@@ -84,14 +84,15 @@ Use a signed app installed in `/Applications`.
 ### Conversation
 
 1. Disable Conversation, enable Transcription, save an OpenAI API key, and confirm finalized speech appears as transcript without starting an agent turn. Confirm the key remains masked and is stored only in Keychain.
-2. Enable local translation and confirm it consumes the transcript while Conversation remains disabled.
-3. Enable OpenAI Realtime while Transcription remains enabled. Confirm the Realtime transcript is displayed and no separate `/v1/audio/transcriptions` request is made during the active session.
-4. Confirm a wake phrase and command in one final transcript starts one agent turn in the separate pipeline.
-5. Speak the wake phrase alone, then a command in the next window. Confirm the capture-time window is honored even with ASR latency.
-6. Confirm interim or unrelated ambient transcripts do not start a turn in wake mode.
-7. Confirm a gesture starts a turn without arming or consuming the voice gate.
-8. During streamed speech, barge in and confirm that the HTTP body and every queued audio buffer stop. Then start another turn and confirm no stale speech resumes.
-9. Load a legacy profile without `activationMode` and confirm its intentional always-listening behavior before migrating it.
+2. Confirm the Transcription card identifies OpenAI as its provider and offers no custom or embedded provider before those implementations are complete. Load a legacy loopback ASR profile with the shared OpenAI key present, relaunch, and confirm the active transcription endpoint migrates to canonical OpenAI without deleting the inert legacy endpoint definition.
+3. Enable local translation and confirm it consumes the transcript while Conversation remains disabled.
+4. Enable OpenAI Realtime while Transcription remains enabled. Confirm the Realtime transcript is displayed and no separate `/v1/audio/transcriptions` request is made during the active session.
+5. Confirm a wake phrase and command in one final transcript starts one agent turn in the separate pipeline.
+6. Speak the wake phrase alone, then a command in the next window. Confirm the capture-time window is honored even with ASR latency.
+7. Confirm interim or unrelated ambient transcripts do not start a turn in wake mode.
+8. Confirm a gesture starts a turn without arming or consuming the voice gate.
+9. During streamed speech, barge in and confirm that the HTTP body and every queued audio buffer stop. Then start another turn and confirm no stale speech resumes.
+10. Load a legacy profile without `activationMode` and confirm its intentional always-listening behavior before migrating it.
 
 ### Models
 

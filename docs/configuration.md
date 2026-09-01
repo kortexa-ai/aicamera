@@ -124,6 +124,11 @@ and optional local translation. Settings configures OpenAI first, uses `gpt-tran
 and stores the shared OpenAI API key in Keychain. Disabling Transcription also disables translation
 and transcript display; it does not affect microphone passthrough.
 
+Normal Settings currently exposes OpenAI only. Embedded Whisper is tracked separately and will not
+appear as a provider until its weights can be downloaded, verified, inspected, and removed with the
+same local-model lifecycle used by the embedded vision and translation models. Custom transcription
+endpoints remain a profile-level compatibility capability and are not offered in the product UI yet.
+
 Conversation selects realtime, agent, and speech endpoint IDs. Settings offers mutually exclusive
 **Separate ASR + agent + TTS**, **OpenAI Realtime**, and **Compatible Realtime** voice pipelines.
 Saving either Realtime choice disables transcription-driven replies and gesture-driven legacy
