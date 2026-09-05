@@ -127,6 +127,13 @@ Use the signed `/Applications/AI Camera.app` installed by `scripts/install-app.s
 newly compiled credential-reading helper for each test: its changed identity can produce another
 Keychain access prompt even while the login Keychain is unlocked. See `AGENTS.md`.
 
+For unattended lifecycle checks, silence can verify the listening deadline, capture release,
+retry, and Stop. A synthetic phrase played through a separately selected physical speaker is
+only useful when the microphone actually detects it. A no-speech result does not establish a
+speech-format or Realtime failure and cannot count as caption/tool acceptance. Leave system audio
+defaults and volume unchanged, restore temporary in-app authentication selections, and stop both
+local capture tests when finished. Do not enable credential prompts to force a standalone probe.
+
 1. With both virtual devices idle, select a physical microphone in Settings, enable Conversation,
    select OpenAI, and save the model/voice using the existing masked API key. Choose speakers or
    headphones as the macOS output. No virtual-device installation or activation is required.

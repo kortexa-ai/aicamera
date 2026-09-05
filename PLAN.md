@@ -20,6 +20,8 @@ Implementation and acceptance priorities:
   legacy responses. Keep network, translation, and tool work off media callbacks.
 - [ ] Complete API-key Realtime acceptance: silent connection/response probe, one utterance,
   transcript/translation, overlay tools, cancellation, error recovery, and a second turn.
+  Installed-app connection, retry to Listening, no-speech capture release, and preservation of
+  a separately started microphone test pass. Spoken response and tool checks remain.
 - [x] Add a dedicated Codex sign-in/refresh/sign-out path based on the public Realtime flow used
   by `esp32-voice`, with isolated credentials. Sign-in, managed refresh, public session acceptance,
   and repeated user-heard responses with normal playback pass. Tools and captions remain in the speech matrix.

@@ -1,5 +1,23 @@
 # Validation record
 
+## Build 34 installed-app Realtime lifecycle
+
+Date: 2026-09-05
+
+- The signed installed host passed silent public Realtime connection tests with both the saved
+  API key and the separate Codex login, without another credential prompt. API-key Talk reached
+  Listening after cancellation of an earlier connection. Silence produced the expected no-speech
+  error and released Talk-owned microphone capture. Stop during Listening retained a microphone
+  test that had been started separately; stopping that test then returned the host to idle.
+- Two short synthetic requests were played through the built-in speaker, selected for that
+  playback process alone. Codex Talk reached Listening but detected no speech. This does not prove
+  spoken request, caption, or model-invoked overlay behavior; the acoustic cause was not established.
+  No audio routing defaults, device volume, Keychain permissions, or system components were changed.
+- The original saved Codex route, model, voice, local Whisper, translation, and vision settings
+  were restored and checked in Settings. Native accessibility confirmed both local capture tests
+  stopped and Talk idle. Media was not recorded. Live speech, translated captions, overlay tool
+  continuation, and playback cancellation remain separate acceptance checks.
+
 ## Build 34 Realtime speaker routing
 
 Date: 2026-09-05
