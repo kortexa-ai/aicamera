@@ -136,6 +136,34 @@ Keychain access prompt even while the login Keychain is unlocked. See `AGENTS.md
 
 Virtual-camera activation and device acceptance are a separate operator-authorized pass.
 
+### Native local translation
+
+Run `scripts/validate.sh` first to build the Debug frameworks. With the pinned HY-MT2 model already
+downloaded through Settings, compile and run the synthetic native check from the repository root:
+
+```sh
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug \
+  -framework AICameraCore -framework llama \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  Sources/AICameraApp/BuiltinTranslationClient.swift \
+  Sources/AICameraApp/BuiltinTranslationModelController.swift \
+  scripts/validate-local-translation.swift \
+  -o /tmp/aicamera-local-translation-validation
+/tmp/aicamera-local-translation-validation
+```
+
+The harness checks late download completion after removal, new-download ownership, cached client
+identity, synthetic Chinese/Japanese/Arabic output, cancellation and recovery, independent engine
+teardown, cold/warm latency, and peak resident memory. It uses no microphone, camera, network, or
+Keychain credential. Pass `--lifecycle-only` to omit inference and use disposable fixtures without
+the model. The default automated suite separately verifies Unicode token boundaries and byte/text
+limits without downloading or loading weights.
+
+The model client stays cached across microphone/camera pipeline restarts. This reduces repeated
+model setup at the cost of retaining the loaded model while the app runs. Removal releases the
+cache; an existing pipeline retains its own reference until it stops.
+
 ### Product identity and Settings lifecycle
 
 1. Confirm Finder, `/Applications`, Dock, App Switcher, Login Items, and the popup header use the same full-color production icon.

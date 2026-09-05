@@ -11,20 +11,40 @@ actor BuiltinTranslationClient: TranslationClient {
     }
 
     func translate(_ request: TranslationRequest) async throws -> String {
-        let engine: Engine
-        if let loaded = self.engine {
-            engine = loaded
-        } else {
-            let loaded = try Engine(modelURL: modelURL)
-            self.engine = loaded
-            engine = loaded
+        let cancellation = CancellationFlag()
+        return try await withTaskCancellationHandler {
+            try cancellation.check()
+            let engine: Engine
+            if let loaded = self.engine {
+                engine = loaded
+            } else {
+                let loaded = try Engine(modelURL: modelURL, cancellation: cancellation)
+                try cancellation.check()
+                self.engine = loaded
+                engine = loaded
+            }
+            return try engine.translate(request, cancellation: cancellation)
+        } onCancel: {
+            cancellation.cancel()
         }
-        return try engine.translate(request)
+    }
+
+    private final class CancellationFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cancelled = false
+        func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+        var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+        func check() throws { if isCancelled { throw CancellationError() } }
+    }
+
+    private enum Runtime {
+        // llama's backend is process-global. Engine teardown must not free another client's backend.
+        static let initialized: Void = { llama_backend_init() }()
     }
 
     private final class Engine {
         private enum TranslationError: LocalizedError {
-            case modelLoadFailed, contextCreationFailed, tokenizationFailed, promptTooLong, inferenceFailed
+            case modelLoadFailed, contextCreationFailed, tokenizationFailed, promptTooLong, inferenceFailed, outputLimitReached
 
             var errorDescription: String? {
                 switch self {
@@ -33,6 +53,7 @@ actor BuiltinTranslationClient: TranslationClient {
                 case .tokenizationFailed: return "The translation prompt could not be tokenized."
                 case .promptTooLong: return "The transcript is too long for local translation."
                 case .inferenceFailed: return "Local translation failed during inference."
+                case .outputLimitReached: return "The translation exceeded its output limit. Try a shorter utterance."
                 }
             }
         }
@@ -43,22 +64,27 @@ actor BuiltinTranslationClient: TranslationClient {
         private let sampler: UnsafeMutablePointer<llama_sampler>
         private var batch: llama_batch
 
-        init(modelURL: URL) throws {
-            llama_backend_init()
+        init(modelURL: URL, cancellation: CancellationFlag) throws {
+            _ = Runtime.initialized
             var modelParameters = llama_model_default_params()
             modelParameters.n_gpu_layers = 99
+            modelParameters.progress_callback_user_data = Unmanaged.passUnretained(cancellation).toOpaque()
+            modelParameters.progress_callback = { _, data in
+                guard let data else { return false }
+                return !Unmanaged<CancellationFlag>.fromOpaque(data).takeUnretainedValue().isCancelled
+            }
             guard let model = llama_model_load_from_file(modelURL.path, modelParameters) else {
-                llama_backend_free()
+                try cancellation.check()
                 throw TranslationError.modelLoadFailed
             }
             var contextParameters = llama_context_default_params()
             contextParameters.n_ctx = 2_048
+            contextParameters.n_batch = 2_048
             let threads = max(1, min(8, ProcessInfo.processInfo.activeProcessorCount - 2))
             contextParameters.n_threads = Int32(threads)
             contextParameters.n_threads_batch = Int32(threads)
             guard let context = llama_init_from_model(model, contextParameters) else {
                 llama_model_free(model)
-                llama_backend_free()
                 throw TranslationError.contextCreationFailed
             }
             let sampler = llama_sampler_chain_init(llama_sampler_chain_default_params())!
@@ -78,11 +104,16 @@ actor BuiltinTranslationClient: TranslationClient {
             llama_batch_free(batch)
             llama_free(context)
             llama_model_free(model)
-            llama_backend_free()
         }
 
-        func translate(_ request: TranslationRequest) throws -> String {
-            try Task.checkCancellation()
+        func translate(_ request: TranslationRequest, cancellation: CancellationFlag) throws -> String {
+            try cancellation.check()
+            guard request.text.utf8.count <= ModelTextBuffer.maximumBytes else { throw TranslationError.promptTooLong }
+            llama_set_abort_callback(context, { data in
+                guard let data else { return true }
+                return Unmanaged<CancellationFlag>.fromOpaque(data).takeUnretainedValue().isCancelled
+            }, Unmanaged.passUnretained(cancellation).toOpaque())
+            defer { llama_set_abort_callback(context, nil, nil) }
             let target = Self.languageName(for: request.targetLanguage)
             let sourceClause = request.sourceLanguage == "auto"
                 ? ""
@@ -96,24 +127,28 @@ actor BuiltinTranslationClient: TranslationClient {
             for (position, token) in tokens.enumerated() {
                 add(token: token, position: Int32(position), logits: position == tokens.count - 1)
             }
-            guard llama_decode(context, batch) == 0 else { throw TranslationError.inferenceFailed }
+            try decode(cancellation: cancellation)
 
-            var result = ""
+            var result = ModelTextBuffer()
             var currentPosition = Int32(tokens.count)
             for _ in 0..<256 {
-                try Task.checkCancellation()
+                try cancellation.check()
                 let token = llama_sampler_sample(sampler, context, batch.n_tokens - 1)
-                if llama_vocab_is_eog(vocabulary, token) { break }
-                result += piece(for: token)
-                if result.count >= AICameraContentLimits.transcriptCharacters { break }
+                if llama_vocab_is_eog(vocabulary, token) { return try result.finish() }
+                try result.append(piece(for: token))
                 clearBatch()
                 add(token: token, position: currentPosition, logits: true)
-                guard llama_decode(context, batch) == 0 else { throw TranslationError.inferenceFailed }
+                try decode(cancellation: cancellation)
                 currentPosition += 1
             }
-            let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { throw TranslationError.inferenceFailed }
-            return trimmed.aicameraLimited(to: AICameraContentLimits.transcriptCharacters)
+            throw TranslationError.outputLimitReached
+        }
+
+        private func decode(cancellation: CancellationFlag) throws {
+            try cancellation.check()
+            let status = llama_decode(context, batch)
+            try cancellation.check()
+            guard status == 0 else { throw TranslationError.inferenceFailed }
         }
 
         private func tokenize(_ text: String) throws -> [llama_token] {
@@ -158,11 +193,17 @@ actor BuiltinTranslationClient: TranslationClient {
             batch.n_tokens += 1
         }
 
-        private func piece(for token: llama_token) -> String {
+        private func piece(for token: llama_token) throws -> [UInt8] {
             var storage = [CChar](repeating: 0, count: 256)
-            let count = llama_token_to_piece(vocabulary, token, &storage, Int32(storage.count), 0, true)
-            guard count > 0 else { return "" }
-            return String(decoding: storage.prefix(Int(count)).map(UInt8.init(bitPattern:)), as: UTF8.self)
+            var count = llama_token_to_piece(vocabulary, token, &storage, Int32(storage.count), 0, true)
+            if count < 0 {
+                let required = -Int(count)
+                guard required <= ModelTextBuffer.maximumBytes else { throw ModelTextBuffer.Failure.limitExceeded }
+                storage = [CChar](repeating: 0, count: required)
+                count = llama_token_to_piece(vocabulary, token, &storage, Int32(storage.count), 0, true)
+            }
+            guard count >= 0, count <= storage.count else { throw TranslationError.inferenceFailed }
+            return storage.prefix(Int(count)).map(UInt8.init(bitPattern:))
         }
 
         private static func languageName(for code: String) -> String {

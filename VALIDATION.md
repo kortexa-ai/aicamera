@@ -1,5 +1,41 @@
 # Validation record
 
+## Build 25 local translation correctness and reuse
+
+Date: 2026-09-05
+
+Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
+
+- Token pieces accumulate as bounded bytes and decode once after end-of-generation. Incomplete
+  UTF-8, empty output, and output limits fail explicitly. The 256-token generation limit no longer
+  returns a silently cut-off translation. The pinned runtime's actual default batch capacity is
+  2,048; its context now declares that capacity explicitly for the existing prompt bound.
+- Model loading and inference observe cancellation through native callbacks and boundary checks.
+  The process-global llama backend initializes once; one engine cannot free another's backend.
+  The model controller retains a client across pipeline restarts and releases its cache on removal.
+  Download and hash cancellation cannot publish into a newer download generation.
+- `scripts/validate.sh` passed 117 Swift tests, the unsigned four-target build, script/metadata and
+  installer checks, and the HAL harness. Five new tests cover byte-split multilingual/emoji text,
+  invalid and incomplete UTF-8, atomic byte-limit rejection, character limits, and empty output.
+- The native synthetic harness passed Chinese, Japanese, and Arabic output, cancellation during
+  inference, successful recovery, client reuse, and independent engine teardown. This run measured
+  0.625 seconds for its first translation and 0.370/0.378 seconds for warm requests. Cancellation
+  returned in 0.127 seconds. Peak resident memory was 2,681,438,208 bytes for the harness, which
+  intentionally held two engines. An earlier first run took 14.3 seconds; these startup runs have
+  different filesystem/Metal cache conditions and are not a controlled speed comparison.
+- A deterministic native fixture completed a cancelled old download after removal and after a
+  replacement download started. The old temporary file was cleaned up, the model stayed absent,
+  the new downloading state survived, and only the new fixture was installed. Cache identity and
+  removal checks passed. No real model was removed or downloaded by this harness.
+- The protected passwordless installer installed signed Release build 25 at `/Applications/AI Camera.app`.
+  Source and installed bundles passed strict deep signature verification; source, installed host,
+  and protected marker all report 25. Neither system component was updated or activated. Native
+  tests used synthetic text and temporary fixtures, with no Keychain access or captured media.
+- Signed Settings acceptance preserved the ready HY-MT2 model and enabled English-to-Chinese
+  translation; closing Settings returned the installed host to idle with both local tests stopped.
+- Live translated-caption acceptance remains in the Realtime matrix. Embedded Whisper and the
+  common download progress/storage experience remain implementation work.
+
 ## Build 24 host-owned Realtime audio
 
 Date: 2026-09-05
