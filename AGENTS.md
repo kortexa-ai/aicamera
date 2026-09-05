@@ -14,6 +14,34 @@ These rules apply to this repository.
 - Do not install or activate system extensions or audio drivers during automated tests.
 - Treat camera and microphone buffers as private data. Do not persist them unless a user explicitly enables recording.
 
+### Avoid repeated password prompts
+
+- For an authorized host update, run `scripts/install-app.sh` directly. It builds signed Release,
+  verifies the source, quits this app, renders the protected replacement transaction, and pipes
+  that exact transaction to `sudo -n /bin/sh` when `sudo -n true` succeeds. It verifies and
+  relaunches `/Applications/AI Camera.app`. Do not run an additional administrator AppleScript
+  wrapper, copy the bundle manually, or reconstruct the transaction.
+- This was verified in the August 30, 2026 development session and is implemented in commit
+  `daa7f32`. The repeated dialog came from `do shell script ... with administrator privileges`,
+  not code signing. The login Keychain already had no auto-lock timeout; do not change Keychain
+  security or save a password to solve an installer authorization prompt.
+- Before signing, check `security find-identity -v -p codesigning`. Preserve the gitignored
+  `Config/Local.xcconfig` signing team/profile configuration and the installed app identity.
+  Verify both the source and installed bundle with `codesign --verify --deep --strict`, check
+  their `CFBundleVersion`, and compare `/Library/Application Support/AI Camera/install-generation`.
+- If `sudo -n true` fails, the script's standard macOS authorization dialog is the fallback.
+  Keychain unlock/access, Apple account renewal, media-extension approval, and driver operations
+  can still need Franci's interaction. Explain the specific prompt and let him type the password;
+  do not weaken security settings. Host installation does not authorize system-component changes.
+- An unlocked Keychain can still prompt for item access by a newly compiled or renamed native
+  probe. Prefer credential tests in the installed, consistently signed app. If a standalone probe
+  is needed, use an already-authorized environment credential when available; do not repeatedly
+  compile new helper identities that each read the app's Keychain item. Do not broaden the item's
+  access list or extract credentials into temporary files merely to avoid a prompt.
+- An accessory-only app can time out in Computer Use until it has a window. When native
+  accessibility use is authorized, open its status item through System Events, then use Computer
+  Use to inspect the popup and Settings. Do not launch a different DerivedData copy for UI tests.
+
 ## Architecture
 
 - Keep media capture and rendering in the macOS host app.
