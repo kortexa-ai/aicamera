@@ -83,9 +83,10 @@ final class BuiltinVisionModelController: ObservableObject {
     private let modelDirectory: URL
     private var downloadTask: Task<Void, Never>?
     private var downloadingModel: BuiltinVisionModel?
+    private var clients: [BuiltinVisionModel: any DetectionClient] = [:]
 
-    init() {
-        modelDirectory = FileManager.default.urls(
+    init(modelDirectory: URL? = nil) {
+        self.modelDirectory = modelDirectory ?? FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
         ).first!.appendingPathComponent("AI Camera/Models", isDirectory: true)
@@ -163,6 +164,7 @@ final class BuiltinVisionModelController: ObservableObject {
             cancelDownload(model)
             return
         }
+        clients.removeValue(forKey: model)
         do {
             let destination = compiledURL(for: model)
             if FileManager.default.fileExists(atPath: destination.path) {
@@ -177,20 +179,10 @@ final class BuiltinVisionModelController: ObservableObject {
     func makeDetectionClient(modelID: String?) -> (any DetectionClient)? {
         let selected = modelID.flatMap(BuiltinVisionModel.init(rawValue:)) ?? .yoloV3Tiny
         guard isReady(selected) else { return nil }
-        do {
-            switch selected {
-            case .yoloV3Tiny:
-                return try YOLOCoreMLDetectionClient(compiledModelURL: compiledURL(for: selected))
-            case .rfDetrMedium, .rfDetrLarge:
-                return try RFDETRCoreMLDetectionClient(
-                    compiledModelURL: compiledURL(for: selected),
-                    inputSize: selected.inputSize
-                )
-            }
-        } catch {
-            states[selected] = .failed(error.localizedDescription)
-            return nil
-        }
+        if let client = clients[selected] { return client }
+        let client = CoreMLDetectionClient(compiledModelURL: compiledURL(for: selected), kind: selected)
+        clients[selected] = client
+        return client
     }
 
     private func compiledURL(for model: BuiltinVisionModel) -> URL {
@@ -296,115 +288,127 @@ final class BuiltinVisionModelController: ObservableObject {
 
 }
 
-private final class YOLOCoreMLDetectionClient: DetectionClient, @unchecked Sendable {
-    private static let inputSize = 416
-    private let model: MLModel
-    private let labels: [String]
-    private let context = CIContext(options: [.cacheIntermediates: false])
+/// One serial worker per downloaded model. Construction is cheap; loading and prediction stay off
+/// the main actor. Core ML prediction cannot be interrupted, so cancellation is checked at its edges.
+private actor CoreMLDetectionClient: DetectionClient {
+    private let compiledModelURL: URL
+    private let kind: BuiltinVisionModel
+    private var model: MLModel?
+    private lazy var context = CIContext(options: [.cacheIntermediates: false])
 
-    init(compiledModelURL: URL) throws {
-        let configuration = MLModelConfiguration()
-        configuration.computeUnits = .all
-        model = try MLModel(contentsOf: compiledModelURL, configuration: configuration)
-        labels = model.modelDescription.classLabels as? [String] ?? []
+    init(compiledModelURL: URL, kind: BuiltinVisionModel) {
+        self.compiledModelURL = compiledModelURL
+        self.kind = kind
     }
 
     func detect(_ input: DetectionRequest) async throws -> [Detection] {
-        let model = model
-        let labels = labels
-        let context = context
-        return try await Task.detached(priority: .userInitiated) {
-            let pixelBuffer = try Self.pixelBuffer(from: input.jpegData, size: Self.inputSize, context: context)
-            let threshold = min(max(input.confidence, 0), 1)
-            let features = try MLDictionaryFeatureProvider(dictionary: [
-                "image": MLFeatureValue(pixelBuffer: pixelBuffer),
-                "confidenceThreshold": MLFeatureValue(double: threshold),
-                "iouThreshold": MLFeatureValue(double: 0.45),
-            ])
-            let output = try model.prediction(from: features)
-            try Task.checkCancellation()
-            guard let coordinates = output.featureValue(for: "coordinates")?.multiArrayValue,
-                  let confidence = output.featureValue(for: "confidence")?.multiArrayValue,
-                  coordinates.shape.count == 2,
-                  confidence.shape.count == 2,
-                  coordinates.shape[1].intValue == 4 else { throw DetectionError.invalidOutput }
-            let count = min(coordinates.shape[0].intValue, confidence.shape[0].intValue, AICameraContentLimits.detections)
-            let classCount = min(confidence.shape[1].intValue, labels.count)
-            return (0..<count).compactMap { row in
-                var classID: Int?
-                var score = 0.0
-                for column in 0..<classCount {
-                    let value = confidence[[row, column] as [NSNumber]].doubleValue
-                    if value > score { score = value; classID = column }
-                }
-                guard let classID, score >= threshold else { return nil }
-                return Self.detection(
-                    label: labels[classID], classID: classID, confidence: score,
-                    centerX: coordinates[[row, 0] as [NSNumber]].doubleValue,
-                    centerY: coordinates[[row, 1] as [NSNumber]].doubleValue,
-                    width: coordinates[[row, 2] as [NSNumber]].doubleValue,
-                    height: coordinates[[row, 3] as [NSNumber]].doubleValue
-                )
-            }
-        }.value
+        try Task.checkCancellation()
+        guard !input.jpegData.isEmpty, input.jpegData.count <= 16 * 1_024 * 1_024,
+              input.confidence.isFinite else { throw DetectionError.invalidImage }
+        if model == nil {
+            let configuration = MLModelConfiguration()
+            configuration.computeUnits = .all
+            model = try MLModel(contentsOf: compiledModelURL, configuration: configuration)
+        }
+        try Task.checkCancellation()
+        guard let model else { throw DetectionError.invalidOutput }
+        let result = try kind == .yoloV3Tiny
+            ? YOLOCoreMLDetectionClient.detect(input, model: model, context: context)
+            : RFDETRCoreMLDetectionClient.detect(input, model: model, inputSize: kind.inputSize, context: context)
+        try Task.checkCancellation()
+        return result
     }
 }
 
-private final class RFDETRCoreMLDetectionClient: DetectionClient, @unchecked Sendable {
-    private let model: MLModel
-    private let inputSize: Int
-    private let context = CIContext(options: [.cacheIntermediates: false])
+private enum YOLOCoreMLDetectionClient {
+    private static let inputSize = 416
 
-    init(compiledModelURL: URL, inputSize: Int) throws {
-        let configuration = MLModelConfiguration()
-        configuration.computeUnits = .all
-        model = try MLModel(contentsOf: compiledModelURL, configuration: configuration)
-        self.inputSize = inputSize
+    static func detect(_ input: DetectionRequest, model: MLModel, context: CIContext) throws -> [Detection] {
+        let labels = model.modelDescription.classLabels as? [String] ?? []
+        let pixelBuffer = try Self.pixelBuffer(from: input.jpegData, size: Self.inputSize, context: context)
+        let threshold = min(max(input.confidence, 0), 1)
+        let features = try MLDictionaryFeatureProvider(dictionary: [
+            "image": MLFeatureValue(pixelBuffer: pixelBuffer),
+            "confidenceThreshold": MLFeatureValue(double: threshold),
+            "iouThreshold": MLFeatureValue(double: 0.45),
+        ])
+        let output = try model.prediction(from: features)
+        try Task.checkCancellation()
+        guard let coordinates = output.featureValue(for: "coordinates")?.multiArrayValue,
+              let confidence = output.featureValue(for: "confidence")?.multiArrayValue,
+              coordinates.shape.count == 2,
+              confidence.shape.count == 2,
+              coordinates.shape[1].intValue == 4,
+              coordinates.shape[0] == confidence.shape[0],
+              (0...RFDETRPostprocessor.maximumQueries).contains(coordinates.shape[0].intValue),
+              (1...RFDETRPostprocessor.maximumClasses).contains(confidence.shape[1].intValue),
+              confidence.shape[1].intValue == labels.count else { throw DetectionError.invalidOutput }
+        let count = min(coordinates.shape[0].intValue, confidence.shape[0].intValue, AICameraContentLimits.detections)
+        let classCount = min(confidence.shape[1].intValue, labels.count)
+        return (0..<count).compactMap { row in
+            var classID: Int?
+            var score = 0.0
+            for column in 0..<classCount {
+                let value = confidence[[row, column] as [NSNumber]].doubleValue
+                if value.isFinite, value > score { score = value; classID = column }
+            }
+            guard let classID, score >= threshold else { return nil }
+            return Self.detection(
+                label: labels[classID], classID: classID, confidence: score,
+                centerX: coordinates[[row, 0] as [NSNumber]].doubleValue,
+                centerY: coordinates[[row, 1] as [NSNumber]].doubleValue,
+                width: coordinates[[row, 2] as [NSNumber]].doubleValue,
+                height: coordinates[[row, 3] as [NSNumber]].doubleValue
+            )
+        }
     }
+}
 
-    func detect(_ input: DetectionRequest) async throws -> [Detection] {
-        let model = model
-        let inputSize = inputSize
-        let context = context
-        return try await Task.detached(priority: .userInitiated) {
-            let pixelBuffer = try YOLOCoreMLDetectionClient.pixelBuffer(
-                from: input.jpegData, size: inputSize, context: context
-            )
-            let tensor = try MLMultiArray(
-                shape: [1, 3, NSNumber(value: inputSize), NSNumber(value: inputSize)],
-                dataType: .float32
-            )
-            try Self.fillNormalizedRGB(tensor, from: pixelBuffer, size: inputSize)
-            let features = try MLDictionaryFeatureProvider(dictionary: [
-                "tensors": MLFeatureValue(multiArray: tensor),
-            ])
-            let output = try model.prediction(from: features)
-            try Task.checkCancellation()
-            let arrays = output.featureNames.compactMap { output.featureValue(for: $0)?.multiArrayValue }
-            guard let boxes = arrays.first(where: { $0.shape.count == 3 && $0.shape[2].intValue == 4 }),
-                  let logits = arrays.first(where: { $0.shape.count == 3 && $0.shape[2].intValue != 4 }) else {
-                throw DetectionError.invalidOutput
+private enum RFDETRCoreMLDetectionClient {
+    static func detect(_ input: DetectionRequest, model: MLModel, inputSize: Int, context: CIContext) throws -> [Detection] {
+        let pixelBuffer = try YOLOCoreMLDetectionClient.pixelBuffer(
+            from: input.jpegData, size: inputSize, context: context
+        )
+        let tensor = try MLMultiArray(
+            shape: [1, 3, NSNumber(value: inputSize), NSNumber(value: inputSize)],
+            dataType: .float32
+        )
+        try Self.fillNormalizedRGB(tensor, from: pixelBuffer, size: inputSize)
+        let features = try MLDictionaryFeatureProvider(dictionary: [
+            "tensors": MLFeatureValue(multiArray: tensor),
+        ])
+        let output = try model.prediction(from: features)
+        try Task.checkCancellation()
+        let arrays = output.featureNames.compactMap { output.featureValue(for: $0)?.multiArrayValue }
+        guard let boxes = arrays.first(where: { $0.shape.count == 3 && $0.shape[2].intValue == 4 }),
+              let logits = arrays.first(where: { $0.shape.count == 3 && $0.shape[2].intValue != 4 }) else {
+            throw DetectionError.invalidOutput
+        }
+        let queryCount = boxes.shape[1].intValue
+        let classCount = logits.shape[2].intValue
+        guard boxes.shape[0].intValue == 1, logits.shape[0].intValue == 1,
+              boxes.shape[1] == logits.shape[1],
+              (1...RFDETRPostprocessor.maximumQueries).contains(queryCount),
+              (1...RFDETRPostprocessor.maximumClasses).contains(classCount) else {
+            throw DetectionError.invalidOutput
+        }
+        var boxValues = Array(repeating: 0.0, count: queryCount * 4)
+        var logitValues = Array(repeating: 0.0, count: queryCount * classCount)
+        for query in 0..<queryCount {
+            for coordinate in 0..<4 {
+                boxValues[query * 4 + coordinate] = boxes[[0, query, coordinate] as [NSNumber]].doubleValue
             }
-            let queryCount = min(boxes.shape[1].intValue, logits.shape[1].intValue)
-            let classCount = logits.shape[2].intValue
-            var boxValues = Array(repeating: 0.0, count: queryCount * 4)
-            var logitValues = Array(repeating: 0.0, count: queryCount * classCount)
-            for query in 0..<queryCount {
-                for coordinate in 0..<4 {
-                    boxValues[query * 4 + coordinate] = boxes[[0, query, coordinate] as [NSNumber]].doubleValue
-                }
-                for classID in 0..<classCount {
-                    logitValues[query * classCount + classID] = logits[[0, query, classID] as [NSNumber]].doubleValue
-                }
+            for classID in 0..<classCount {
+                logitValues[query * classCount + classID] = logits[[0, query, classID] as [NSNumber]].doubleValue
             }
-            return RFDETRPostprocessor.detections(
-                boxes: boxValues,
-                logits: logitValues,
-                queryCount: queryCount,
-                classCount: classCount,
-                confidence: input.confidence
-            )
-        }.value
+        }
+        return RFDETRPostprocessor.detections(
+            boxes: boxValues,
+            logits: logitValues,
+            queryCount: queryCount,
+            classCount: classCount,
+            confidence: input.confidence
+        )
     }
 
     private static func fillNormalizedRGB(_ tensor: MLMultiArray, from pixelBuffer: CVPixelBuffer, size: Int) throws {
@@ -460,7 +464,9 @@ private extension YOLOCoreMLDetectionClient {
     static func detection(
         label: String, classID: Int, confidence: Double,
         centerX: Double, centerY: Double, width: Double, height: Double
-    ) -> Detection {
+    ) -> Detection? {
+        guard [confidence, centerX, centerY, width, height].allSatisfy(\.isFinite),
+              (0...1).contains(confidence) else { return nil }
         let left = min(max(centerX - width / 2, 0), 1)
         let top = min(max(centerY - height / 2, 0), 1)
         let right = min(max(centerX + width / 2, 0), 1)

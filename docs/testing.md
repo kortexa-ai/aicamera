@@ -226,6 +226,32 @@ In the signed installed app, also verify:
 5. Remove a model downloaded for this test, confirm the active lane is disabled, then download and
    enable it again. Do not remove pre-existing user weights solely for acceptance.
 
+### Local detector runtime
+
+The native detector check uses the three already-downloaded model artifacts and two public photos.
+It validates the exact fixture hashes before inference. It neither opens capture nor changes model
+weights; removal uses an empty disposable directory.
+
+```sh
+curl -fL --max-filesize 5242880 \
+  https://raw.githubusercontent.com/pjreddie/darknet/master/data/dog.jpg \
+  -o /tmp/aicamera-vision-darknet-dog.jpg
+curl -fL --max-filesize 5242880 https://media.roboflow.com/dog.jpg \
+  -o /tmp/aicamera-vision-dog.jpg
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug -framework AICameraCore \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  Sources/AICameraApp/BuiltinVisionModelController.swift scripts/validate-local-vision.swift \
+  -o /tmp/aicamera-local-vision-validation
+/tmp/aicamera-local-vision-validation /tmp/aicamera-vision-darknet-dog.jpg /tmp/aicamera-vision-dog.jpg
+```
+
+The check covers object labels, normalized finite bounds, cached client reuse, first/warm inference,
+main-actor responsiveness, cancellation/recovery, and cache removal. YOLO Tiny's close-up misses are
+reported separately from the shared standard-fixture checks. These photos are narrow correctness
+fixtures, not an accuracy benchmark. Follow with a local camera test to check live overlays and
+gestures, then stop the test and verify that capture returns to idle.
+
 ### Codex login
 
 After `scripts/validate.sh`, the following native check uses the installed CLI with a disposable,

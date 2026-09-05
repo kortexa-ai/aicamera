@@ -36,6 +36,30 @@ inside the runtime; cancellation is checked immediately afterward. Inference has
 Removing weights releases the cache, while an already-running pipeline owns its reference until it
 stops. Fixed windows can split speech at boundaries; the app does not claim streaming ASR or full VAD.
 
+## Local detector runtime
+
+YOLO Tiny and RF-DETR Medium/Large use a serial worker for each downloaded model. Creating a pipeline
+does not load a Core ML model on the UI thread. The first detection loads it in the worker; subsequent
+frames and pipeline restarts reuse it. Removing a model invalidates its cached client. Core ML
+prediction is synchronous and cannot be interrupted mid-call; a cancelled task checks before and
+after prediction and does not publish the result.
+
+RF-DETR output is limited to 1,000 queries and 256 classes before any tensor copy or candidate
+allocation. Nonfinite scores/coordinates are rejected. Scores below the requested confidence do not
+enter the sort; stable top-K ordering and the 128-detection scene limit are preserved.
+
+Native correctness fixtures are downloaded separately for testing and are not bundled in the app:
+
+| Fixture | SHA-256 |
+|---|---|
+| [Darknet dog/bicycle/car](https://github.com/pjreddie/darknet/blob/master/data/dog.jpg) | `5a9522051c3cec2bbd2f6323fccba32e8fbf3ddcc2b3e2fd46b04c720bc6f866` |
+| [Roboflow close-up dog](https://media.roboflow.com/dog.jpg) | `64a8ee417e67b63338c011ce8f86ed6338dfa97cb91fb20b353550775141a90a` |
+
+All three models find the dog in the standard Darknet fixture. RF-DETR also finds the close-up dog;
+YOLO Tiny returns no detections there at confidence 0.25. These fixtures establish a narrow runtime
+check, not broad accuracy. See [testing.md](testing.md#local-detector-runtime) for the reproducible
+command and [VALIDATION.md](../VALIDATION.md) for measured first/warm times and remaining acceptance.
+
 ## Download and storage lifecycle
 
 Whisper, HY-MT2, and vision weights use one streamed downloader. It writes a private temporary file,

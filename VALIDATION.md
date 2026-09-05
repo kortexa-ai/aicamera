@@ -1,5 +1,46 @@
 # Validation record
 
+## Build 31 local detector reuse and bounds
+
+Date: 2026-09-05
+
+- Pipeline construction now creates/reuses a cheap serial actor for each detector. Core ML loading,
+  image preparation, prediction, and postprocessing run off the main actor. Prediction cannot abort
+  mid-call; cancellation checks at the boundaries discard retired work. Cache removal is verified
+  using a disposable empty model directory, with no changes to real model weights.
+- RF-DETR validates batch/shape agreement, at most 1,000 queries and 256 classes before tensor
+  allocation, finite scores/coordinates, and the 128-result scene limit. Filtering below-threshold
+  scores before sorting preserves stable top-K semantics while reducing routine candidate work.
+  Four new Core tests cover overflow-sized dimensions, nonfinite values, ties/background selection,
+  and result limits. Full validation passed 139 tests and the unsigned four-target build.
+- The native harness used only the pinned public Darknet and Roboflow photos listed in
+  [local-models.md](docs/local-models.md#local-detector-runtime). All three downloaded models detected
+  the dog, bicycle, and car in Darknet's fixture. RF-DETR also detected the close-up dog; YOLO Tiny
+  returned no detections on that photo at confidence 0.25. The harness verified finite normalized
+  boxes, cached identity, main-actor responsiveness during first inference, cancelled-call recovery,
+  cancellation before loading, and cache invalidation on removal.
+
+  | Model | Client construction | First load/inference | Three warm calls | Cancellation return |
+  |---|---:|---:|---:|---:|
+  | YOLO Tiny | 0.040 ms | 0.100 s | 6.70–7.73 ms | 4.68 ms |
+  | RF-DETR Medium | 0.020 ms | 4.183 s | 39.25–39.87 ms | 25.62 ms |
+  | RF-DETR Large | 0.023 ms | 4.076 s | 64.69–68.34 ms | 51.64 ms |
+
+  Main-actor five-millisecond probes continued during the calls. The process peaked at 203,046,912
+  resident bytes while retaining all three clients. These are individual public-fixture measurements
+  with existing filesystem/Metal cache state, not a broad benchmark or a real-time frame guarantee.
+  The capture/render path continues while first inference warms up; stale inference is discarded.
+- A final native rerun passed after full validation; the warmed filesystem/Metal caches reduced
+  first RF-DETR inference to about 0.08/0.11 seconds. This confirms the first-call timings above
+  depend on cache state rather than providing a controlled cold-start benchmark.
+- The protected passwordless installer installed signed build 31. Source and installed bundles
+  pass strict deep signature verification; both versions and the protected generation marker are
+  31. During a local camera test, RF-DETR Large boxes and a manually rendered three.js ring appeared
+  over the live preview; Clear removed the ring. The user reported that the live camera/gesture
+  check looked good. The camera test was stopped and the host returned to idle. This checks local
+  composition, not Realtime tool invocation or delivery to another call participant. No system
+  component was updated or activated, and no camera or microphone media was recorded.
+
 ## Build 30 PCM duration correction
 
 Date: 2026-09-05

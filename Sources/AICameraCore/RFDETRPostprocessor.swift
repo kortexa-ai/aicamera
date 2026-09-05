@@ -1,6 +1,8 @@
 import Foundation
 
 public enum RFDETRPostprocessor {
+    public static let maximumQueries = 1_000
+    public static let maximumClasses = 256
     private struct Candidate {
         let score: Double
         let flatIndex: Int
@@ -17,19 +19,21 @@ public enum RFDETRPostprocessor {
         selectionLimit: Int = 300,
         resultLimit: Int = AICameraContentLimits.detections
     ) -> [Detection] {
-        guard queryCount > 0,
-              classCount > 0,
+        guard (1...maximumQueries).contains(queryCount),
+              (1...maximumClasses).contains(classCount),
               boxes.count >= queryCount * 4,
               logits.count >= queryCount * classCount,
               selectionLimit > 0,
-              resultLimit > 0 else { return [] }
+              resultLimit > 0, confidence.isFinite else { return [] }
 
         let threshold = min(max(confidence, 0), 1)
         var candidates: [Candidate] = []
-        candidates.reserveCapacity(queryCount * classCount)
+        candidates.reserveCapacity(min(selectionLimit, queryCount * classCount))
         for flatIndex in 0..<(queryCount * classCount) {
+            guard logits[flatIndex].isFinite else { continue }
             let logit = min(max(logits[flatIndex], -88), 88)
             let score = 1 / (1 + exp(-logit))
+            guard score > threshold else { continue }
             candidates.append(Candidate(
                 score: score,
                 flatIndex: flatIndex,
@@ -43,11 +47,13 @@ public enum RFDETRPostprocessor {
         }
 
         var detections: [Detection] = []
+        let resultLimit = min(resultLimit, AICameraContentLimits.detections)
         detections.reserveCapacity(min(resultLimit, selectionLimit))
         for candidate in candidates.prefix(selectionLimit) {
             guard candidate.score > threshold,
                   let label = cocoClassNames[candidate.classID] else { continue }
             let offset = candidate.query * 4
+            guard boxes[offset..<(offset + 4)].allSatisfy(\.isFinite) else { continue }
             let centerX = boxes[offset]
             let centerY = boxes[offset + 1]
             let width = max(boxes[offset + 2], 0)

@@ -13,21 +13,24 @@ this phase. Older compatible-service milestones below are historical roadmap con
 
 Implementation and acceptance priorities:
 
-- [ ] Make local Talk audible through speakers/headphones, use the selected physical microphone,
+- [x] Make local Talk audible through speakers/headphones, use the selected physical microphone,
   close each one-shot gate on VAD/Stop/deadlines, release Talk-owned capture, and prevent concurrent
   legacy responses. Keep network, translation, and tool work off media callbacks.
 - [ ] Complete API-key Realtime acceptance: silent connection/response probe, one utterance,
   transcript/translation, overlay tools, cancellation, error recovery, and a second turn.
 - [x] Add a dedicated Codex sign-in/refresh/sign-out path based on the public Realtime flow used
   by `esp32-voice`, with isolated credentials. Sign-in, managed refresh, public session acceptance,
-  and a user-heard response pass; playback speed and the remaining speech matrix stay open.
+  and repeated user-heard responses with normal playback pass. Tools and captions remain in the speech matrix.
   Subscription coverage of Realtime usage remains unverified.
 - [x] Implement embedded Whisper with explicit verified model downloads, progress, cancellation,
   removal, a local provider choice, and measured in-process transcription.
 - [x] Correct local translation Unicode handling, model/client reuse, cancellation, output limits,
   and late download completion; verify synthetic native output, recovery, and latency.
-- [ ] Verify translated captions during live Realtime playback, local video inference, and gesture
-  overlays during a camera test.
+- [x] Reuse local detector workers, keep model loading off the UI thread, preserve cancellation,
+  bound tensor output and postprocessing, and verify native inference on public fixtures.
+- [x] Verify local video inference, gesture overlays, and manual three.js composition during a
+  camera test; stop the test and return to idle.
+- [ ] Verify translated captions and model-invoked overlay tools during live Realtime playback.
 - [ ] Simplify Settings to the supported OpenAI and local routes, preserve drafts and truthful
   feature state, remove irrelevant Kortexa controls, and verify with native UI/accessibility.
 - [ ] Complete full validation and signed Release host installation. Virtual-camera activation
@@ -35,6 +38,7 @@ Implementation and acceptance priorities:
 
 ## Current status
 
+- Build 31 reuses serial local detector workers and validates tensor shapes before allocation. Native checks pass for YOLO Tiny and RF-DETR Medium/Large, including cache identity, UI responsiveness, cancellation, recovery, and removal. Warm fixture inference measured about 7/40/67 ms respectively; first RF-DETR initialization/inference depends on filesystem/Metal cache state. The signed host passes local camera, gesture, and manual three.js composition acceptance and is back at idle. Settings and Realtime tool/caption acceptance remain.
 - Build 29 adds a separate Codex login through the installed official CLI, managed refresh, explicit API-key/Codex selection, and a silent public Realtime connection test. It preserves desktop credentials and never silently falls back to the API key. Build 26 added embedded Whisper and shared verified model downloads; build 25 corrected translation text and reuse; build 24 moved Realtime onto host-owned PCM.
 - Build 30 corrects truncated PCM conversion by delivering only the requested input frames, retaining the speech converter through a response, and draining its tail. Synthetic checks preserve exact duration and continuous pitch at 44.1/48 kHz; the user confirmed normal playback in a second spoken turn. Codex sign-in, refresh, and audible replies pass. Tools and live translated-caption acceptance remain open. Native local translation and public-fixture Whisper checks pass. Host updates preserve the validated build-12 HAL driver without reinstalling it.
 - Build-12 microphone acceptance passed four normal cycles, short-lived clients, two simultaneous clients with `0 → 1 → 2 → 1 → 0` demand, forced client exit, local-test takeover, and host quit/relaunch while demand remained active. Callback flow, physical Yeti acquisition, prompt teardown, and return to idle all passed without recording media.
