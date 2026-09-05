@@ -28,6 +28,9 @@ Date: 2026-09-05
   installer checks, and HAL harnesses. The protected passwordless installer installed signed
   build 30. Source and installed bundles pass strict deep signature verification; both versions
   and the protected install-generation marker are 30. No system component was updated or activated.
+- The user repeated a spoken Realtime turn in build 30 and confirmed that playback now sounds
+  normal. This closes the reported speed-up acceptance check. Tool and translated-caption
+  acceptance remain separate.
 
 ## Build 29 separate Codex login
 
