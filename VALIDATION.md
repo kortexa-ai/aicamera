@@ -1,5 +1,41 @@
 # Validation record
 
+## Build 24 host-owned Realtime audio
+
+Date: 2026-09-05
+
+Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
+
+- Realtime now uses public OpenAI WebSocket PCM from the selected AVCapture microphone through
+  the `RealtimeConversationClient` Core protocol. The separate WebRTC capture/rendering dependency
+  is removed. Local Talk routes generated speech to the macOS output without microphone monitoring.
+- `scripts/validate.sh` passed 112 Swift tests with zero failures, the unsigned four-target build,
+  script/metadata checks, installer rendering checks, and HAL harness. Eleven new policy tests cover
+  absolute input/response deadlines, late VAD events, transcript accumulation/bounds, strict tool
+  arguments, conditional tool exposure, and lossless splitting of large PCM messages for playback.
+  `git diff --check` passed. No driver or system extension was installed or activated by validation.
+- A memory-only public WebSocket probe using the configured API credential completed setup in
+  1.34 seconds and received six nonzero audio chunks totaling 108,000 PCM bytes, followed by a
+  completed response. The microphone was never armed; the request used synthetic text. This proves
+  transport and generated-audio delivery, not audible host playback or subscription billing.
+- Signed UI checks passed the no-speech timeout, explicit Stop after starting Talk, repeated starts,
+  and preservation of a microphone test started before Talk. A Talk-owned test returned to idle
+  with its level meter removed; a pre-existing microphone test remained active until explicitly
+  stopped. No camera or microphone content was recorded or persisted.
+- Review also corrected partial ASR windows and resampler state at Realtime transitions, so the
+  resumed batch lane cannot upload audio retained from a Realtime turn. Translation runs outside
+  the transport event consumer with one active task and one replaceable pending final caption.
+- The protected installer built and relaunched signed Release build 24 at `/Applications/AI Camera.app`
+  through passwordless `sudo`. Source and installed bundles passed strict deep signature checks;
+  both bundle versions and the protected generation marker report 24. The installed app contains
+  AICameraCore and llama frameworks, with no WebRTC framework. The HAL driver remains build 12;
+  neither system component was updated or activated.
+- Audible one-utterance replies, VAD-to-playback completion, live tool continuation, and translated
+  captions still require acceptance. Dedicated Codex authentication, embedded Whisper, and Settings
+  simplification remain separate implementation work. Native UI orchestration and hardware playback
+  are not covered by the Core unit tests. Existing Swift 6 actor-isolation warnings in model and
+  configuration code remain for the next review pass.
+
 ## Build 23 OpenAI-only transcription provider UX
 
 Date: 2026-08-31

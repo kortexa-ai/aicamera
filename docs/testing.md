@@ -96,25 +96,45 @@ Use a signed app installed in `/Applications`.
 
 ### Models
 
-In development builds, confirm the Smarty preset still exposes only verified running choices. Production Settings should present OpenAI-first transcription and Realtime controls, built-in model downloads, and no unrelated generic secret editor.
+The current product target uses OpenAI and embedded local models. Kortexa services and compatible
+Realtime endpoints are outside this acceptance pass. Existing imported metadata must remain inert
+until a supported route is selected. Do not start remote services for this pass.
 
-Use the Smarty profile and check each real changed route, not only a health endpoint:
+For built-in vision, download a model, confirm its readiness, and use a local camera test to verify
+detections and gesture overlays. Test removal and cancellation without saving camera frames.
+For translation, verify complete Unicode output and cancellation against synthetic text, then
+confirm captions continue to update while Realtime speech plays. Embedded Whisper and dedicated
+Codex login remain pending until their download/authentication and runtime paths are implemented.
 
-- submit one JPEG to the configured detector;
-- submit one 16 kHz PCM window to ASR;
-- send one chat turn;
-- send one VLM frame if enabled;
-- request one complete PCM16 WAV speech response;
-- when `streamingPCM` is enabled, request raw mono PCM16, verify its sample-rate metadata, first nonzero virtual-microphone samples, bounded completion, and cancellation.
+### OpenAI Realtime Talk (host only)
 
-Start local services through their project service manager. Do not start duplicate or GPU-heavy services without checking current workloads and VRAM.
+Use the signed `/Applications/AI Camera.app` installed by `scripts/install-app.sh`. Do not use a
+newly compiled credential-reading helper for each test: its changed identity can produce another
+Keychain access prompt even while the login Keychain is unlocked. See `AGENTS.md`.
 
-For voice-pipeline selection, choose **OpenAI Realtime** and confirm the canonical endpoint is fixed
-to `https://api.openai.com`; choose **Compatible Realtime** and confirm the base URL is editable.
-In both modes, confirm separate transcription, agent-reply, voice, wake-phrase, and gesture-reply
-controls are disabled. Save the Realtime configuration and confirm its bearer credential is stored
-only in Keychain. Select **Separate ASR + agent + TTS** and confirm Realtime is disabled without
-deleting its endpoint metadata or credential reference.
+1. With both virtual devices idle, select a physical microphone in Settings, enable Conversation,
+   select OpenAI, and save the model/voice using the existing masked API key. Choose speakers or
+   headphones as the macOS output. No virtual-device installation or activation is required.
+2. Press **Talk — one utterance**. Confirm the input is the selected microphone and the state
+   passes from connecting to listening. Stay silent: after ten seconds of listening, the turn
+   must report no speech, restore Talk, and release the microphone if Talk started its test.
+3. Start another turn and say a short request. Confirm the transcript accumulates, listening
+   closes after the utterance, the reply is audible once with no microphone monitoring, and its
+   full final audio plays before Talk returns to idle. Do not record the utterance or output.
+4. Press Stop during connection, listening, and playback. Confirm prompt release and no late
+   audio, transcript, or tool side effects. Start another turn to verify recovery.
+5. Start **Test microphone** before Talk. Stop or finish Talk and confirm the existing microphone
+   test stays active. Then stop that test explicitly and confirm capture drains.
+6. Leave independent transcription and Translate enabled during Talk. Confirm no separate batch
+   ASR request starts during the turn or later uploads its partial audio window. Final captions
+   may translate without delaying speech, and stale translations must not reach a later turn.
+7. Enable Tools and start a local camera test. Request an overlay, then clear it. Confirm each
+   tool executes once, the continuation waits for all results, and the spoken result follows.
+   Stop the camera test and verify a later Talk cannot claim it rendered an overlay.
+8. Test a rejected model/credential and network loss. Confirm a bounded error, capture release,
+   and a usable retry. Never include secrets or captured media in logs or acceptance evidence.
+
+Virtual-camera activation and device acceptance are a separate operator-authorized pass.
 
 ### Product identity and Settings lifecycle
 

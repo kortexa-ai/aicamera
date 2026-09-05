@@ -1,217 +1,101 @@
 # Realtime conversation and local camera tools
 
-Status: design approved; implementation pending.
+The current product target is OpenAI Realtime with an API key or a dedicated Codex login, plus
+embedded local transcription, translation, and video processing. Compatible services, api.server,
+and Hermes are outside this phase. Virtual-camera component activation/acceptance is deferred.
 
-## Goals
+## Public OpenAI transport
 
-AICamera will add an explicitly activated Realtime conversation path while retaining the existing
-ASR → agent → TTS pipeline as a selectable fallback. The first local model tools render and clear
-a transparent JavaScript/three.js overlay on the published camera frame.
+The host depends on the `RealtimeConversationClient` protocol in `AICameraCore`. Its native
+implementation connects directly to `wss://api.openai.com/v1/realtime?model=…`. Credentials are
+resolved from Keychain or an environment reference. They never enter profile JSON or the
+session/model context. The host waits for `session.updated` before arming input.
 
-The Realtime path must work with:
+Microphone capture stays in the existing AVCapture pipeline. Its selected hardware samples are
+converted in memory to 24 kHz mono PCM16; the software gate admits them only after Talk arms the
+current turn. The public WebSocket protocol carries audio and control events in one ordered
+stream. Output PCM enters the host's existing bounded player. This removes a second microphone
+capture path and makes device selection and microphone gating independent of a WebRTC audio
+module. The previous native module could not bind the selected input reliably on this Mac.
 
-1. The documented OpenAI Realtime WebRTC endpoint.
-2. An OpenAI-compatible WebRTC endpoint such as `api.server`.
-3. An explicitly experimental ChatGPT/Codex subscription provider based on GooeyPi's proven but
-   private Quicksilver protocol.
+Redirects are rejected, individual received messages are capped at 256 KiB, and outbound work is
+limited to 64 messages / 512 KiB with at most one second of microphone PCM including the in-flight
+send. At most two capture chunks may wait for admission. Overflow and connection deadlines close
+the turn. Network sends never wait inside capture callbacks.
 
-No provider may send microphone audio until the user explicitly arms one utterance.
+See the [OpenAI WebSocket guide](https://developers.openai.com/api/docs/guides/realtime-websocket)
+and [Realtime conversation guide](https://developers.openai.com/api/docs/guides/realtime-conversations).
 
-## Provider dialects
+## One-shot Talk
 
-### Canonical OpenAI
+Talk starts or joins an explicit local microphone test and arms one utterance after connection.
+The same user-selected hardware microphone supplies both the local test and Realtime. A virtual
+or ineligible default input is never used as a fallback.
 
-- Signal with multipart `POST https://api.openai.com/v1/realtime/calls`.
-- Send the gathered SDP offer plus the bounded standard Realtime session object.
-- Authenticate with a separate OpenAI API key stored in Keychain.
-- Use the `oai-events` WebRTC data channel and standard function-call events.
+The gate closes on server VAD stop, Stop, lane teardown, settings changes, external-client
+takeover, app termination, or failure. Monotonic deadlines reject no speech after 10 seconds,
+limit an armed utterance to 30 seconds, and stop a stalled response after 120 seconds. Late VAD
+messages cannot rearm a closed turn. States distinguish connecting, listening, responding, and
+failure. Each Talk currently creates a new session; context retention between turns is pending.
 
-### Compatible endpoint
+Local Talk replies play through the macOS speakers/headphones output without monitoring the
+physical microphone. A local microphone test alone starts no playback engine. External virtual
+microphone clients retain the bounded microphone/speech mixer. Finishing or stopping Talk releases
+the microphone test if Talk started it, while preserving a test the user had already started.
 
-- Signal with multipart `POST <base>/v1/realtime/calls`.
-- Use the same standard session, SDP, data-channel, tool-call, and tool-result contract.
-- Allow HTTPS public endpoints and HTTP only for loopback/private development endpoints under the
-  existing endpoint policy.
-- Store the bearer credential in Keychain or resolve it from an environment secret reference.
-- `api.server` forwards any structurally valid bounded client-declared function tool. It does not
-  execute tools. AICamera recognizes and executes only its own tool names.
+Independent transcription and legacy response generation pause during Realtime. Partial ASR
+windows and resampler state are discarded at each transition, so audio from a Realtime turn cannot
+be uploaded later in a batch transcription request. Translation of
+final captions has one active task and one replaceable pending value; it does not hold the event
+consumer while PCM and Stop events arrive. Transcript deltas accumulate within bounded captions.
+Late translation results cannot publish into a later turn or stopped pipeline.
 
-### Experimental ChatGPT/Codex subscription
+## Bounded audio and event ownership
 
-GooeyPi's subscription voice implementation was reverted from its current main branch, but its
-historical implementation proves the following flow:
+PCM and `response.done` arrive on the same ordered WebSocket stream, so completing a response
+needs no guessed RTP tail delay. The host drains its bounded playback queue before releasing the
+Talk-owned test. Large PCM messages are split into at most one-second player inputs without losing
+their final samples. Generation checks reject stale transport, translation, and playback completions.
+Only the host player emits audio; it cannot attach duplicate renderers to one remote track.
 
-- OAuth authorization-code + PKCE through `auth.openai.com`, with refresh tokens.
-- Signal with JSON to the private ChatGPT Codex Realtime route rather than `api.openai.com`.
-- Use the Quicksilver/AVAS headers and fixed live model/voice expected by that service.
-- Receive `delegation.created` rather than standard function calls; return bounded delegation
-  context events.
+Tool outputs use the same serialized send queue. The host returns all function results before
+requesting continuation on `response.done`; it must not start a second response while the first
+is active. Continuation disables further tools for that response.
 
-This is an undocumented protocol and can change independently. The Settings UI must label it
-**Experimental ChatGPT subscription**, isolate its wire adapter from the canonical adapter, and
-store access/refresh tokens in macOS Keychain. AICamera must not read `~/.codex` or `~/.prime`
-credential files. The OAuth implementation can follow the proven flow only after confirming the
-client identity and product use are acceptable.
+## Local overlay tools
 
-## User activation and state machine
+The session advertises `render_overlay` and `clear_overlay` only when Tools is enabled and an
+active camera renderer exists. The executor checks those capabilities again before side effects.
+Unknown tools, unknown argument fields, malformed JSON, non-string scripts, non-numeric/boolean
+TTLs, and out-of-range TTLs are rejected. Script and argument byte limits are separate. Omitted
+TTL uses the configured default. The transport admits at most eight unique tool calls per turn.
 
-The initial UX is one-shot click-to-talk with VAD and Stop:
+The host owns the 640 × 360 transparent canvas, mirror description, available THREE/AICamera APIs,
+TTL, script size, replacement behavior, and scene-data permission. Scripts cannot choose another
+canvas or fetch external assets. The existing CSP, navigation restrictions, non-persistent WebKit
+store, TTL, fresh-frame expiry, and crash handling remain required. Tools receive no raw frames.
 
-```text
-idle
-  → connecting (microphone egress closed)
-  → ready/muted
-  → listening (user pressed Talk; egress gate open)
-  → responding (VAD speech_stopped; egress gate closed)
-  → ready/muted or idle after a short bounded timeout
-```
+## Dedicated Codex login
 
-Rules:
+This integration is still pending. The old private Quicksilver/ChatGPT route is not the target.
+The current `../esp32-voice` implementation uses an isolated official Codex device login and its
+access token with the public OpenAI Realtime protocol. Successful session setup and generated
+speech are observed account behavior; they do not establish subscription billing coverage.
 
-- **Talk** arms exactly one utterance.
-- The outgoing audio track is disabled before connection and whenever the gate is closed.
-- Server VAD `speech_started` confirms listening; `speech_stopped` closes the egress gate.
-- A no-speech deadline and maximum-utterance deadline close the gate fail-closed.
-- **Stop**, camera/microphone lane teardown, external-client takeover, endpoint change, and app
-  termination close the gate first, invalidate the generation, stop queued speech, and close the
-  peer if cancellation is not supported by the compatible endpoint.
-- A visible state must distinguish connected/muted, transmitting, and responding.
-- A short muted idle session can preserve latency and conversation context. It must release the
-  self-hosted server's call lease after the bounded idle timeout.
+AI Camera must own its separate login, refresh, and sign-out lifecycle and keep secrets isolated.
+It must not copy or rotate the desktop agent's login. Verify the dedicated flow, expiry, refresh
+ownership, cancellation, and public Realtime access before presenting it as functional. Show
+billing uncertainty accurately unless account evidence establishes attribution.
 
-Track disabling is not the sole software invariant. A generation-checked egress gate controls
-whether captured samples may reach the sender, and tests must prove that stale callbacks cannot
-reopen a stopped session.
+## Remaining acceptance
 
-## Native WebRTC and audio routing
+- Signed native Talk: no speech, one utterance, audible output, VAD stop, Stop during connection and
+  playback, second turn, selected input/output, and prompt capture release.
+- Tool result/response continuation, invalid calls, renderer failure, and transport recovery.
+- Translation enabled while audio arrives, late transcript handling, and cancellation.
+- Dedicated login/refresh/sign-out and actual speech generation.
+- Embedded Whisper download/runtime and local translation/video quality and latency.
+- Settings simplification to the supported OpenAI and embedded local routes.
 
-Chromium supplies GooeyPi's WebRTC implementation. AICamera needs a native macOS framework. The
-qualified candidate is LiveKit's Apache-2.0 `LiveKitWebRTC` XCFramework, which supports macOS
-arm64/x86_64 and exposes:
-
-- native peer connection, SDP, RTP, and data-channel APIs;
-- `RTCAudioTrack.addRenderer` with `AVAudioPCMBuffer` callbacks for decoded remote audio;
-- audio-device playout controls so remote audio can be routed into AICamera rather than played a
-  second time by WebRTC.
-
-Input can initially use WebRTC's microphone source with its local track disabled outside the
-explicit gate. Output must use the remote audio renderer and copy bounded PCM into the existing
-`SpeechPlaybackEvent.beginPCM/pcm/finishPCM` path. This keeps model speech in the current virtual
-microphone mixer and preserves its one-second ingress and four-buffer bounds. The renderer callback
-must only copy/admit data; it must never wait on UI or network work.
-
-A spike must prove on macOS before full integration:
-
-1. Standard signaling against canonical OpenAI and `api.server`.
-2. Muted connection sends no microphone content.
-3. One-shot unmute plus server VAD.
-4. Remote PCM renderer format and bounded conversion into the existing mixer.
-5. Stop/close releases capture, playout, the peer, and the server call lease.
-6. Standard function call → local result → response continuation.
-
-## Normalized host boundary
-
-Provider-specific adapters emit one host contract:
-
-```swift
-enum RealtimeEvent {
-    case connected
-    case speechStarted
-    case speechStopped
-    case inputTranscript(String, final: Bool)
-    case outputTranscript(String, final: Bool)
-    case outputPCM(AVAudioPCMBuffer)
-    case toolCall(id: String, name: String, argumentsJSON: Data)
-    case responseFinished
-    case failed(RealtimeFailure)
-}
-```
-
-The exact type can differ, but Core must not import AppKit/WebKit. `PipelineCoordinator` owns the
-session generation, fallback policy, transcript/scene updates, tool budgets, and response state.
-`AppModel` owns the MainActor callback that invokes `OverlayScriptRenderer`.
-
-Canonical and compatible adapters map standard function events. The experimental Codex adapter
-maps bounded `delegation.created` JSON into the same tool call and maps the result back to delegation
-context events.
-
-## Overlay tools
-
-The standard providers declare two client-owned function tools:
-
-```text
-render_overlay(script: string, ttlSeconds?: number)
-clear_overlay()
-```
-
-The live tool description and system instructions provide host-owned facts:
-
-- canvas width and height (currently 640 × 360);
-- transparent background and premultiplied-alpha output;
-- coordinate origin, orientation, output scaling, and camera mirror state;
-- available `THREE` and `window.AICamera` APIs;
-- `AICamera.onFrame(dt)` lifecycle;
-- optional bounded scene data and its normalized coordinate/timestamp contract;
-- no network, external assets, persistence, recording, or DOM/UI outside the canvas;
-- one active script, replacement behavior, default TTL, maximum TTL, and script byte limit.
-
-The model does not choose canvas dimensions. The host validates UTF-8 bytes, finite TTL, known tool
-name, exact JSON argument types, maximum calls/rounds, current camera capability, and conversation
-generation. Tool output returns only bounded success metadata or a bounded error.
-
-The model does not receive raw camera frames through Realtime by default. Scene-aware overlays use
-the existing clean inference summary and optional `AICamera.sceneData`. Generated overlays never
-feed back into inference.
-
-## Script sandbox prerequisite
-
-Before model-triggered scripts ship, the app must prove subresource egress is blocked. The current
-WebKit content-rule compiler fails on this SDK and cannot be the only control. Add and test a strict
-CSP that blocks connections, remote media, frames, fonts, objects, workers, and navigation while
-allowing only the bundled three.js/bridge and the required indirect evaluation. Keep the navigation
-delegate and non-persistent data store as defense in depth.
-
-Also enforce script TTL, fresh-frame expiry, web-content crash recovery, bounded frame rate, and
-memory/CPU watchdog behavior. Remove or development-gate file diagnostics before release.
-
-## Configuration and secrets
-
-Add a Realtime section to Settings with:
-
-- enabled and preferred/fallback mode;
-- provider: OpenAI, compatible, or experimental ChatGPT subscription;
-- base URL for compatible endpoints;
-- model and voice where the provider permits them;
-- Keychain credential action or environment secret reference;
-- OAuth sign-in/sign-out for the experimental provider;
-- connection/tool probe that does not enable microphone capture.
-
-Profiles contain only endpoint metadata and secret references. API keys, bearer tokens, access
-tokens, and refresh tokens never enter profile JSON, logs, tool output, or model context.
-
-## Fallback policy
-
-The legacy transcription, chat-completions agent, and speech clients remain intact.
-
-- Setup failure before microphone transmission can fall back for the next explicitly armed
-  utterance.
-- Disconnect before any response side effect can retry within a small fixed budget.
-- Disconnect after audio, text, or a tool side effect must not replay that turn through the legacy
-  pipeline; report the failure and use fallback only for the next utterance.
-- Realtime and legacy response generation must never run concurrently.
-- Gesture and future vision-driven behavior can continue using the legacy path independently.
-
-## Validation
-
-Automated tests must cover configuration migration, secret isolation, SDP and event byte bounds,
-redirect rejection, ICE/data-channel deadlines, egress gating, VAD timeouts, stale generations,
-remote PCM bounds, Stop/teardown, unknown tools, malformed arguments, tool result continuation,
-Codex delegation normalization, and deterministic fallback without duplicate side effects.
-
-Acceptance order:
-
-1. Microphone-free standard tool probe against `api.server`.
-2. One-shot audio and overlay tool against `api.server`.
-3. Explicit paid/API-key test against canonical OpenAI Realtime.
-4. Separately labelled experimental ChatGPT subscription test.
-5. Independent virtual-camera and virtual-microphone clients confirm composed video and model audio.
+Do not record camera or microphone content for acceptance. Use memory-only aggregate probes and
+synthetic fixtures. Full validation does not install or activate system extensions or drivers.

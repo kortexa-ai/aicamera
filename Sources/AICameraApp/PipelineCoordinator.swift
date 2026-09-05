@@ -44,6 +44,9 @@ actor PipelineCoordinator {
     private var pendingUtterance: AudioUtterance?
     private var transcriptionGeneration: UInt64 = 0
     private var realtimeTranscriptionActive = false
+    private var realtimeTranscriptRevision: UInt64 = 0
+    private var realtimeTranslationTask: Task<Void, Never>?
+    private var pendingRealtimeTranslation: (event: TranscriptEvent, revision: UInt64)?
     private var conversationTask: Task<Void, Never>?
     private var pendingConversationInput: ConversationInput?
     private var conversationGeneration: UInt64 = 0
@@ -89,6 +92,9 @@ actor PipelineCoordinator {
 
     func stop() async {
         isRunning = false
+        realtimeTranscriptRevision &+= 1
+        realtimeTranslationTask?.cancel()
+        pendingRealtimeTranslation = nil
         transcriptionGeneration &+= 1
         transcriptionTask?.cancel()
         transcriptionTask = nil
@@ -124,10 +130,36 @@ actor PipelineCoordinator {
 
     func submitRealtimeTranscript(text: String, isFinal: Bool) async {
         guard isRunning, configuration.overlays.showTranscript else { return }
+        realtimeTranscriptRevision &+= 1
+        let revision = realtimeTranscriptRevision
         let event = TranscriptEvent(text: text, mode: isFinal ? .final : .partial)
-        let displayed = await translated(event)
-        await scene.applyTranscript(displayed)
+        await scene.applyTranscript(event)
         await publish()
+        guard isFinal, configuration.pipeline.translation.enabled else { return }
+        // Translation must not hold the Realtime event consumer while PCM/control events arrive.
+        // Retain one running translation and replace the single pending finalized transcript.
+        pendingRealtimeTranslation = (event, revision)
+        startRealtimeTranslationIfNeeded()
+    }
+
+    private func startRealtimeTranslationIfNeeded() {
+        guard isRunning, realtimeTranslationTask == nil,
+              let pending = pendingRealtimeTranslation else { return }
+        pendingRealtimeTranslation = nil
+        realtimeTranslationTask = Task { [weak self] in
+            guard let self else { return }
+            let displayed = await self.translated(pending.event)
+            await self.finishRealtimeTranslation(displayed, revision: pending.revision)
+        }
+    }
+
+    private func finishRealtimeTranslation(_ event: TranscriptEvent, revision: UInt64) async {
+        if isRunning, !Task.isCancelled, revision == realtimeTranscriptRevision {
+            await scene.applyTranscript(event)
+            await publish()
+        }
+        realtimeTranslationTask = nil
+        startRealtimeTranslationIfNeeded()
     }
 
     func submit(gestures: [GestureObservation], frameID: FrameID) async {
@@ -142,7 +174,7 @@ actor PipelineCoordinator {
         }
         let isNewGesture = gesture.kind != lastObservedGestureKind
         lastObservedGestureKind = gesture.kind
-        guard conversation.enabled,
+        guard conversation.enabled, !realtimeTranscriptionActive,
               conversation.respondToGestures,
               isNewGesture,
               Date().timeIntervalSince(lastGestureResponse) >= conversation.gestureCooldownSeconds else { return }
@@ -169,6 +201,14 @@ actor PipelineCoordinator {
     func setRealtimeTranscriptionActive(_ active: Bool) {
         realtimeTranscriptionActive = active
         guard active else { return }
+        realtimeTranscriptRevision &+= 1
+        pendingRealtimeTranslation = nil
+        // The explicitly armed Realtime turn owns conversation generation until it closes.
+        conversationGeneration &+= 1
+        conversationTask?.cancel()
+        conversationTask = nil
+        pendingConversationInput = nil
+        wakePhraseGate.reset()
         transcriptionGeneration &+= 1
         transcriptionTask?.cancel()
         transcriptionTask = nil
@@ -378,6 +418,8 @@ actor PipelineCoordinator {
             try Task.checkCancellation()
             guard !transcript.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             let displayedTranscript = await translated(transcript)
+            try Task.checkCancellation()
+            guard isRunning, !realtimeTranscriptionActive else { return }
             await scene.applyTranscript(displayedTranscript)
             await publish()
             if conversation.enabled, let command = agentCommand(

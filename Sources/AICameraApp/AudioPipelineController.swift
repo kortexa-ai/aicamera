@@ -60,6 +60,9 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
 
     private var microphoneConverter: AVAudioConverter?
     private var asrConverter: AVAudioConverter?
+    private var realtimeConverter: AVAudioConverter?
+    private var realtimeAudioHandler: (@Sendable (Data, TimeInterval) -> Void)?
+    private let realtimeFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24_000, channels: 1, interleaved: false)!
     private var asrPCM = Data()
     private var lastBargeIn = Date.distantPast
     /// Access only on processingQueue. Fast attack and bounded exponential decay.
@@ -78,6 +81,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
     private var speechPlaybackGeneration: UInt64 = 0
     private var graphConfigured = false
     private var publishToVirtualMicrophone = false
+    private var speechOutputEnabled = false
     /// The controller has immutable configuration and AppModel discards it after stop.
     private var captureConfigured = false
     /// Access only on processingQueue.
@@ -137,26 +141,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
                 }
                 outputDeviceID = resolvedOutputDeviceID
 
-                if !graphConfigured {
-                    outputEngine.attach(microphonePlayer)
-                    outputEngine.attach(speechPlayer)
-                    outputEngine.connect(microphonePlayer, to: outputEngine.mainMixerNode, format: mixFormat)
-                    outputEngine.connect(speechPlayer, to: outputEngine.mainMixerNode, format: mixFormat)
-                    graphConfigured = true
-                }
-                microphonePlayer.volume = Float(configuration.microphoneGain)
-                speechPlayer.volume = Float(configuration.speechGain)
-                try setCurrentDevice(resolvedOutputDeviceID, on: outputEngine.outputNode)
-                outputEngine.prepare()
-                do {
-                    try outputEngine.start()
-                } catch {
-                    throw AudioPipelineError(
-                        message: "The virtual microphone output could not start: \(error.localizedDescription)"
-                    )
-                }
-                microphonePlayer.play()
-                speechPlayer.play()
+                try configureSpeechOutput(deviceID: resolvedOutputDeviceID, includeMicrophone: true)
             }
 
             let selectedInputDeviceID: AudioDeviceID
@@ -206,6 +191,73 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         }
     }
 
+    /// Local Talk replies go to the selected system output, without microphone monitoring.
+    /// Ordinary microphone testing does not start an output engine.
+    func enableLocalSpeechPlayback() throws {
+        try captureControlQueue.sync {
+            guard started else { throw AudioPipelineError(message: "Start the microphone first.") }
+            if outputEngine.isRunning { return }
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var deviceID = AudioDeviceID(kAudioObjectUnknown)
+            var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+            guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID) == noErr,
+                  deviceID != kAudioObjectUnknown,
+                  !DeviceDiscovery.isDuplexVirtualAudioDevice(deviceID) else {
+                throw AudioPipelineError(message: "Choose speakers or headphones as the macOS sound output for Talk.")
+            }
+            try configureSpeechOutput(deviceID: deviceID, includeMicrophone: false)
+        }
+    }
+
+    func setRealtimeAudioHandler(_ handler: (@Sendable (Data, TimeInterval) -> Void)?) {
+        processingQueue.async { [weak self] in
+            guard let self else { return }
+            self.realtimeAudioHandler = handler
+            self.realtimeConverter = handler == nil ? nil : AVAudioConverter(from: self.mixFormat, to: self.realtimeFormat)
+            // A partial batch must never carry Realtime audio into a later ASR request.
+            self.asrPCM.removeAll(keepingCapacity: true)
+            self.asrConverter = handler == nil && self.transcriptionEnabled
+                ? AVAudioConverter(from: self.mixFormat, to: self.asrFormat) : nil
+        }
+    }
+
+    func disableLocalSpeechPlayback() {
+        captureControlQueue.sync {
+            let isLocalOutput = processingQueue.sync { !publishToVirtualMicrophone && speechOutputEnabled }
+            guard isLocalOutput else { return }
+            processingQueue.sync {
+                speechOutputEnabled = false
+                resetSpeechPlayback(stopPlayer: true)
+            }
+            outputEngine.stop()
+        }
+    }
+
+    private func configureSpeechOutput(deviceID: AudioDeviceID, includeMicrophone: Bool) throws {
+        if !graphConfigured {
+            outputEngine.attach(microphonePlayer)
+            outputEngine.attach(speechPlayer)
+            if includeMicrophone {
+                outputEngine.connect(microphonePlayer, to: outputEngine.mainMixerNode, format: mixFormat)
+            }
+            outputEngine.connect(speechPlayer, to: outputEngine.mainMixerNode, format: mixFormat)
+            graphConfigured = true
+        }
+        microphonePlayer.volume = includeMicrophone ? Float(configuration.microphoneGain) : 0
+        speechPlayer.volume = Float(configuration.speechGain)
+        try setCurrentDevice(deviceID, on: outputEngine.outputNode)
+        outputEngine.prepare()
+        do { try outputEngine.start() }
+        catch { throw AudioPipelineError(message: "Speech output could not start: \(error.localizedDescription)") }
+        if includeMicrophone { microphonePlayer.play() }
+        speechPlayer.play()
+        processingQueue.sync { speechOutputEnabled = true }
+    }
+
     func stop() {
         captureControlQueue.sync {
             guard started else { return }
@@ -233,11 +285,14 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         processingQueue.sync {
             processingActive = false
             publishToVirtualMicrophone = false
+            speechOutputEnabled = false
             smoothedInputLevel = 0
             storeInputLevel(0)
             asrPCM.removeAll(keepingCapacity: false)
             microphoneConverter = nil
             asrConverter = nil
+            realtimeConverter = nil
+            realtimeAudioHandler = nil
             pendingMicrophoneBuffers = 0
             pendingSpeechBuffers = 0
             speechPCMStaging.removeAll(keepingCapacity: false)
@@ -262,7 +317,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         completion: @escaping @Sendable (Bool) -> Void
     ) {
         processingQueue.async { [weak self] in
-            guard let self, self.processingActive, self.publishToVirtualMicrophone else {
+            guard let self, self.processingActive, self.speechOutputEnabled else {
                 completion(false)
                 return
             }
@@ -503,6 +558,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
             return
         }
         let captured = CapturedAudioBuffer(value: buffer)
+        let capturedAt = ProcessInfo.processInfo.systemUptime
         let slots = processingSlots
         processingQueue.async { [weak self, captured, slots] in
             defer { slots.signal() }
@@ -511,11 +567,11 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
             if self.microphoneConverter?.inputFormat != buffer.format {
                 self.microphoneConverter = AVAudioConverter(from: buffer.format, to: self.mixFormat)
             }
-            self.processMicrophone(buffer)
+            self.processMicrophone(buffer, capturedAt: capturedAt)
         }
     }
 
-    private func processMicrophone(_ input: AVAudioPCMBuffer) {
+    private func processMicrophone(_ input: AVAudioPCMBuffer, capturedAt: TimeInterval) {
         guard processingActive,
               let microphoneConverter,
               let mixed = Self.convert(input, using: microphoneConverter, to: mixFormat) else { return }
@@ -555,7 +611,9 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
             onBargeIn()
         }
 
-        guard transcriptionEnabled,
+        deliverRealtimePCM(mixed, capturedAt: capturedAt)
+
+        guard realtimeAudioHandler == nil, transcriptionEnabled,
               let asrConverter,
               let asrBuffer = Self.convert(mixed, using: asrConverter, to: asrFormat),
               let samples = asrBuffer.floatChannelData?[0] else { return }
@@ -589,6 +647,18 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         if asrPCM.count > segmentBytes * 2 {
             asrPCM = Data(asrPCM.suffix(segmentBytes))
         }
+    }
+
+    private func deliverRealtimePCM(_ mixed: AVAudioPCMBuffer, capturedAt: TimeInterval) {
+        guard let handler = realtimeAudioHandler, let converter = realtimeConverter,
+              let buffer = Self.convert(mixed, using: converter, to: realtimeFormat),
+              let samples = buffer.floatChannelData?[0], buffer.frameLength <= 12_000 else { return }
+        var pcm = [Int16](repeating: 0, count: Int(buffer.frameLength))
+        for index in pcm.indices {
+            let sample = samples[index]
+            pcm[index] = sample.isFinite ? Int16(max(-1, min(1, sample)) * Float(Int16.max)) : 0
+        }
+        pcm.withUnsafeBytes { handler(Data($0), capturedAt) }
     }
 
     private func setCurrentDevice(_ deviceID: AudioDeviceID, on node: AVAudioIONode) throws {
