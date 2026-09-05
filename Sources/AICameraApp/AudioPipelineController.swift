@@ -61,6 +61,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
     private var microphoneConverter: AVAudioConverter?
     private var asrConverter: AVAudioConverter?
     private var realtimeConverter: AVAudioConverter?
+    private var speechConverter: AVAudioConverter?
     private var realtimeAudioHandler: (@Sendable (Data, TimeInterval) -> Void)?
     private let realtimeFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24_000, channels: 1, interleaved: false)!
     private var asrPCM = Data()
@@ -292,6 +293,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
             microphoneConverter = nil
             asrConverter = nil
             realtimeConverter = nil
+            speechConverter = nil
             realtimeAudioHandler = nil
             pendingMicrophoneBuffers = 0
             pendingSpeechBuffers = 0
@@ -440,6 +442,21 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
                 return false
             }
         }
+        if speechPCMStreamFinishing, speechPCMStaging.isEmpty,
+           pendingSpeechBuffers < 4, let converter = speechConverter {
+            speechConverter = nil
+            guard let tail = PCMBufferConverter.convert(nil, using: converter, endOfStream: true) else {
+                resetSpeechPlayback(stopPlayer: true)
+                onError("Speech playback: the PCM converter could not finish.")
+                return false
+            }
+            do { try scheduleMixedSpeech(tail) }
+            catch {
+                resetSpeechPlayback(stopPlayer: true)
+                onError("Speech playback: \(error.localizedDescription)")
+                return false
+            }
+        }
         if speechPCMStreamFinishing, pendingSpeechBuffers == 0 {
             guard speechPCMStaging.isEmpty else {
                 resetSpeechPlayback(stopPlayer: true)
@@ -477,17 +494,26 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
               !decoded.samples.isEmpty,
               decoded.samples.count % (MemoryLayout<Int16>.size * decoded.channels) == 0,
               let native = Self.audioBuffer(from: decoded),
-              let converter = AVAudioConverter(from: native.format, to: mixFormat),
-              let mixed = Self.convert(native, using: converter, to: mixFormat) else {
+              let converter = speechConverter ?? AVAudioConverter(from: native.format, to: mixFormat),
+              let mixed = PCMBufferConverter.convert(native, using: converter, endOfStream: resetStream) else {
             throw AudioPipelineError(message: "The speech response has an unsupported audio format.")
         }
-        guard pendingSpeechBuffers < 4 else {
-            throw AudioPipelineError(message: "Speech output is busy; a stale response was dropped.")
-        }
+        speechConverter = resetStream ? nil : converter
         if resetStream {
             speechPCMStaging.removeAll(keepingCapacity: true)
             speechPCMStreamSampleRate = nil
             speechPCMStreamFinishing = false
+        }
+        try scheduleMixedSpeech(mixed)
+    }
+
+    private func scheduleMixedSpeech(_ mixed: AVAudioPCMBuffer) throws {
+        guard mixed.frameLength > 0 else { return }
+        guard mixed.format == speechPlayer.outputFormat(forBus: 0) else {
+            throw AudioPipelineError(message: "The speech output format changed. Stop Talk and try again.")
+        }
+        guard pendingSpeechBuffers < 4 else {
+            throw AudioPipelineError(message: "Speech output is busy; a stale response was dropped.")
         }
         pendingSpeechBuffers += 1
         let generation = speechPlaybackGeneration
@@ -516,6 +542,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         speechPCMStaging.removeAll(keepingCapacity: true)
         speechPCMStreamSampleRate = nil
         speechPCMStreamFinishing = false
+        speechConverter = nil
         activeSpeechID = nil
         let ingressCompletion = pendingSpeechIngress?.completion
         pendingSpeechIngress = nil
@@ -713,21 +740,8 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         using converter: AVAudioConverter,
         to outputFormat: AVAudioFormat
     ) -> AVAudioPCMBuffer? {
-        let ratio = outputFormat.sampleRate / input.format.sampleRate
-        let capacity = AVAudioFrameCount(ceil(Double(input.frameLength) * ratio) + 32)
-        guard let output = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else { return nil }
-        var provided = false
-        var conversionError: NSError?
-        let status = converter.convert(to: output, error: &conversionError) { _, inputStatus in
-            if provided {
-                inputStatus.pointee = .noDataNow
-                return nil
-            }
-            provided = true
-            inputStatus.pointee = .haveData
-            return input
-        }
-        guard conversionError == nil, status != .error else { return nil }
+        guard converter.outputFormat == outputFormat,
+              let output = PCMBufferConverter.convert(input, using: converter) else { return nil }
         return output.frameLength > 0 ? output : nil
     }
 

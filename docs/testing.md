@@ -109,6 +109,20 @@ runtime acceptance.
 
 ### OpenAI Realtime Talk (host only)
 
+Before listening acceptance, check conversion with a synthetic five-second tone. This uses the
+production PCM conversion helper and opens no audio device or media file:
+
+```sh
+xcrun swiftc -parse-as-library -O Sources/AICameraApp/PCMBufferConverter.swift \
+  scripts/validate-audio-conversion.swift -o /tmp/aicamera-audio-conversion-validation
+/tmp/aicamera-audio-conversion-validation
+```
+
+The check requires exact duration (within one frame), continuous 997 Hz pitch/waveform, matching
+stereo channels, and complete final draining at 44.1/48 kHz. It includes quarter-second Realtime
+chunks, irregular short chunks, whole responses, and both planar-float and interleaved-integer capture
+conversion. A successful tone check does not replace listening through the selected hardware.
+
 Use the signed `/Applications/AI Camera.app` installed by `scripts/install-app.sh`. Do not use a
 newly compiled credential-reading helper for each test: its changed identity can produce another
 Keychain access prompt even while the login Keychain is unlocked. See `AGENTS.md`.

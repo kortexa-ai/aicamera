@@ -1,5 +1,34 @@
 # Validation record
 
+## Build 30 PCM duration correction
+
+Date: 2026-09-05
+
+- After the user reported accelerated Realtime playback, a native synthetic five-second 24 kHz
+  tone reproduced a delivery bug: the prior converter returned only 163,840 frames for twenty
+  quarter-second chunks. That is 3.4133 seconds at 48 kHz or 3.7152 seconds at 44.1 kHz. Its input
+  callback supplied more frames than requested, then discarded the remainder with each converter.
+- The shared helper now supplies only the requested frames and retains a cursor through each
+  input buffer. Streaming speech reuses one converter, distinguishes a temporary lack of input
+  from end-of-stream, and drains the final tail before playback completion. Player format mismatch
+  fails explicitly. Capture resampling uses the same corrected delivery helper.
+- `scripts/validate-audio-conversion.swift` uses only synthetic PCM in memory. Twenty 24 kHz
+  quarter-second chunks produce exactly 220,500 frames at 44.1 kHz and 240,000 frames at 48 kHz:
+  five seconds in both cases. Irregular chunks, including one-frame input, and whole responses
+  produce identical duration and continuous 997 Hz waveforms. RMS error is below 0.000003 for
+  float conversion. Planar stereo capture to 24 kHz and interleaved integer capture to 16 kHz
+  also preserve duration; integer conversion RMS error is below 0.000018. Stereo channels agree
+  and all output samples are finite. No device, network, Keychain, or media file is opened.
+- The callback follows Apple's requested-frame contract in
+  [TN3136](https://developer.apple.com/documentation/technotes/tn3136-avaudioconverter-performing-sample-rate-conversions).
+  The playback format check follows
+  [AVAudioPlayerNode's buffer-rate requirement](https://developer.apple.com/documentation/avfaudio/avaudioplayernode).
+  Hardware listening acceptance remains separate from these deterministic signal checks.
+- Full `scripts/validate.sh` passed 135 Swift tests, the unsigned four-target build, metadata and
+  installer checks, and HAL harnesses. The protected passwordless installer installed signed
+  build 30. Source and installed bundles pass strict deep signature verification; both versions
+  and the protected install-generation marker are 30. No system component was updated or activated.
+
 ## Build 29 separate Codex login
 
 Date: 2026-09-05
