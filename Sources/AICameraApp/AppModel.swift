@@ -937,8 +937,8 @@ final class AppModel: ObservableObject {
             realtimeConversationState = .listening
         case .speechStopped:
             realtimeConversationState = .responding
-        case let .transcript(_, text, isFinal):
-            await pipeline?.submitRealtimeTranscript(text: text, isFinal: isFinal)
+        case let .transcript(source, text, isFinal):
+            await pipeline?.submitRealtimeTranscript(source: source, text: text, isFinal: isFinal)
         case let .functionCall(call):
             realtimeToolContinuationPending = true
             await executeRealtimeTool(call, session: session, generation: generation)

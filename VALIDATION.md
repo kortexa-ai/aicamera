@@ -1,5 +1,31 @@
 # Validation record
 
+## Build 34 Realtime speaker routing
+
+Date: 2026-09-05
+
+- Realtime previously discarded the transcript source, so AI replies followed Show transcript
+  and never reached the Show agent response lane. The host now preserves the source. The coordinator
+  routes user speech to transcript state and AI speech to agent-response state; each display switch
+  applies independently. Translation revisions are separate per source, while work remains one active
+  and one latest pending value. New turns cancel the old worker without allowing overlapping jobs.
+- The native harness passes all four user/AI switch combinations, interleaved partials and finals,
+  user translation during AI partial output, and AI translation without replacing the user caption.
+  Controlled completions still verify supersession, nonblocking admission, new-turn invalidation,
+  and Stop. Local HY-MT2 successfully publishes translated text for both speakers. This uses only
+  synthetic text and no media, network, or credentials.
+- Publication checks running state again after fetching the scene snapshot. Startup also checks
+  again before scheduling expiry, so Stop cannot leave a late publisher or newly scheduled timer.
+
+- Final full validation passed 146 tests and the unsigned four-target build. The native rerun
+  passed all scheduling and speaker checks. With that run's local caches, admission took 0.000021
+  seconds, the user translation arrived at 0.381 seconds, and both user/AI translated captions
+  were published by 0.531 seconds. These are synthetic examples, not a latency guarantee.
+- The protected passwordless transaction installed signed build 34. Strict source and installed
+  signatures pass; source/installed versions and the protected generation marker are 34. Native
+  accessibility confirms the host is idle with camera and microphone tests stopped. No system
+  component was installed or activated. Live voice/caption/tool acceptance remains separate.
+
 ## Native Realtime caption scheduling
 
 Date: 2026-09-05; host code from build 33

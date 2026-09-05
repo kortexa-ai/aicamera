@@ -380,5 +380,6 @@ xcrun swiftc -parse-as-library -O \
 
 Use `--controlled-only` to skip real HY-MT2 inference. Controlled completions intentionally ignore
 cancellation to verify late-result rejection, one active/latest pending translation, partial/final
-handling, new-turn isolation, and Stop. The real-model pass publishes a synthetic English sentence
-as a Chinese caption through the coordinator. No media, network, or credentials are accessed.
+handling, new-turn isolation, and Stop. All four combinations of Show transcript and Show agent
+response are checked, along with interleaved sources and independent translated finals. The real-model
+pass publishes synthetic English sentences as Chinese user and AI captions through the coordinator. No media, network, or credentials are accessed.

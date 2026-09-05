@@ -33,15 +33,19 @@ Implementation and acceptance priorities:
 - [x] Verify local video inference, gesture overlays, and manual three.js composition during a
   camera test; stop the test and return to idle.
 - [ ] Verify translated captions and model-invoked overlay tools during live Realtime playback.
-  Native caption scheduling and HY-MT2 publication pass. Preserve Realtime speaker source so
-  Show transcript and Show agent response apply independently before final caption acceptance.
+  Native caption scheduling and HY-MT2 publication pass. Realtime preserves speaker source,
+  so Show transcript and Show agent response apply independently; live listening remains separate.
 - [x] Simplify Settings to the supported OpenAI and local routes, preserve drafts and truthful
   feature state, remove irrelevant controls, keep transfer/custom endpoints hidden, and verify
   with native UI/accessibility.
-- [ ] Complete full validation and signed Release host installation. Virtual-camera activation
+- [x] Complete full validation and signed Release host installation. Virtual-camera activation
   and extension/device acceptance are deferred at the user's request; do not activate components.
 
 ## Current status
+
+- Build 34 preserves user/AI speaker identity through Realtime caption routing. Each display switch
+  controls its own source, translations have independent revisions, and new-turn/Stop invalidation
+  rejects retired work. Native tests cover switch combinations and interleaved translated captions.
 
 - Build 33 bounds overlay logs and frame messages, rejects retired script output, and reloads
   documents on replacement/Clear to release script state. Synthetic native pixel checks pass;
