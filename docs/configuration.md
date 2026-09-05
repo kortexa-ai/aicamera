@@ -1,183 +1,103 @@
-# Configuration
+# Settings
 
-AI Camera reads one schema-versioned JSON profile from:
+A new installation uses pure passthrough. AI, transcription, overlays, and mirroring are off.
+Configure the app in **Settings → General**, **AI**, and **Privacy**. Changes are validated and
+saved atomically. Feature toggles apply immediately; Conversation and Transcription provider,
+authentication, model, and language drafts apply only when saved. Changing an active configuration
+restarts its processing with new immutable settings; media callbacks never wait for this work.
+
+Settings import/export and custom endpoints are hidden for this product phase.
+
+## General
+
+Choose the camera and microphone, camera size and frame rate, mirroring, microphone gain, and
+launch-at-login behavior. Only recognized direct local hardware is eligible. If System Default
+resolves to an excluded input, the app warns and selects an eligible device. Device identifiers
+are specific to each Mac.
+
+Virtual-device installation and maintenance are separate from local testing. They can require
+macOS approval. The host starts physical capture only for matching virtual-device demand or an
+explicit local test; Talk can temporarily acquire the selected microphone for one utterance.
+
+## Conversation
+
+Choose **API key** or **Codex login** for public OpenAI Realtime, select the model and voice, then
+use **Save & Enable**. Setup stays available while Conversation is off. The active authentication
+label identifies the saved choice even while another option is being edited.
+
+The API key is stored in macOS Keychain and shared with OpenAI Transcription. Removing that key
+disables the features using it; an independent Codex login and local models do not depend on it.
+Codex uses a separate login owned by AI Camera, with refresh and sign-out controls. Sign-out turns
+off Conversation when that login is active. See [authentication boundaries](codex-login.md).
+Realtime access and subscription coverage depend on the account; the app does not promise that
+Realtime audio usage is included in a subscription.
+
+**Test Connection** checks the saved credential and selected model without acquiring the microphone
+or generating a spoken response. **Talk** in the menu popup sends one utterance from the selected
+microphone and plays the reply through the current speakers/headphones. Stop, silence, and bounded
+deadlines end the session. The public WebSocket transport uses 24 kHz mono PCM; host conversion
+preserves duration at the audio device's rate. Raw camera frames are not sent by Conversation.
+
+## Transcription and translation
+
+Transcription works independently of Conversation. Choose **OpenAI** or **Local Whisper**, select
+a model and language, then save. The active-provider label reflects the saved route; editing the
+picker does not switch providers until saved. OpenAI requires an API key. Whisper runs in process
+and needs neither a credential nor an audio endpoint.
+
+Download Whisper Base (148 MB) or Small (190 MB) explicitly. Downloads have progress, cancellation,
+integrity verification, and removal. Removing the selected active model disables its transcription
+lane. Setup remains available while the feature is off.
+
+Enable **Translate** after downloading the local HY-MT2 model and enabling Transcription. Select
+the source and target languages. Translation processes finalized text outside media callbacks.
+Disabling Transcription also disables translation and transcript display. During Talk, the Realtime
+transcript replaces batch ASR, avoiding duplicate audio uploads; independent ASR resumes with new
+capture windows after the turn. See [embedded model details](local-models.md).
+
+## Vision and gestures
+
+Vision setup remains available while processing is off. Download/select a local detector, then
+enable **Object detection**. YOLOv3 Tiny and RF-DETR Medium/Large run through cached serial Core ML
+workers. An unready model cannot be enabled. Removing the active detector disables its stage before
+removing the asset. **Gestures** uses local Apple Vision without a model download or endpoint.
+
+The group switch turns all vision processing off; turning it on enables gestures. Individual
+switches show which detector and gesture processing are active. Camera frames stay in app memory.
+Each inference stage has one active request and one replaceable pending frame; stale results are
+discarded. First model loading does not block the main actor or camera rendering.
+
+## Tools and overlays
+
+**Tools** allows bounded Realtime `render_overlay` and `clear_overlay` calls when a camera lane and
+the renderer are available. Generated three.js scripts use the bundled transparent renderer and
+expire automatically. The manual script editor is only present in Debug builds.
+
+**Overlays** controls camera annotations: transcript, agent response, status, detection boxes, and
+gesture labels. Turn on the parent switch to see the selected annotations in the camera image.
+Local camera testing shows the processed result without activating a system component.
+
+## Privacy and stored settings
+
+**Privacy** describes the enabled local processing and external data routes. Local inference
+processes media in memory. OpenAI receives only the data required by enabled OpenAI features.
+Model downloads are explicit network operations; they do not upload camera or microphone data.
+The app has no recording feature.
+
+The underlying schema-versioned file is stored at:
 
 ```text
 ~/Library/Application Support/AI Camera/profile.json
 ```
 
-Settings exposes the profile as individual controls and validates and atomically saves each change. **Reload** restores the last valid profile from disk. Import and export remain available for moving a complete profile. A valid change stops the currently active lanes and then reconciles current client demand with new controller snapshots.
+It contains credential references, not secret values. Invalid or newer-schema files are preserved
+and block automatic capture until repaired or reset through the app. The schema retains older
+endpoint metadata for compatibility, but loading a configuration disables unsupported conversation
+and remote video stages. Legacy transcription is migrated to the configured OpenAI service when
+its shared key exists, otherwise it is disabled. No custom-endpoint controls are offered.
 
-A new profile is operational without model or hardware configuration. It uses system-default inputs with mirroring, overlays, video stages, conversation, and transcription disabled. This is the pure-passthrough base mode. If an existing profile is corrupt, too new, or invalid, the app preserves its file and blocks automatic camera and microphone capture until the user imports a valid profile or explicitly resets to defaults; it never silently runs the in-memory default instead. Start with [`Examples/kortexa-local.json`](../Examples/kortexa-local.json) only when AI processing is wanted. The Smarty preset is an example, not a runtime requirement.
-
-## Import and export
-
-Use **Settings → AI → Import…** or **Export…** to move a profile between
-installations. Imports are limited to 1 MiB and must pass the same schema, endpoint, privacy,
-and credential-reference validation as the active profile before they replace it. A rejected
-import leaves the active profile unchanged.
-
-Ordinary exports contain environment-variable or Keychain account references only. AI Camera
-does not read or copy the referenced secret values during export; move those secrets separately
-using the destination system's secure credential setup. Exported files are written with
-owner-only permissions.
-
-[`Examples/openai.json`](../Examples/openai.json) remains an importable compatibility example and
-contains no credential value. The separate ASR, agent, vision, detection, and TTS choices currently
-use services verified as running on Smarty. Realtime voice can instead use canonical OpenAI or a
-custom OpenAI-compatible endpoint. Broader hosted and custom provider configuration is tracked
-separately. The **Smarty Preset** button is available only in development builds, though its checked
-example remains available for profile import.
-
-## Capture
-
-| Key | Meaning |
-|---|---|
-| `videoDeviceID` | Optional AVFoundation device unique ID. Omit it to use the compatible system-preferred physical camera. Software and Continuity cameras are excluded. If the system default is excluded, the app warns and uses the first compatible physical camera. |
-| `audioDeviceID` | Optional Core Audio device UID. Omit it to use the system-default physical input. Software loopbacks and wired or wireless Continuity microphones are excluded. If the system default is excluded, the app warns and uses the first physical microphone. |
-| `width`, `height`, `framesPerSecond` | Render and virtual-camera format. The extension publishes 640×480, 1280×720, and 1920×1080 at 15, 30, or 60 fps. |
-| `mirrorVideo` | Mirror the rendered output and gesture coordinates. |
-| `audioSampleRate` | Host mix rate. Use 44100 or 48000 for the bundled driver. |
-| `audioChannels` | Capture profile channel request. The bundled virtual device is stereo. |
-| `virtualAudioOutputDeviceID` | Core Audio output UID for the mix. Omitted values fall back to the bundled `ai.kortexa.aicamera.audio.device`; advanced profiles can name another duplex loopback device. |
-| `microphoneGain`, `speechGain` | Nonnegative mixer gains. |
-
-Stable IDs are discovered in the UI. Do not copy IDs from another Mac.
-
-## Automatic lifecycle
-
-The profile does not contain a manual running flag. The camera extension reports active source clients and the HAL driver reports recent input readers. The host polls these bounded signals and reconciles camera and microphone capture independently. No enabled AI stage means no model request is made. When the last relevant client closes, the host stops that physical input; when both lanes are idle it also cancels and releases the shared pipeline coordinator.
-
-Configuration changes are applied by stopping current lanes, replacing the immutable controller snapshots, and reconciling current demand. Capture never waits for this work on a real-time callback.
-
-## Endpoint adapters
-
-| Adapter | Default route | Data sent |
-|---|---|---|
-| `openAIChat` | `/v1/chat/completions` | system/user prompt, transcript, optional scene metadata |
-| `openAIVision` | `/v1/chat/completions` | JPEG frame and prompt |
-| `openAITranscription` | `/v1/audio/transcriptions` | PCM16 WAV |
-| `openAISpeech` | `/v1/audio/speech` | response text, voice, and speech format request |
-| `openAIRealtime` | `wss://api.openai.com/v1/realtime` | session options and bounded PCM conversation audio |
-| `kortexaDetection` | `/detect` | multipart JPEG and confidence/model fields |
-| `kortexaPCMTranscription` | `/transcribe/pcm?sample_rate=16000` | raw signed PCM16 mono bytes |
-
-`path` replaces the compatible default route. `model` is sent only by adapters that use it. Common options are `temperature`, `max_tokens`, and `confidence`. Unknown option values remain inert unless an adapter reads them.
-
-Chat, vision, and transcription responses use complete JSON or multipart HTTP requests. Speech defaults to a complete PCM16 RIFF/WAV response. For an endpoint that supports the Kortexa raw-audio contract, set `options.streamingPCM` to `true`. The speech adapter then sends `response_format: "pcm"` and `stream_format: "audio"` and consumes mono PCM16 little-endian bytes as they arrive. This option is endpoint-specific and is not a generic OpenAI API guarantee.
-
-For streamed PCM, `x-sample-rate` on the response takes precedence over numeric `options.pcmSampleRate`; otherwise the adapter uses 24000 Hz. The accepted range is 8000 through 192000 Hz. A transport without streaming support falls back to complete WAV. Production transport still rejects redirects and cookies, caps the cumulative body at 32 MiB, splits chunks to a fixed size, and fails instead of dropping data when its bounded stream buffer fills.
-
-## Authentication
-
-OpenAI Realtime offers an API key or a separate Codex login. `realtimeAuthentication` is `apiKey`
-by default for older profiles, or `codex`. A Codex endpoint must be canonical OpenAI and have
-`auth.kind: none`: its credential comes from the isolated login controller, so neither current nor
-older builds can silently substitute a saved API key. The separate OpenAI transcription provider
-continues to require an API key. See [Codex sign-in and support boundaries](codex-login.md).
-
-The Kortexa API key field appears under the development-only Smarty controls, beside
-the features that use it. The key authenticates HTTPS AI requests routed by `api.kortexa.ai` to
-Smarty. Pure passthrough, local Apple Vision gesture detection, virtual-device maintenance, and
-login-item management do not need it. The value is stored under Keychain service
-`ai.kortexa.aicamera`, account `kortexa-api`; the profile stores only that account reference.
-
-`auth.kind` is one of:
-
-- `none`
-- `bearerEnvironment`
-- `apiKeyEnvironment`
-- `bearerKeychain`
-- `apiKeyKeychain`
-
-`reference` is an environment-variable name or a Keychain account name, never the secret itself. `header` and `prefix` are configurable. For example:
-
-```json
-"auth": {
-  "kind": "bearerEnvironment",
-  "reference": "AICAMERA_API_KEY",
-  "header": "Authorization",
-  "prefix": "Bearer "
-}
-```
-
-For an advanced imported endpoint, add a secret without putting it in shell history:
-
-```sh
-security add-generic-password -U \
-  -s ai.kortexa.aicamera \
-  -a my-endpoint-account \
-  -w
-```
-
-## Video stages
-
-Each stage has a stable `id`, `kind`, enable switch, optional endpoint, maximum request rate, maximum accepted frame age, prompt, and options.
-
-- `handGesture` uses Apple Vision locally and needs no endpoint.
-- `objectDetection` normally requires a `kortexaDetection` endpoint. A local stage instead sets `options.provider` to `builtin` and `options.model` to `yolov3-tiny`, `rfdetr-medium`, or `rfdetr-large`; it needs no endpoint.
-- `visionLanguage` requires an `openAIVision` endpoint.
-
-A stage keeps at most one in-flight request and one replaceable pending frame. Slow results that exceed `maximumFrameAgeMilliseconds` are discarded.
-
-Local object-detection weights are explicit downloads. The app verifies pinned SHA-256 hashes, compiles the selected Core ML package once, and stores only the compiled model in the user's Application Support directory. RF-DETR Medium is the default recommendation; Large is the higher-accuracy option for M4 Pro / M3 Max-class hardware and above. The generic macOS Core ML packages and provenance are published at [`kortexa-ai/rf-detr-coreml`](https://huggingface.co/kortexa-ai/rf-detr-coreml). Removing a model disables its active stage before deleting the compiled asset.
-
-## Transcription and conversation
-
-Transcription is independent of Conversation. In **Settings → AI → Transcription**, choose
-**OpenAI** or **Local Whisper** and save the choice. OpenAI uses `gpt-transcribe` by default and
-shares the Realtime API key in Keychain. Whisper runs in process and needs no credential or audio
-endpoint. Download Base (148 MB) or Small (190 MB), choose a language or Auto-detect, then use
-**Save & Enable**. The current provider remains active until the new choice is saved; the status
-line identifies that active provider. Setup remains available while transcription is off.
-
-Final transcripts can feed local translation and captions with Conversation disabled. Disabling
-Transcription also disables translation and transcript display, without affecting microphone
-passthrough. Removing the active Whisper model disables its transcription lane first. See
-[model provenance and storage](local-models.md) for download bounds, licenses, and removal.
-
-`transcriptionProvider` is `openAI` (the default for older profiles) or `whisper`.
-`transcriptionWhisperModel` is `base` or `small-q5_1`; `transcriptionLanguage` defaults to `auto`.
-A Whisper profile must omit `transcriptionEndpointID`. This also prevents an older app that ignores
-the new provider field from silently using a retained remote ASR route. Inert endpoint metadata and
-credential references remain available for switching back. Custom transcription endpoints remain
-a profile compatibility capability and are not offered in normal Settings.
-
-Conversation selects realtime, agent, and speech endpoint IDs. Settings offers mutually exclusive
-**Separate ASR + agent + TTS**, **OpenAI Realtime**, and **Compatible Realtime** voice pipelines.
-Saving either Realtime choice disables transcription-driven replies and gesture-driven legacy
-replies, preventing the separate response path from running concurrently. Independent Transcription
-may remain enabled; while a Realtime session is active, its transcript is reused and batch ASR is
-suppressed so the same audio is not uploaded twice.
-Set `realtimeEnabled` and `realtimeEndpointID` to use an `openAIRealtime` endpoint. The supported
-transport connects to public OpenAI over WebSocket and uses 24 kHz mono PCM from host capture.
-Compatible endpoint metadata can still round-trip, but the current transport rejects those routes.
-Existing profiles default realtime to disabled when these keys are absent.
-
-Canonical OpenAI and each compatible host use distinct Keychain account references so changing a
-base URL cannot silently send one provider's saved bearer token to another provider.
-
-Legacy agent and speech roles are inactive whenever Realtime is configured. Independent ASR resumes
-when a Realtime turn ends, using new capture windows. `transcriptionEnabled` controls ASR independently
-of `conversation.enabled`, without disabling microphone passthrough. `utteranceSeconds` controls
-fixed 16 kHz ASR windows from 0.5 through 30 seconds. The speech gate rejects silence; it is not a
-full VAD. Whisper keeps one active request and a bounded pending window outside media callbacks.
-
-`activationMode` is `wakePhrase` or `alwaysListening`. Checked-in profiles use `wakePhrase`. In that mode, `respondToFinalTranscripts` allows only accepted final ASR text to reach the agent: a leading, case-insensitive `wakePhrase` either prefixes a command or arms the next speech-bearing utterance for `wakeWindowSeconds` (1 through 30). The phrase must contain at least one letter or number and is limited to 128 characters. The deadline uses each utterance's monotonic capture time, so ASR latency cannot extend or shorten the physical window. Fixed ASR windows can still split a phrase at a boundary; bounded overlap is deferred.
-
-Schema-1 profiles that omit `activationMode` retain their former always-listening behavior. If `transcriptionEnabled` is omitted, it is true only when the legacy profile has a transcription endpoint. Settings exposes conversation, ASR, agent-reply, activation-mode, wake-phrase, and bounded wake-window controls.
-
-One ASR request and one pending window are bounded independently from the agent/TTS turn, so ambient transcription cannot cancel an active response. Always-listening mode replaces the pending window with the latest one. Wake mode preserves the first pending window so a command immediately after a wake-only window is not overwritten by later speech. `respondToGestures` sends an edge-triggered gesture description directly to the agent without consuming the voice gate. `gestureCooldownSeconds` limits repeated gesture turns. `bargeIn` stops the active TTS/agent turn and queued speech when microphone energy is detected during playback, even if that speech does not contain the wake phrase.
-
-## Privacy
-
-The default `localOnly` mode permits only `localhost`, `127.0.0.1`, and IPv6 loopback. A non-loopback URL must:
-
-1. use HTTPS;
-2. use `allowListed` mode;
-3. have an exact host in `allowedHosts`; and
-4. have an exact endpoint grant for every data class the adapter sends.
-
-Data classes are `rawAudio`, `rawFrame`, `transcript`, `sceneMetadata`, and `promptText`. A missing grant fails closed before the request is built. Production HTTP uses an ephemeral session with no cookie or URL cache. Redirects are rejected so a permitted endpoint cannot forward media to another host; configure the final canonical URL directly.
-
-`persistMedia` must remain `false`. The current app has no media persistence implementation.
+Remote requests remain subject to HTTPS, an exact host allowlist, and an endpoint-specific grant
+for every data class sent (`rawAudio`, `rawFrame`, `transcript`, `sceneMetadata`, `promptText`).
+Missing grants fail closed. HTTP uses an ephemeral session without cookies or a URL cache and
+rejects redirects. The default network policy permits only loopback; enabling an OpenAI feature
+saves its explicit route and grants. `persistMedia` must remain false.

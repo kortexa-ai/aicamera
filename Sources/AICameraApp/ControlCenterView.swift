@@ -95,6 +95,7 @@ struct ControlCenterView: View {
                 .help("Send microphone audio only for one VAD-bounded Realtime utterance.")
             }
 
+            #if DEBUG
             if model.cameraTestActive, model.scriptOverlayEnabled {
                 GroupBox("Overlay script") {
                     VStack(alignment: .leading, spacing: 6) {
@@ -121,6 +122,8 @@ struct ControlCenterView: View {
                     }
                 }
             }
+
+            #endif
 
             if model.microphoneTestActive {
                 InputLevelMeter(level: model.microphoneInputLevel)

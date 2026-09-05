@@ -304,3 +304,17 @@ plutil -p '/Applications/AI Camera.app/Contents/Info.plist'
 ```
 
 Do not use broad process-kill or system-directory cleanup commands for diagnosis.
+
+## Settings acceptance for the OpenAI/local product
+
+Use the signed installed host. General, AI, and Privacy are the only Settings tabs. Verify:
+
+- Conversation and Transcription drafts survive tab switches and do not change the active route
+  until saved. Setup remains available with either feature off.
+- Vision setup/downloads remain visible with the group off. Group Off disables its stages;
+  individual controls show actual state after re-enabling. No custom endpoint or transfer UI appears.
+- Privacy matches enabled local models and the selected saved OpenAI authentication route.
+- Release camera testing shows the preview without the manual script editor. Stop returns to idle.
+
+Settings import/export is intentionally hidden; `ProfileTransfer` tests cover only the retained
+serialization capability. They do not establish a user-facing transfer flow.

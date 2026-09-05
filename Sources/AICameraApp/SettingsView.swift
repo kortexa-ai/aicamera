@@ -14,8 +14,6 @@ struct SettingsView: View {
     @State private var transcriptionProvider = TranscriptionProvider.openAI
     @State private var transcriptionWhisperModel = BuiltinWhisperModel.base
     @State private var didLoadDrafts = false
-    @State private var voicePipelineMode = VoicePipelineMode.openAIRealtime
-    @State private var realtimeBaseURL = ConfigurationController.openAIRealtimeBaseURL.absoluteString
     @State private var realtimeModel = ConfigurationController.defaultRealtimeModel
     @State private var realtimeVoice = ConfigurationController.defaultRealtimeVoice
     @State private var realtimeCredential = ""
@@ -28,8 +26,6 @@ struct SettingsView: View {
     @State private var transcriptionCredential = ""
     @State private var transcriptionCredentialSummary: String?
     @State private var transcriptionMessage: String?
-    @State private var useHermes = false
-    @State private var conversationDraftEnabled: Bool
 
     init(model: AppModel) {
         self.model = model
@@ -39,9 +35,6 @@ struct SettingsView: View {
         self.builtinTranslation = model.builtinTranslationModelController
         self.builtinWhisper = model.builtinWhisperModelController
         self.codexAuth = model.codexAuthController
-        self._conversationDraftEnabled = State(
-            initialValue: model.configurationController.configuration.pipeline.conversation.enabled
-        )
     }
 
     var body: some View {
@@ -50,11 +43,11 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "switch.2") }
                 .tag(AICameraSettingsPage.general)
 
-            advancedSettings
+            aiSettings
                 .tabItem { Label("AI", systemImage: "sparkles") }
                 .tag(AICameraSettingsPage.advanced)
 
-            maintenanceSettings
+            privacySettings
                 .tabItem { Label("Privacy", systemImage: "hand.raised") }
                 .tag(AICameraSettingsPage.maintenance)
         }
@@ -160,7 +153,7 @@ struct SettingsView: View {
                 Section("Virtual Devices") {
                     virtualDeviceControls
                 }
-        }
+            }
             .formStyle(.grouped)
             .toggleStyle(.switch)
             .padding()
@@ -178,7 +171,7 @@ struct SettingsView: View {
         }
     }
 
-    private var advancedSettings: some View {
+    private var aiSettings: some View {
         Form {
             if !configuration.isConfigurationUsable {
                 Section("Configuration repair") {
@@ -209,16 +202,17 @@ struct SettingsView: View {
                     }
                     .onChange(of: realtimeAuthentication) { _, choice in
                         cancelConnectionTest()
+                        realtimeMessage = nil
                         if choice == .codex { codexAuth.loadStatus() }
                     }
                     Picker("Model", selection: $realtimeModel) {
                         ForEach(realtimeModelChoices, id: \.self) { Text($0).tag($0) }
                     }
-                    .onChange(of: realtimeModel) { _, _ in cancelConnectionTest() }
+                    .onChange(of: realtimeModel) { _, _ in cancelConnectionTest(); realtimeMessage = nil }
                     Picker("Voice", selection: $realtimeVoice) {
                         ForEach(realtimeVoiceChoices, id: \.self) { Text($0.capitalized).tag($0) }
                     }
-                    .onChange(of: realtimeVoice) { _, _ in cancelConnectionTest() }
+                    .onChange(of: realtimeVoice) { _, _ in cancelConnectionTest(); realtimeMessage = nil }
                     if realtimeAuthentication == .codex {
                         codexLoginControls
                     } else {
@@ -226,7 +220,7 @@ struct SettingsView: View {
                             LabeledContent("API key") {
                                 HStack(spacing: 8) {
                                     Text(realtimeCredentialSummary).monospaced()
-                                    Button(role: .destructive) { removeRealtimeCredential() } label: {
+                                    Button(role: .destructive) { removeOpenAICredential() } label: {
                                         Image(systemName: "trash")
                                     }
                                     .buttonStyle(.borderless)
@@ -277,7 +271,7 @@ struct SettingsView: View {
                 disabledText: "Realtime tools are disabled."
             ) {
                 if toolsEnabled {
-                    Text("Realtime can currently draw and clear bounded overlays. Screenshot and camera controls will appear here as they become available.")
+                    Text("Ask Realtime to draw or clear an animated overlay while the camera is active. Each overlay expires automatically.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -286,18 +280,14 @@ struct SettingsView: View {
             settingsSection(
                 "Vision & Gestures",
                 enabled: visionEnabledBinding,
-                disabledText: "Vision and gesture processing are disabled."
+                disabledText: "Vision and gesture processing are disabled.",
+                showsSetupWhenDisabled: true
             ) {
-                if visionEnabled {
+                Group {
                     builtinVisionControls
-                    Toggle("Gestures", isOn: videoStageBinding(kind: .handGesture))
-                    if videoStageIsEnabled(.handGesture) {
+                    Toggle("Gestures", isOn: gesturesEnabledBinding)
+                    if gesturesEnabled {
                         Toggle("Show gesture labels", isOn: overlayBoolBinding(\.showGestureLabels))
-                    }
-                    DisclosureGroup("Advanced endpoint") {
-                        Text("Custom vision endpoint, model, and Keychain credential settings are coming in a later update.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -341,7 +331,6 @@ struct SettingsView: View {
                     model.stopRealtimeConversation()
                     if configuration.configuration.pipeline.conversation.realtimeAuthentication == .codex {
                         configuration.update { $0.pipeline.conversation.enabled = false }
-                        conversationDraftEnabled = false
                     }
                     codexAuth.signOut()
                 }
@@ -642,7 +631,7 @@ struct SettingsView: View {
         }
     }
 
-    private var maintenanceSettings: some View {
+    private var privacySettings: some View {
         Form {
             Section {
                 privacyContent
@@ -675,26 +664,14 @@ struct SettingsView: View {
         let conversation = configuration.configuration.pipeline.conversation
         realtimeAuthentication = conversation.realtimeAuthentication
         if realtimeAuthentication == .codex { codexAuth.loadStatus() }
-        guard conversation.realtimeEnabled,
-              let endpointID = conversation.realtimeEndpointID,
-              let endpoint = configuration.configuration.endpoints.first(where: { $0.id == endpointID }) else {
-            voicePipelineMode = .openAIRealtime
-            realtimeBaseURL = ConfigurationController.openAIRealtimeBaseURL.absoluteString
-            realtimeCredentialSummary = AppSecretResolver().maskedSecret(
-                account: ConfigurationController.realtimeCredentialAccount
-            )
-            conversationDraftEnabled = conversation.enabled
-            return
-        }
-        realtimeBaseURL = endpoint.baseURL.absoluteString
-        realtimeModel = endpoint.model ?? ConfigurationController.defaultRealtimeModel
-        realtimeVoice = endpoint.options["voice"]?.stringValue ?? ConfigurationController.defaultRealtimeVoice
-        useHermes = endpoint.options["kortexaAgent"]?.stringValue == "hermes"
-        voicePipelineMode = .openAIRealtime
+        let remote = endpoint(withID: conversation.realtimeEndpointID)
+        let supported = remote.flatMap { SupportedConfigurationPolicy.isPublicRealtime($0) ? $0 : nil }
+        realtimeModel = supported?.model ?? ConfigurationController.defaultRealtimeModel
+        realtimeVoice = supported?.options["voice"]?.stringValue ?? ConfigurationController.defaultRealtimeVoice
         realtimeCredentialSummary = AppSecretResolver().maskedSecret(
-            account: ConfigurationController.realtimeCredentialAccount(for: endpoint.baseURL)
+            account: ConfigurationController.openAICredentialAccount
         )
-        conversationDraftEnabled = conversation.enabled
+        realtimeMessage = nil
     }
 
     private func syncTranscriptionDraft() {
@@ -708,21 +685,6 @@ struct SettingsView: View {
             ? conversation.transcriptionLanguage : remote?.options["language"]?.stringValue ?? "auto"
         transcriptionLanguage = Self.transcriptionLanguages.contains(where: { $0.code == language }) ? language : "auto"
         transcriptionMessage = nil
-    }
-
-    private func handleVoicePipelineSelection(_ mode: VoicePipelineMode) {
-        realtimeMessage = nil
-        if mode == .openAIRealtime {
-            realtimeBaseURL = ConfigurationController.openAIRealtimeBaseURL.absoluteString
-            if realtimeModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                realtimeModel = ConfigurationController.defaultRealtimeModel
-            }
-            useHermes = false
-        } else if realtimeBaseURL == ConfigurationController.openAIRealtimeBaseURL.absoluteString {
-            realtimeBaseURL = ConfigurationController.kortexaRealtimeURL.absoluteString
-            realtimeModel = ConfigurationController.hermesRealtimeModel
-        }
-        refreshRealtimeCredentialSummary()
     }
 
     private func testRealtimeConnection() {
@@ -756,11 +718,7 @@ struct SettingsView: View {
             realtimeMessage = "Complete Codex sign-in before enabling this conversation option."
             return
         }
-        let rawURL = ConfigurationController.openAIRealtimeBaseURL.absoluteString
-        guard let baseURL = URL(string: rawURL), baseURL.host != nil else {
-            realtimeMessage = "Enter a valid Realtime base URL."
-            return
-        }
+        let baseURL = ConfigurationController.openAIRealtimeBaseURL
         let model = realtimeModel.trimmingCharacters(in: .whitespacesAndNewlines)
         let voice = realtimeVoice.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty, !voice.isEmpty else {
@@ -768,7 +726,7 @@ struct SettingsView: View {
             return
         }
         let endpointID = "openai-realtime"
-        let credentialAccount = ConfigurationController.realtimeCredentialAccount(for: baseURL)
+        let credentialAccount = ConfigurationController.openAICredentialAccount
         guard realtimeAuthentication == .codex || realtimeCredentialSummary != nil || !realtimeCredential.isEmpty else {
             realtimeMessage = "Add an API key to enable Realtime."
             return
@@ -781,11 +739,7 @@ struct SettingsView: View {
                 )
                 realtimeCredential = ""
             }
-            var options: [String: JSONValue] = ["voice": .string(voice)]
-            if voicePipelineMode == .compatibleRealtime,
-               baseURL.host?.lowercased() == "api.kortexa.ai" {
-                options["kortexaAgent"] = .string(useHermes ? "hermes" : "api")
-            }
+            let options: [String: JSONValue] = ["voice": .string(voice)]
             let endpoint = EndpointConfiguration(
                 id: endpointID,
                 adapter: .openAIRealtime,
@@ -820,10 +774,7 @@ struct SettingsView: View {
                 }
             }
             realtimeCredentialSummary = AppSecretResolver().maskedSecret(account: credentialAccount)
-            if credentialAccount == ConfigurationController.openAICredentialAccount {
-                transcriptionCredentialSummary = realtimeCredentialSummary
-            }
-            conversationDraftEnabled = true
+            transcriptionCredentialSummary = realtimeCredentialSummary
             realtimeMessage = configuration.validationMessage ?? "Realtime configuration saved."
         } catch {
             realtimeMessage = "Realtime credential save failed: \(error.localizedDescription)"
@@ -1023,44 +974,8 @@ struct SettingsView: View {
         }
     }
 
-    private func refreshRealtimeCredentialSummary() {
-        let url = voicePipelineMode == .openAIRealtime
-            ? ConfigurationController.openAIRealtimeBaseURL
-            : URL(string: realtimeBaseURL)
-        guard let url else {
-            realtimeCredentialSummary = nil
-            return
-        }
-        realtimeCredentialSummary = AppSecretResolver().maskedSecret(
-            account: ConfigurationController.realtimeCredentialAccount(for: url)
-        )
-    }
-
-    private func removeRealtimeCredential() {
-        cancelConnectionTest()
-        let url = voicePipelineMode == .openAIRealtime
-            ? ConfigurationController.openAIRealtimeBaseURL
-            : URL(string: realtimeBaseURL)
-        guard let url else { return }
-        let account = ConfigurationController.realtimeCredentialAccount(for: url)
-        if account == ConfigurationController.openAICredentialAccount {
-            removeOpenAICredential()
-            return
-        }
-        do {
-            try AppSecretResolver().remove(
-                account: account
-            )
-            realtimeCredentialSummary = nil
-            configuration.update { $0.pipeline.conversation.enabled = false }
-            conversationDraftEnabled = false
-            realtimeMessage = "API key removed. Conversation was disabled."
-        } catch {
-            realtimeMessage = "API key removal failed: \(error.localizedDescription)"
-        }
-    }
-
     private func removeOpenAICredential() {
+        cancelConnectionTest()
         do {
             try AppSecretResolver().remove(account: ConfigurationController.openAICredentialAccount)
             realtimeCredentialSummary = nil
@@ -1081,11 +996,11 @@ struct SettingsView: View {
                     profile.pipeline.conversation.enabled = false
                 }
             }
-            conversationDraftEnabled = configuration.configuration.pipeline.conversation.enabled
-            realtimeMessage = "Shared OpenAI API key removed. OpenAI features were disabled."
+            realtimeMessage = "Shared API key removed. Features using that key were disabled."
             transcriptionMessage = realtimeMessage
         } catch {
-            transcriptionMessage = "API key removal failed: \(error.localizedDescription)"
+            realtimeMessage = "API key removal failed: \(error.localizedDescription)"
+            transcriptionMessage = realtimeMessage
         }
     }
 
@@ -1185,54 +1100,23 @@ struct SettingsView: View {
         builtinTranslation.remove()
     }
 
-    private func videoStageIsEnabled(_ kind: VideoStageKind) -> Bool {
-        configuration.configuration.pipeline.videoStages.first(where: { $0.kind == kind })?.enabled == true
+    private var gesturesEnabled: Bool {
+        configuration.configuration.pipeline.videoStages.contains { $0.kind == .handGesture && $0.enabled }
     }
 
-    private func videoStageBinding(kind: VideoStageKind) -> Binding<Bool> {
-        Binding(
-            get: { videoStageIsEnabled(kind) },
-            set: { enabled in
-                configuration.update { profile in
-                    if let index = profile.pipeline.videoStages.firstIndex(where: { $0.kind == kind }) {
-                        profile.pipeline.videoStages[index].enabled = enabled
-                        return
-                    }
-                    let stage: VideoStageConfiguration
-                    switch kind {
-                    case .handGesture:
-                        stage = .init(
-                            id: "hands",
-                            kind: .handGesture,
-                            enabled: enabled,
-                            maximumRateHz: 8,
-                            maximumFrameAgeMilliseconds: 250
-                        )
-                    case .objectDetection:
-                        stage = .init(
-                            id: "objects",
-                            kind: .objectDetection,
-                            enabled: enabled,
-                            endpointID: "smarty-objects",
-                            maximumRateHz: 2,
-                            maximumFrameAgeMilliseconds: 1_000,
-                            options: ["confidence": .number(0.35)]
-                        )
-                    case .visionLanguage:
-                        stage = .init(
-                            id: "vision",
-                            kind: .visionLanguage,
-                            enabled: enabled,
-                            endpointID: "smarty-vision",
-                            maximumRateHz: 0.2,
-                            maximumFrameAgeMilliseconds: 2_000,
-                            prompt: "Describe only visual facts useful to a conversational camera assistant."
-                        )
-                    }
-                    profile.pipeline.videoStages.append(stage)
+    private var gesturesEnabledBinding: Binding<Bool> {
+        Binding(get: { gesturesEnabled }, set: { enabled in
+            configuration.update { profile in
+                if let index = profile.pipeline.videoStages.firstIndex(where: { $0.kind == .handGesture }) {
+                    profile.pipeline.videoStages[index].enabled = enabled
+                } else {
+                    profile.pipeline.videoStages.append(.init(
+                        id: "hands", kind: .handGesture, enabled: enabled,
+                        maximumRateHz: 8, maximumFrameAgeMilliseconds: 250
+                    ))
                 }
             }
-        )
+        })
     }
 
     private func overlayBoolBinding(_ keyPath: WritableKeyPath<OverlayConfiguration, Bool>) -> Binding<Bool> {
@@ -1267,17 +1151,6 @@ struct SettingsView: View {
         Binding(
             get: { configuration.configuration.capture[keyPath: keyPath] },
             set: { value in configuration.update { $0.capture[keyPath: keyPath] = value } }
-        )
-    }
-
-    private func conversationBoolBinding(
-        _ keyPath: WritableKeyPath<ConversationConfiguration, Bool>
-    ) -> Binding<Bool> {
-        Binding(
-            get: { configuration.configuration.pipeline.conversation[keyPath: keyPath] },
-            set: { value in
-                configuration.update { $0.pipeline.conversation[keyPath: keyPath] = value }
-            }
         )
     }
 
@@ -1397,6 +1270,9 @@ struct SettingsView: View {
     }
 
     private func syncDrafts() {
+        cancelConnectionTest()
+        realtimeCredential = ""
+        transcriptionCredential = ""
         syncRealtimeDraft()
         syncTranscriptionDraft()
     }
@@ -1456,20 +1332,6 @@ private extension EndpointConfiguration {
     var hostDisplayName: String {
         if EndpointLocation.isLoopback(baseURL) { return "a local service on this Mac" }
         return baseURL.host ?? baseURL.absoluteString
-    }
-}
-
-private enum VoicePipelineMode: String, CaseIterable, Identifiable {
-    case openAIRealtime
-    case compatibleRealtime
-
-    var id: Self { self }
-
-    var title: String {
-        switch self {
-        case .openAIRealtime: return "OpenAI Realtime"
-        case .compatibleRealtime: return "Compatible Realtime"
-        }
     }
 }
 

@@ -61,7 +61,7 @@ final class ConfigurationController: ObservableObject {
                 self.validationMessage = "The default profile could not be saved: \(error.localizedDescription)"
             }
         }
-        migrateUnsupportedTranscriptionConfiguration()
+        migrateUnsupportedConfiguration()
     }
 
     static func installOpenAITranscriptionConfiguration(
@@ -103,23 +103,33 @@ final class ConfigurationController: ObservableObject {
         profile.pipeline.conversation.transcriptionEnabled = true
     }
 
-    private func migrateUnsupportedTranscriptionConfiguration() {
+    private func migrateUnsupportedConfiguration() {
         guard isConfigurationUsable else { return }
         var candidate = configuration
-        guard let migrationMessage = normalizeSupportedTranscriptionConfiguration(in: &candidate) else { return }
+        guard let migrationMessage = normalizeSupportedConfiguration(in: &candidate) else { return }
         do {
             try ConfigurationValidator.validate(candidate)
             try store.save(candidate)
             configuration = candidate
             profileTransferMessage = migrationMessage
         } catch {
-            validationMessage = "The legacy transcription configuration could not be migrated: \(error.localizedDescription)"
+            isConfigurationUsable = false
+            validationMessage = "The legacy configuration could not be migrated: \(error.localizedDescription)"
         }
     }
 
-    private func normalizeSupportedTranscriptionConfiguration(
+    private func normalizeSupportedConfiguration(
         in candidate: inout AICameraConfiguration
     ) -> String? {
+        var messages: [String] = []
+        if SupportedConfigurationPolicy.disableUnsupportedRoutes(in: &candidate) {
+            messages.append("Disabled unsupported conversation/video routes. Set up OpenAI Realtime or local vision in AI.")
+        }
+        if let message = normalizeTranscription(in: &candidate) { messages.append(message) }
+        return messages.isEmpty ? nil : messages.joined(separator: " ")
+    }
+
+    private func normalizeTranscription(in candidate: inout AICameraConfiguration) -> String? {
         guard candidate.pipeline.conversation.transcriptionEnabled,
               candidate.pipeline.conversation.transcriptionProvider == .openAI,
               let endpointID = candidate.pipeline.conversation.transcriptionEndpointID,
@@ -140,7 +150,7 @@ final class ConfigurationController: ObservableObject {
 
     func update(_ change: (inout AICameraConfiguration) -> Void) {
         guard isConfigurationUsable else {
-            validationMessage = "Repair and save the profile in AI & Advanced before changing other settings."
+            validationMessage = "Repair and save the profile in AI before changing other settings."
             return
         }
         var candidate = configuration
@@ -159,7 +169,7 @@ final class ConfigurationController: ObservableObject {
     func importProfile(from url: URL) {
         do {
             var candidate = try ProfileTransfer.read(from: url)
-            let migrationMessage = normalizeSupportedTranscriptionConfiguration(in: &candidate)
+            let migrationMessage = normalizeSupportedConfiguration(in: &candidate)
             try store.save(candidate)
             configuration = candidate
             isConfigurationUsable = true
@@ -182,7 +192,7 @@ final class ConfigurationController: ObservableObject {
     func reload() {
         do {
             var candidate = try store.load()
-            let migrationMessage = normalizeSupportedTranscriptionConfiguration(in: &candidate)
+            let migrationMessage = normalizeSupportedConfiguration(in: &candidate)
             if migrationMessage != nil { try store.save(candidate) }
             configuration = candidate
             isConfigurationUsable = true
@@ -208,7 +218,7 @@ final class ConfigurationController: ObservableObject {
 
     func applySmartyPreset() {
         var local = Self.smartyPreset()
-        let migrationMessage = normalizeSupportedTranscriptionConfiguration(in: &local)
+        let migrationMessage = normalizeSupportedConfiguration(in: &local)
         do {
             try store.save(local)
             configuration = local

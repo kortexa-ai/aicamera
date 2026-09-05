@@ -9,7 +9,9 @@ Detailed test evidence belongs in [`VALIDATION.md`](VALIDATION.md). Manual accep
 The active target is a complete local desktop experience: OpenAI Realtime with an API key or a
 dedicated Codex login, plus in-process transcription, translation, object detection, and gestures.
 Kortexa services, `api.server`, Hermes, and their normal Settings controls are out of scope for
-this phase. Older compatible-service milestones below are historical roadmap context.
+this phase. Settings import/export also remains hidden; if exposed later, label it Settings
+import/export without deployment-specific terminology. Older compatible-service milestones below
+are historical roadmap context.
 
 Implementation and acceptance priorities:
 
@@ -31,12 +33,17 @@ Implementation and acceptance priorities:
 - [x] Verify local video inference, gesture overlays, and manual three.js composition during a
   camera test; stop the test and return to idle.
 - [ ] Verify translated captions and model-invoked overlay tools during live Realtime playback.
-- [ ] Simplify Settings to the supported OpenAI and local routes, preserve drafts and truthful
-  feature state, remove irrelevant Kortexa controls, and verify with native UI/accessibility.
+- [x] Simplify Settings to the supported OpenAI and local routes, preserve drafts and truthful
+  feature state, remove irrelevant controls, keep transfer/custom endpoints hidden, and verify
+  with native UI/accessibility.
 - [ ] Complete full validation and signed Release host installation. Virtual-camera activation
   and extension/device acceptance are deferred at the user's request; do not activate components.
 
 ## Current status
+
+- Build 32 simplifies the OpenAI/local Settings implementation, keeps vision setup visible while
+  off, disables unsupported loaded conversation/video routes without deleting their metadata,
+  and hides the manual overlay script editor in Release. Settings transfer remains hidden.
 
 - Build 31 reuses serial local detector workers and validates tensor shapes before allocation. Native checks pass for YOLO Tiny and RF-DETR Medium/Large, including cache identity, UI responsiveness, cancellation, recovery, and removal. Warm fixture inference measured about 7/40/67 ms respectively; first RF-DETR initialization/inference depends on filesystem/Metal cache state. The signed host passes local camera, gesture, and manual three.js composition acceptance and is back at idle. Settings and Realtime tool/caption acceptance remain.
 - Build 29 adds a separate Codex login through the installed official CLI, managed refresh, explicit API-key/Codex selection, and a silent public Realtime connection test. It preserves desktop credentials and never silently falls back to the API key. Build 26 added embedded Whisper and shared verified model downloads; build 25 corrected translation text and reuse; build 24 moved Realtime onto host-owned PCM.
@@ -132,6 +139,14 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 - [ ] Reject external resources, oversized SVG, excessive element counts, and stale overlay work. Model-rendered scripts are covered by the section below.
 - [ ] Continue sending clean pre-overlay frames to inference so generated content cannot recursively contaminate vision input.
 - [ ] Run an end-to-end `snappy` test that adds random annotations and verifies composed pixels in an independent virtual-camera client.
+
+### Future live face filters and conversational graphics
+
+Follow-up direction: local face landmarks (MediaPipe is a candidate) anchor generated three.js
+filters, such as a moving hat, while spoken questions can produce floating graphics such as a pie
+chart. Composite these into the outgoing camera image so other call participants see the result.
+Evaluate tracking stability, occlusion, frame freshness, and bounded landmark access after the
+current OpenAI/local completion work. See [the follow-up design item](https://github.com/kortexa-ai/aicamera/issues/45).
 
 ### Model-rendered overlay scripts (transparent render layer)
 

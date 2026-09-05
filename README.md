@@ -10,13 +10,10 @@ A fresh profile uses the system-default hardware inputs and pure passthrough: no
 - Pure passthrough defaults; configurable physical inputs, resolution, frame rate, mirroring, overlays, gains, and AI stages remain optional.
 - Idle-only local camera and microphone tests show the processed preview and a bounded live input meter. Real client demand cancels testing immediately; inline settings buttons open the matching in-app device controls.
 - Optional launch at login so the menu-bar host is available before a virtual-device client opens.
-- Bounded gesture, object-detection, VLM, ASR, agent, and TTS stages with an ASR toggle and an independent transcription lane. Local detection offers lightweight YOLOv3 Tiny plus downloadable Apache-2.0 RF-DETR Medium and Large Core ML models.
-- OpenAI Realtime conversation through a saved API key and the host's selected microphone.
-- Independent transcription with OpenAI or embedded multilingual Whisper Base/Small, plus optional local HY-MT2 translation. Local weights have explicit downloads, progress, cancellation, integrity checks, and removal.
-- Hand gesture recognition with Apple Vision. Gesture events can trigger an agent response.
-- Detection boxes, gestures, transcripts, agent text, and status overlays.
-- Wake-phrase or gesture activation without a manual Ask button.
-- Microphone forwarding, bounded opt-in streaming PCM TTS with WAV fallback, and immediate barge-in cancellation.
+- OpenAI Realtime through an API key or [separate Codex login](docs/codex-login.md), with one-utterance Talk, bounded host audio, and normal playback through speakers/headphones. Account access and subscription coverage of Realtime usage are not guaranteed.
+- Independent transcription with OpenAI or embedded multilingual Whisper Base/Small, plus local HY-MT2 translation. Local weights have explicit downloads, progress, cancellation, integrity checks, and removal.
+- In-process object detection with YOLOv3 Tiny or RF-DETR Medium/Large, plus Apple Vision hand gestures. Model loading and inference stay off the UI and capture callbacks.
+- Detection boxes, gestures, transcripts, agent text, and status annotations, plus bounded transparent three.js overlays created through Realtime tools.
 - Install, activate, deactivate, and remove controls for both virtual devices.
 - Local-only network policy by default. Remote use needs an HTTPS host allowlist and exact per-data grants.
 - No raw media recording by default. Profiles contain secret references, not secret values.
@@ -68,12 +65,13 @@ The app must be in `/Applications` before macOS can activate its camera system e
 6. Use the small settings button beside either resolved input to open its controls under **Settings → General**. Optionally enable **Open AI Camera at login** there.
 7. Select **AI Camera** or **AI Camera Microphone** in another app. The matching lane starts and stops automatically.
 
-No model configuration is needed for passthrough. To add AI, enable stages or conversation in Settings or apply one of the checked examples in [`Examples/`](Examples/). The profile is stored at `~/Library/Application Support/AI Camera/profile.json`. Existing schema-1 profiles retain their compatibility behavior, including always-listening activation when `activationMode` is absent.
+No model configuration is needed for passthrough. **Settings → AI** offers public OpenAI Realtime,
+OpenAI or Local Whisper transcription, local translation, vision, gestures, and overlays. Setup for
+Conversation, Transcription, and local vision is available while those features are off. **Privacy**
+shows enabled data routes. Settings import/export and custom endpoints are hidden for now.
 
-Profiles can be imported or exported under **Settings → AI**. Transfers contain only
-environment-variable or Keychain references; they never copy secret values. The checked
-[`Examples/openai.json`](Examples/openai.json) profile uses an `OPENAI_API_KEY` reference and can
-be imported directly.
+Settings are saved at `~/Library/Application Support/AI Camera/profile.json`. Loading older settings
+preserves endpoint metadata but disables unsupported conversation and remote video routes.
 
 ## Documentation
 
@@ -89,7 +87,11 @@ be imported directly.
 
 ## Current validation boundary
 
-The core tests and unsigned app, framework, camera-extension, and audio-driver build are automated. System-extension activation and HAL installation are deliberately manual because they modify the operating system and can require a registered signing profile, administrator authorization, user approval, and a reboot. Development-signed build 9 passed the prior bounded native placeholder/live, stop/restart, and simultaneous-client camera acceptance. Build 10 adds automatic demand, pure-passthrough defaults, independent lanes, update detection, and login-item controls; its automated non-installing validation is recorded in [`VALIDATION.md`](VALIDATION.md), while signed device-demand acceptance remains manual.
+Core tests, native synthetic/public-fixture checks, and the unsigned app, framework, camera-extension,
+and audio-driver build are automated. The signed host has passed local camera/microphone testing,
+normal Realtime playback, and native local-model validation; details are in [VALIDATION.md](VALIDATION.md).
+System-extension activation and HAL installation are separate manual operations. Acceptance of the
+current host's output in another call app remains deferred; no automated test installs components.
 
 ## License
 

@@ -1,5 +1,32 @@
 # Validation record
 
+## Build 32 OpenAI/local Settings cleanup
+
+Date: 2026-09-05
+
+- Removed obsolete compatible-service state, unused generic endpoint bindings, and the empty
+  custom-vision disclosure. Conversation uses one canonical OpenAI credential path and keeps
+  API-key/Codex drafts separate from the saved active authentication choice. Local vision setup
+  remains available while processing is off; individual switches reflect enabled stages.
+- Settings transfer and custom endpoints remain hidden at the user's request. The Release popup
+  no longer exposes the manual script editor. README and configuration guidance now describe the
+  current OpenAI/local product rather than older private-service controls.
+- Loading settings disables unsupported conversation and remote video stages without deleting
+  their endpoint definitions, credential references, or unrelated local transcription. Migration
+  failure blocks capture. Four regression tests cover metadata preservation, idempotence, public
+  API-key/Codex routes, independent local transcription, and rejected endpoint overrides.
+- Full validation passed 143 tests and the unsigned four-target build. The protected passwordless
+  installer installed signed build 32; strict source and installed signatures pass, and both
+  bundle versions and the protected generation marker are 32. No system component was activated.
+
+- Native UI/accessibility acceptance verified all three tabs, absent transfer/custom-endpoint
+  controls, vision setup while off, truthful group/individual switches, active-route labels,
+  authentication/transcription drafts across tab switches, and Privacy's saved Codex/local routes.
+  API-key and Codex silent public connection tests both passed. The Release camera preview loaded
+  without the script editor and stopped to idle. Original Codex, Whisper Base, translation, and
+  RF-DETR Large settings were retained. Completed connection messages are cleared when the selected
+  authentication, model, or voice changes so an old result cannot describe a new draft.
+
 ## Build 31 local detector reuse and bounds
 
 Date: 2026-09-05
