@@ -1106,7 +1106,7 @@ final class AppModel: ObservableObject {
     private func applyRealtimeTool(_ call: RealtimeFunctionCall) -> [String: Any] {
         let configuration = configurationController.configuration.overlays.script
         guard configuration.enabled, let renderer = scriptRenderer, cameraRunGate?.isActive == true else {
-            return ["ok": false, "error": "Overlay tools require enabled Tools and an active camera test."]
+            return ["ok": false, "error": "Overlay tools require enabled Tools and an active camera lane."]
         }
         guard let command = RealtimeOverlayCommand.parse(name: call.name, arguments: call.arguments, configuration: configuration) else {
             return ["ok": false, "error": "Unknown tool or invalid arguments."]
@@ -1163,7 +1163,7 @@ final class AppModel: ObservableObject {
     }
 
     /// Dev/acceptance entry point: run a pasted overlay script on the live
-    /// camera test. Phase 2 replaces this with the agent `render_overlay` tool.
+    /// camera test. Realtime invokes the same renderer through validated tools.
     func loadOverlayScript(_ script: String) {
         let scriptConfig = configurationController.configuration.overlays.script
         guard let renderer = scriptRenderer else {

@@ -1,5 +1,38 @@
 # Validation record
 
+## Build 33 overlay lifetime and message bounds
+
+Date: 2026-09-05
+
+- Script admission uses UTF-8 bytes and rejects nonfinite/out-of-range TTLs. Replacement, Clear,
+  and expiry invalidate old pixels and reload the document, releasing previous script globals and
+  timers. Navigation is restricted to the renderer document. Logs are rate-limited, bounded in
+  memory, and no longer written to public unified logs or the unbounded diagnostic file. No existing
+  diagnostic file was read or deleted during this work.
+- The bridge publishes at most one unacknowledged frame. Native checks validate generation,
+  increasing sequence, exact dimensions and encoded length before decoding. Opted-in scene updates
+  have a 64 KiB bound, one active evaluation, and one replaceable pending value. Three regression
+  tests cover pixels, stale generations/replays, payload bounds, booleans, fractions, and nonfinite
+  sequence numbers. Full validation passed 146 tests and the unsigned four-target build.
+- The production renderer's synthetic native harness passed UTF-8/TTL bounds, continuous
+  publication, new-document isolation from an old timer/global, immediate replacement/Clear,
+  rejection of late output, expiry, script-error recovery, coalesced scene updates, and stop/restart.
+  First pixels arrived in 0.174 seconds; a two-second sample contained 53 distinct fresh frames.
+  No camera, microphone, network, credentials, or image files were used by this harness.
+- The public tool probe compiles but could not run a model round trip: both API-key and separate
+  Codex reads return OSStatus -25293 with interaction disabled. The first attempt exposed a macOS
+  compatibility issue: `LAContext.interactionNotAllowed` alone did not suppress a legacy Keychain
+  ACL dialog. That exact probe was stopped. Adding the process-local legacy no-interaction switch
+  and query guard made both reads fail promptly without another dialog; no item ACL, password,
+  credential file, or security setting was changed. The native renderer result above is distinct
+  from uncompleted public tool/continuation acceptance.
+
+- The final native rerun passed with first pixels at 0.188 seconds and 51 fresh frames in two
+  seconds. Its host process peaked at 81,494,016 resident bytes; this excludes WebKit's separate
+  content/GPU processes and is not a total renderer memory benchmark. Signed build 33 was installed
+  through the protected passwordless transaction. Source and installed deep signatures pass;
+  source/installed versions and the protected generation marker are 33. No component was activated.
+
 ## Build 32 OpenAI/local Settings cleanup
 
 Date: 2026-09-05

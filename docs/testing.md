@@ -318,3 +318,43 @@ Use the signed installed host. General, AI, and Privacy are the only Settings ta
 
 Settings import/export is intentionally hidden; `ProfileTransfer` tests cover only the retained
 serialization capability. They do not establish a user-facing transfer flow.
+
+## Synthetic overlay runtime and public tools
+
+After `scripts/validate.sh`, compile the actual host renderer against the freshly built framework:
+
+```sh
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug -framework AICameraCore \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  Sources/AICameraApp/OverlayScriptRenderer.swift scripts/validate-overlay-runtime.swift \
+  -o /tmp/aicamera-overlay-runtime-validation
+/tmp/aicamera-overlay-runtime-validation "$PWD/Resources/Overlay/overlay.html"
+```
+
+The runtime check uses generated geometry, validates actual pixel colors, and saves no images.
+It needs the macOS GUI session for WebKit, but no camera, microphone, network, or credential.
+
+The optional public tool check uses synthetic instructions and receives PCM without playing or
+saving it. It returns a tool result, requests continuation only after the first response completes,
+and then requests Clear. It uses an already-provided `OPENAI_API_KEY` in memory when available;
+otherwise its single Keychain read forbids interaction using both the legacy process-level switch
+and the modern authentication context. The modern context alone did not suppress a legacy item ACL
+dialog on this Mac; the probe uses the deprecated legacy guards deliberately until those items
+move to a backend that honors the modern context. These controls change no item ACL or saved setting. `codex` reads only AI Camera's separate
+login and does not refresh or sign in. An inaccessible/expired credential fails explicitly.
+
+```sh
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug -framework AICameraCore \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  Sources/AICameraApp/OverlayScriptRenderer.swift \
+  Sources/AICameraApp/RealtimeConversationSession.swift scripts/validate-realtime-tools.swift \
+  -o /tmp/aicamera-realtime-tool-validation
+/tmp/aicamera-realtime-tool-validation "$PWD/Resources/Overlay/overlay.html" api-key
+# Optional, only after completing the separate login in the installed app:
+/tmp/aicamera-realtime-tool-validation "$PWD/Resources/Overlay/overlay.html" codex
+```
+
+This proves synthetic tool-to-pixel behavior only when it passes. Live microphone invocation,
+translated captions, and another participant's camera view remain distinct acceptance checks.

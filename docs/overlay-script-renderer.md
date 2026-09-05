@@ -1,193 +1,89 @@
-# Model-rendered overlay scripts
+# Model-rendered camera overlays
 
-Status: Phase 0 spike in progress. See the "Model-rendered overlay scripts" section of `PLAN.md` for the backlog.
+The host accepts bounded `render_overlay` and `clear_overlay` Realtime function calls. Generated
+three.js scenes run in a hidden WKWebView and publish transparent pixels to the camera compositor.
+API-key and separate Codex authentication use the same public function-call contract. Normal
+Settings exposes Tools; the manual script editor appears only in Debug local camera tests.
 
-## Goal
-
-Give the conversation agent a tool that renders model-generated content on top of the live
-camera frames. The model writes a small JavaScript scene (three.js, WebGL2). The scene runs in a
-hidden in-app WKWebView. Each rendered frame is read back as pixels and alpha-composited onto the
-published virtual-camera frame, so any camera client (Zoom, QuickTime, a local test) sees the
-overlay.
-
-## Why WKWebView + three.js (and not the alternatives)
-
-| Option | Verdict | Reason |
-|---|---|---|
-| WKWebView + three.js (WebGL2) | **Chosen** | In-process, no new signed binary, WebKit web-content process gives crash isolation, three.js is the most common 3D library in model training data so generated code is reliable. |
-| typegpu / WebGPU | Not in WKWebView | WebGPU is unavailable in Safari/WebKit. typegpu only runs in Chromium. |
-| Hosted Chromium (Electron/ElectronBun) | Swap-in later | Separate signed process, ~200 MB RAM, startup latency, lifecycle and update management. Worth it only if WebGPU becomes a hard requirement. Keep behind the same renderer protocol. |
-| JavaScriptCore + custom Swift render API | Rejected | Model code quality drops against a made-up API, and a JS crash takes down the app (JSC is in-process). |
-
-The structured/SVG overlay path from the "AI-generated camera composition" backlog item stays for
-simple labels and boxes. Script rendering is for rich 2D/3D/animated content. The two coexist.
-
-## Data flow
+## Current data flow
 
 ```text
-agent (LLM)
-  | tool call: render_overlay(script, ttlSeconds?)
-  v
-PipelineCoordinator.runAgent
-  | validate (size, TTL, known tool) -> execute locally
-  v
-OverlayScriptRenderer (actor)
-  | hidden NSWindow (off-screen, near-zero alpha) + WKWebView
-  | page: overlay.html + vendored three.js + bridge (window.AICamera)
-  | rAF loop: renderer.render() -> gl.readPixels(RGBA) -> postMessage(ArrayBuffer)
-  v
-OverlayFrameMailbox (single slot, timestamped CVPixelBuffer, 32RGBA)
-  |
-  v
-OverlayRenderer.render()
-  | camera frame (CoreImage) -> existing labels -> composite latest FRESH overlay (<= ~150 ms)
-  v
-VirtualCameraFeeder (CMIO sink, capacity 1) -> camera clients
+public Realtime function call
+  → validated local command (script bytes, TTL, enabled capability)
+  → OverlayScriptRenderer (main-thread lifecycle, isolated WebKit content)
+  → bundled three.js/WebGL2 scene, 640 × 360 transparent canvas
+  → one unacknowledged base64 RGBA frame, script generation and sequence
+  → native size/generation checks, premultiplied BGRA conversion
+  → one latest-frame slot, maximum accepted age 150 ms
+  → host alpha composition over camera annotations
+  → camera preview / virtual-camera feeder
 ```
 
-The inference path is unchanged: `analysisRenderer` keeps rendering clean frames, so generated
-content can never feed back into the model.
+Capture reads the latest slot without waiting for WebKit or inference. The clean inference path
+omits generated overlays, so the model does not recursively analyze its own graphics. The canvas
+is upscaled to the selected camera output size.
 
-## Components
+## Lifetime and bounds
 
-### 1. `OverlayScriptRenderer` (app target, actor)
+Only one script is active. Native admission checks UTF-8 byte size (default 64 KiB), finite TTL,
+and the configured TTL range (default 30 seconds, maximum 60). A replacement immediately clears
+old pixels and loads a fresh document. That releases previous script globals, timers, callbacks,
+and scene resources. Multiple replacements during initial loading share one pending script slot.
+Clear and expiry invalidate the current generation, clear pending pixels, and reload a blank
+renderer document. Stop tears down the window and web view.
 
-- Owns one hidden window and one WKWebView. The window is ordered in (required for continuous
-  rendering) but placed off-screen with near-zero alpha; the app is accessory-only, so no Dock or
-  window-list presence.
-- Loads the bundled page with `loadFileURL` (dev spike) or a custom `WKURLSchemeHandler` scheme
-  (Phase 1, cleaner isolation). All remote requests blocked with a `WKContentRuleList`; opaque
-  origin; no cookies/storage; no automatic windows.
-- `load(script:)`: bounded to one in-flight load; a generation counter (same pattern as
-  `VideoPipelineController.runGeneration`) rejects stale loads and stale frame callbacks.
-- `stop()`: tears down the page, clears the mailbox, cancels the watchdog.
-- Watchdog: if no frame arrives for ~2 s while a script is active, the overlay is treated as
-  stale and disappears. A web-content crash therefore degrades to "no overlay", never to a hung
-  camera lane.
+The bridge sends at most one frame until native code acknowledges its generation and sequence.
+Rendering continues while publication waits. The host verifies current generation, increasing
+sequence, fixed dimensions, and exact encoded size before base64 decoding. A stale, replayed,
+malformed, or oversized frame cannot repopulate the mailbox after Clear or replacement.
 
-### 2. `OverlayFrameMailbox`
+Freshness expiry removes a stalled overlay from the compositor. A web-content crash clears state
+and reloads the bundled page. WebKit provides process isolation; the app does not claim a hard
+JavaScript CPU/GPU memory quota. Host queues, frame sizes, and visible overlay lifetime are bounded.
 
-Single-slot, timestamped `CVPixelBuffer` mailbox (pattern of the existing `LatestValueMailbox`).
-New frames replace old ones; the compositor reads the latest and drops it when older than the
-freshness bound. No queue, no backpressure: the capture callback never waits for the web view.
+## Script contract
 
-### 3. `OverlayRenderer` change
+Scripts use the existing `THREE` global and `AICamera.scene`, `AICamera.camera`, and
+`AICamera.onFrame(dt => …)`. They must not create another canvas, renderer, page, or frame loop.
+The bundled PerspectiveCamera starts at `(0, 0, 6)` and looks toward the origin. For example:
 
-After the camera frame and the existing labels are drawn, composite the latest fresh overlay
-frame (CIGetAlphaComposite). Absent or stale overlay means the frame is published unchanged.
-The clean `analysisRenderer` path never composites.
-
-### 4. Agent tool protocol extension (Phase 2)
-
-Realtime is now the primary tool transport; see `realtime-conversation.md` for the WebRTC,
-standard function-call, experimental Codex delegation, activation, and fallback design. The
-request/response contract below remains the legacy chat-completions fallback so both paths feed the
-same bounded local tool executor.
-
-Current legacy protocol: `AgentClient.respond(to:) async throws -> String`. Proposed:
-
-```swift
-public struct AgentTool: Equatable, Sendable {
-    public var name: String
-    public var description: String
-    public var parameters: JSONValue   // JSON Schema
-}
-
-public struct AgentToolCall: Equatable, Sendable {
-    public var id: String
-    public var name: String
-    public var arguments: JSONValue
-}
-
-public struct AgentToolResult: Equatable, Sendable {
-    public var callID: String
-    public var output: JSONValue
-}
-
-public struct AgentResponse: Equatable, Sendable {
-    public var text: String?
-    public var toolCalls: [AgentToolCall]
-}
-
-public protocol AgentClient: Sendable {
-    func respond(to request: AgentRequest) async throws -> String
-    // New, with protocol-extension fallbacks so existing adapters keep working:
-    func respond(to request: AgentRequest, tools: [AgentTool]) async throws -> AgentResponse
-    func respond(to request: AgentRequest, toolResults: [AgentToolResult]) async throws -> String
-}
+```javascript
+const mesh = new THREE.Mesh(
+  new THREE.BoxGeometry(1.5, 1.5, 1.5),
+  new THREE.MeshStandardMaterial({ color: 0x8b5cf6 })
+);
+AICamera.scene.add(mesh);
+AICamera.onFrame(dt => { mesh.rotation.y += dt; });
 ```
 
-`OpenAIAgentClient` implements the tool-aware variants with the standard `tools` / `tool_calls`
-chat-completions fields. The coordinator enforces the bounds: at most one tool round-trip per
-turn, at most a few tool calls, known tool names only, validated arguments, and the existing
-endpoint timeout.
+The default is a transparent background. Network requests, external textures, fonts, media,
+iframes, workers, forms, and additional windows are blocked by the page policy and host controls.
+Navigation is restricted to the bundled renderer document. WebKit uses nonpersistent storage.
 
-Tools:
+`overlays.script.allowSceneData` defaults to false. When enabled through the retained configuration
+schema, the bridge can read bounded local `AICamera.sceneData`. Host updates are at most 64 KiB,
+with one JavaScript evaluation active and one replaceable pending snapshot. Scripts never receive
+raw camera frames. Script messages are limited to a short, rate-limited in-memory UI value; they
+are never written to unified logs or a diagnostic file.
 
-- `render_overlay(script: string, ttlSeconds?: number)` — load a new scene script.
-- `clear_overlay()` — remove the current overlay.
+## Validation and remaining acceptance
 
-Validation: script byte cap (default 64 KB), TTL cap (default 60 s max), one active script at a
-time (new replaces old), memory-only (never persisted, consistent with the media-privacy rule).
+`scripts/validate-overlay-runtime.swift` exercises the production renderer with generated geometry,
+without cameras, microphones, credentials, or network. It checks byte/TTL bounds, continuous frame
+publication, fresh-document replacement, Clear, expiry, script-error recovery, scene updates, and
+stop/restart. `scripts/validate-realtime-tools.swift` adds public model-generated tools, native pixel
+verification, function outputs, audio/caption continuation, and Clear. Its Keychain reads forbid
+interaction; an unavailable credential is a reported test limitation, not a request to unlock it.
 
-### 5. Profile schema
+See [testing commands](testing.md) and [measured evidence](../VALIDATION.md). Current virtual-camera
+acceptance in another call app is deferred. Future face tracking and conversational graphics build
+on this host compositor; landmark tracking and another participant's view still need separate work.
 
-New `overlays.script` block (schema version bump):
+## Historical renderer spike
 
-```json
-"script": {
-  "enabled": true,
-  "maxScriptBytes": 65536,
-  "maximumFps": 30,
-  "defaultTTLSeconds": 30,
-  "maximumTTLSeconds": 60,
-  "allowSceneData": false
-}
-```
-
-`allowSceneData` is opt-in: when true, the bridge exposes the current `SceneSnapshot`
-(detections, gesture, transcript) to the script via `window.AICamera.getScene()`. The data stays
-local (the web view has no network), but it is a visible setting because it changes what a
-model-generated script can see.
-
-## Security model
-
-Model-generated JavaScript is untrusted. Defense in depth:
-
-1. WebKit web-content process isolation: a script crash or leak does not take down the host app.
-2. No network: all remote requests blocked; opaque origin; no shared storage.
-3. No native access except the explicit `window.AICamera` bridge (bounded, typed messages).
-4. Size/TTL/rate caps enforced by the coordinator and the renderer.
-5. Watchdog degrades to "no overlay" on hang or crash.
-
-## Dev loop ("quick way to render")
-
-- The same page + bridge can be opened in a browser (via a tiny local dev server or `file://`)
-  with a `?dev` flag that fakes the camera background, so scripts can be iterated with full
-  DevTools. The same script string is then what the tool call carries.
-- The control center gains a dev-only script paste box (local camera test only) for manual
-  acceptance without a model round-trip.
-- `AICameraOverlaySpike` (dev tool, not shipped) runs the whole pixel path headlessly:
-  `swift run AICameraOverlaySpike --duration 6 --out /tmp/aicamera-overlay-spike`.
-  It renders a rotating cube over a synthetic background, prints per-stage latency stats, and
-  saves sample PNGs.
-
-## Phase plan
-
-- **Phase 0 (spike, in progress)** — prove the pixel path and measure latency:
-  hidden WKWebView renders a three.js cube; `readPixels` to `CVPixelBuffer`; alpha composite over
-  a synthetic background; verify `ArrayBuffer` message delivery; verify continuous rendering with
-  the window off-screen; record p50/p95 for render, readPixels, and post-to-native stages.
-- **Phase 1 (renderer)** — `OverlayScriptRenderer` + mailbox + `OverlayRenderer` compositing +
-  `overlays.script` profile settings + dev script paste box. No model yet.
-- **Phase 2 (agent tool)** — tool-calling protocol extension, `render_overlay` / `clear_overlay`,
-  validation, TTL expiry, teardown on stop/barge-in, system-prompt guidance plus 2-3 example
-  scripts.
-- **Phase 3 (hardening)** — crash watchdog, memory caps, privacy setting, docs, end-to-end
-  acceptance (independent virtual-camera client sees composed script pixels), PLAN/VALIDATION
-  updates.
-- **Phase 4 (optional)** — hosted Chromium (Electron/ElectronBun) renderer behind the same
-  protocol if WebGPU/typegpu is required.
+The measurements below describe the original August experiment, not the current hardened bridge.
+Its WebKit observations informed the fixed 640 × 360 base64 channel. The production window stays
+on-screen beneath the desktop with near-zero alpha so WebKit continues rendering.
 
 ## Phase 0 spike results (2026-08-19, snappy, macOS 26.5 SDK, M4 Pro)
 
@@ -231,12 +127,3 @@ binary loopback channel for full-resolution scenes.
    `NWListener.State.waiting` now carries an `NWError` (port read from `listener.port`),
    `CVPixelBufferPoolCreate` takes `(allocator, poolAttributes, pixelBufferAttributes, out)`,
    `NWParameters.allowLocalEndpoint` removed.
-
-## Open questions (for Phase 1)
-
-1. Does `NWListener` work inside the signed app bundle? If not, use raw POSIX sockets for the
-   loopback channel.
-2. Default overlay canvas size: 640x360 (cheap, upscaled) vs 1280x720 (sharp, ~24 ms/frame
-   with base64). Decide after the raw channel is measured in-app.
-3. Below-desktop window level in the real app: verify it survives Spaces, screen sleep/wake,
-   and display changes without user-visible artifacts.

@@ -77,25 +77,31 @@ store, TTL, fresh-frame expiry, and crash handling remain required. Tools receiv
 
 ## Dedicated Codex login
 
-This integration is still pending. The old private Quicksilver/ChatGPT route is not the target.
-The current `../esp32-voice` implementation uses an isolated official Codex device login and its
-access token with the public OpenAI Realtime protocol. Successful session setup and generated
-speech are observed account behavior; they do not establish subscription billing coverage.
+The installed official Codex CLI owns an isolated device-login, refresh, and sign-out lifecycle
+for AI Camera. It uses a separate home and Keychain item; the desktop agent's login is not copied
+or rotated. The app reads the current access token only into memory for public Realtime. It never
+falls back to a saved API key when Codex is selected. See [authentication details](codex-login.md).
 
-AI Camera must own its separate login, refresh, and sign-out lifecycle and keep secrets isolated.
-It must not copy or rotate the desktop agent's login. Verify the dedicated flow, expiry, refresh
-ownership, cancellation, and public Realtime access before presenting it as functional. Show
-billing uncertainty accurately unless account evidence establishes attribution.
+Dedicated sign-in, managed refresh, silent session acceptance, and user-heard responses with normal
+playback have passed in the signed host. This is observed account behavior, not evidence that
+Realtime audio is covered by a subscription. Real-account sign-out was not forced during acceptance
+because that would discard the user's completed login; the bounded logout path is implemented and
+its disposable-home lifecycle was tested.
 
-## Remaining acceptance
+## Overlay runtime and acceptance
 
-- Signed native Talk: no speech, one utterance, audible output, VAD stop, Stop during connection and
-  playback, second turn, selected input/output, and prompt capture release.
-- Tool result/response continuation, invalid calls, renderer failure, and transport recovery.
-- Translation enabled while audio arrives, late transcript handling, and cancellation.
-- Dedicated login/refresh/sign-out and actual speech generation.
-- Embedded Whisper download/runtime and local translation/video quality and latency.
-- Settings simplification to the supported OpenAI and embedded local routes.
+The renderer now validates fixed-size generation-tagged frames before decoding, acknowledges one
+frame at a time, and clears old pixels immediately on replacement. A fresh document releases the
+previous script's globals and timers. Clear/expiry remove pending output. Script logs remain bounded
+in memory. See [the renderer contract](overlay-script-renderer.md).
 
-Do not record camera or microphone content for acceptance. Use memory-only aggregate probes and
-synthetic fixtures. Full validation does not install or activate system extensions or drivers.
+Core policies, signed native Talk, selected microphone ownership, Stop/no-speech handling, normal
+playback, local model inference, and Settings have recorded evidence in [VALIDATION.md](../VALIDATION.md).
+Synthetic runtime/tool probes cover the remaining operations without recording user media. Final
+live translated-caption and voice-invoked tool checks must be distinguished from synthetic tests.
+Virtual-camera component activation and current external-client acceptance remain deferred.
+
+The standalone public tool probe requests a synthetic response, returns `function_call_output`,
+and waits for `response.done` before asking for continuation, following OpenAI's
+[Realtime conversation contract](https://developers.openai.com/api/docs/guides/realtime-conversations).
+No microphone audio is supplied; received PCM is validated in memory and is not played or saved.

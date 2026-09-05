@@ -41,6 +41,11 @@ Implementation and acceptance priorities:
 
 ## Current status
 
+- Build 33 bounds overlay logs and frame messages, rejects retired script output, and reloads
+  documents on replacement/Clear to release script state. Synthetic native pixel checks pass;
+  standalone public tool probes currently fail closed because their Keychain access is unavailable
+  without user interaction. Installed-app connection and prior listening checks remain valid.
+
 - Build 32 simplifies the OpenAI/local Settings implementation, keeps vision setup visible while
   off, disables unsupported loaded conversation/video routes without deleting their metadata,
   and hides the manual overlay script editor in Release. Settings transfer remains hidden.
@@ -109,7 +114,9 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 - [ ] Add the bounded WebRTC conversation session described in `docs/realtime-conversation.md`: canonical OpenAI Realtime, self-hosted OpenAI-compatible Realtime, and an explicitly experimental ChatGPT/Codex subscription provider; keep separate ASR, agent, and TTS stages as the selectable fallback.
 - [ ] Add one-shot **Talk** activation with server VAD and **Stop**: connect with microphone egress closed, transmit only during an explicitly armed utterance, close the gate on VAD stop/timeout/cancellation, and route decoded remote PCM through the existing bounded virtual-microphone mixer.
 - [ ] Add Realtime Settings for provider, endpoint, model, voice, and Keychain-backed credentials or OAuth; profiles store secret references only. Test the standard protocol against canonical OpenAI and `api.server`.
-- [ ] Normalize standard Realtime function calls and experimental Codex delegation calls into one local bounded tool executor; start with `render_overlay` and `clear_overlay`.
+- [x] Normalize public Realtime function calls into one bounded local `render_overlay`/`clear_overlay`
+  executor. API-key and separate Codex login use this same public contract; private delegation is
+  outside the current product. Live voice-to-tool acceptance remains in the current priorities.
 - [x] Redesign AI & Advanced around an OpenAI-first Conversation flow with masked Keychain credentials, current Realtime model/voice choices, collapsible Tools, Vision & Gestures, and Overlays groups; hide profile and Smarty-specific controls from the normal UI.
 - [x] Add an advanced compatible Realtime path, including the public Kortexa `/v1/realtime/calls` endpoint and an isolated Hermes selector that sends `X-Kortexa-Agent: hermes` only when explicitly enabled.
 - [x] Securely download the compact YOLOv3 Tiny model from Apple's Core ML gallery, verify its pinned SHA-256 artifact integrity, and run bounded in-process object detection without network inference before enabling the Built-in control.
@@ -155,7 +162,10 @@ Design: `docs/overlay-script-renderer.md`. The model gets a bounded `render_over
 - [ ] Keep the cheaper structured/SVG overlay path for simple labels; use script rendering for rich 2D/3D/animated content.
 - [x] Phase 0 spike: the `AICameraOverlaySpike` dev tool proves hidden WKWebView + three.js + `readPixels` to `CVPixelBuffer` + alpha composite at 30 fps. Results and WebKit/SDK quirks are recorded in `docs/overlay-script-renderer.md`.
 - [x] Add `OverlayScriptRenderer` (on-screen at near-zero window alpha so WebKit keeps rendering invisibly, bounded `window.AICamera` bridge, non-persistent storage) and a lock-based single-slot overlay-frame mailbox (`LatestValueSlot`); composite only fresh frames in `OverlayRenderer`; keep the inference path clean. Manual camera-test acceptance confirmed the live camera, rotating cube, and ring composite correctly.
-- [ ] Add the Realtime-first bounded tool executor described in `docs/realtime-conversation.md`; expose `render_overlay(script, ttlSeconds?)` and `clear_overlay()` with the live canvas dimensions, transparency rules, bridge API, and scene-coordinate contract; retain chat-completions tool support for the legacy fallback; tear down on lane stop, cancellation, and expiry.
+- [x] Add the public Realtime bounded tool executor described in `docs/realtime-conversation.md`;
+  expose `render_overlay(script, ttlSeconds?)` and `clear_overlay()` with canvas dimensions,
+  transparency, bridge, and coordinate contracts; tear down on lane stop, cancellation, and expiry.
+  Legacy chat-completions tool support is outside the current product.
 - [x] Add `overlays.script` profile settings (`enabled`, `maxScriptBytes`, `maximumFps`, `defaultTTLSeconds`, `maximumTTLSeconds`, `allowSceneData`); scripts are memory-only and never persisted.
 - [x] Add a dev-only overlay script box to the control center (visible during a local camera test when script overlays are enabled) for acceptance without a model round-trip.
 - [ ] Add a web-content crash watchdog (no fresh frame means the overlay disappears), memory caps, and an end-to-end acceptance test where an independent virtual-camera client sees the composed script pixels.

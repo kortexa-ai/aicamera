@@ -2,7 +2,6 @@ import AICameraCore
 import AppKit
 import CoreVideo
 import Foundation
-import os.log
 import WebKit
 
 /// Renders overlay scripts (three.js, WebGL2) in a hidden WKWebView and
@@ -29,34 +28,20 @@ final class OverlayScriptRenderer: NSObject {
 
     /// The canvas renders at half the typical output resolution: the base64
     /// channel stays cheap (~5 ms/frame) and the compositor upscales.
-    private let canvasWidth = 640
-    private let canvasHeight = 360
+    private let canvasWidth = OverlayFramePolicy.width
+    private let canvasHeight = OverlayFramePolicy.height
 
     private let scriptConfiguration: ScriptOverlayConfiguration
     private let onLog: @Sendable (String) -> Void
     private let slot = LatestValueSlot<Frame>()
-    private static let logger = Logger(subsystem: "ai.kortexa.aicamera", category: "overlay-script")
-
-    /// Routes a diagnostic line to the UI log slot, the unified log, and a
-    /// file (the file is the reliable diagnostic during development).
+    // Script messages may contain scene or transcript text. Keep only a bounded UI value;
+    // never send them to persistent logs. Throttle before scheduling the UI callback.
+    private var lastLogTime = -Double.infinity
     private func logLine(_ line: String) {
-        Self.logger.info("\(line, privacy: .public)")
-        Self.diag(line)
-        onLog(line)
-    }
-
-    private static func diag(_ line: String) {
-        let entry = "[\(ISO8601DateFormatter().string(from: Date()))] \(line)\n"
-        guard let data = entry.data(using: .utf8) else { return }
-        let url = URL(fileURLWithPath: "/tmp/aicamera-overlay-diag.log")
-        if FileManager.default.fileExists(atPath: url.path),
-           let handle = try? FileHandle(forWritingTo: url) {
-            handle.seekToEndOfFile()
-            handle.write(data)
-            try? handle.close()
-        } else {
-            try? data.write(to: url)
-        }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastLogTime >= 0.25 else { return }
+        lastLogTime = now
+        onLog(String(decoding: line.utf8.prefix(512), as: UTF8.self))
     }
 
     private var window: NSWindow?
@@ -66,13 +51,20 @@ final class OverlayScriptRenderer: NSObject {
     private var pendingScript: String?
     private var scriptExpiry: Date?
     private var expiryTask: Task<Void, Never>?
-    private var generation: UInt64 = 0
+    private var frameGeneration = UUID().uuidString
+    private var lastFrameSequence = -1
+    private var expectedNavigation: WKNavigation?
+    private let pageURL: URL?
+    private var pendingSceneData: String?
+    private var sceneUpdateInFlight = false
 
     init(
         scriptConfiguration: ScriptOverlayConfiguration,
+        pageURL: URL? = Bundle.main.url(forResource: "overlay", withExtension: "html"),
         onLog: @escaping @Sendable (String) -> Void
     ) {
         self.scriptConfiguration = scriptConfiguration
+        self.pageURL = pageURL
         self.onLog = onLog
     }
 
@@ -80,7 +72,6 @@ final class OverlayScriptRenderer: NSObject {
 
     func start() {
         guard window == nil else { return }
-        Self.diag("start() entered")
         let handler = FrameMessageHandler(
             onFrame: { [weak self] body in self?.handleFrame(body) },
             onLog: { [weak self] line in self?.logLine(line) }
@@ -131,16 +122,16 @@ final class OverlayScriptRenderer: NSObject {
         window.orderFrontRegardless()
         self.window = window
 
-        guard let pageURL = Bundle.main.url(forResource: "overlay", withExtension: "html") else {
+        guard pageURL != nil else {
             logLine("Overlay page is missing from the app bundle.")
             return
         }
-        Self.diag("loading page: \(pageURL.path)")
-        webView.loadFileURL(pageURL, allowingReadAccessTo: pageURL.deletingLastPathComponent())
+        loadPage()
     }
 
     func stop() {
-        generation &+= 1
+        frameGeneration = UUID().uuidString
+        lastFrameSequence = -1
         scriptExpiry = nil
         pendingScript = nil
         expiryTask?.cancel()
@@ -148,6 +139,9 @@ final class OverlayScriptRenderer: NSObject {
         slot.clear()
         webView?.stopLoading()
         webView?.navigationDelegate = nil
+        expectedNavigation = nil
+        pendingSceneData = nil
+        sceneUpdateInFlight = false
         window?.orderOut(nil)
         webView = nil
         window = nil
@@ -161,42 +155,56 @@ final class OverlayScriptRenderer: NSObject {
     /// Returns false when the script is rejected (empty or oversized).
     @discardableResult
     func load(script: String, ttlSeconds: Double) -> Bool {
-        Self.diag("load() scriptBytes=\(script.count) pageReady=\(pageReady)")
         guard scriptConfiguration.enabled,
-              !script.isEmpty,
-              script.count <= scriptConfiguration.maxScriptBytes else {
+              webView != nil, !script.isEmpty,
+              script.utf8.count <= scriptConfiguration.maxScriptBytes,
+              ttlSeconds.isFinite, (1...scriptConfiguration.maximumTTLSeconds).contains(ttlSeconds) else {
             return false
         }
-        let ttl = min(max(ttlSeconds, 1), scriptConfiguration.maximumTTLSeconds)
-        generation &+= 1
-        scriptExpiry = Date().addingTimeInterval(ttl)
-        if pageReady {
-            inject(script: script)
-        } else {
-            pendingScript = script
-        }
+        frameGeneration = UUID().uuidString
+        lastFrameSequence = -1
+        slot.clear()
+        scriptExpiry = Date().addingTimeInterval(ttlSeconds)
+        pendingScript = script
+        // A new document releases old timers, callbacks, scene globals, and GPU resources.
+        // If the initial document is still loading, replace its single pending script instead.
+        if pageReady { loadPage() }
         scheduleExpiry()
         return true
     }
 
     /// Deactivates the current script and clears pending overlay frames.
     func clear() {
-        generation &+= 1
+        frameGeneration = UUID().uuidString
+        lastFrameSequence = -1
         scriptExpiry = nil
         pendingScript = nil
         expiryTask?.cancel()
         expiryTask = nil
         slot.clear()
-        if pageReady {
-            webView?.evaluateJavaScript("window.AICamera._deactivate()")
-        }
+        if webView != nil { loadPage() }
     }
 
     /// Pushes the current scene snapshot (JSON) to the page. Only called
     /// when `allowSceneData` is enabled.
     func updateSceneData(_ json: String) {
-        guard scriptConfiguration.allowSceneData, pageReady else { return }
-        webView?.evaluateJavaScript("window.AICamera._setSceneData(\(json))")
+        guard scriptConfiguration.allowSceneData, pageReady, scriptExpiry != nil,
+              json.utf8.count <= 64 * 1_024, let data = json.data(using: .utf8),
+              (try? JSONSerialization.jsonObject(with: data)) != nil else { return }
+        pendingSceneData = json
+        sendPendingSceneData()
+    }
+
+    private func sendPendingSceneData() {
+        guard !sceneUpdateInFlight, let json = pendingSceneData else { return }
+        pendingSceneData = nil
+        sceneUpdateInFlight = true
+        let current = frameGeneration
+        webView?.evaluateJavaScript("window.AICamera._setSceneData(\(json))") { [weak self] _, _ in
+            guard let self, self.frameGeneration == current else { return }
+            self.sceneUpdateInFlight = false
+            self.sendPendingSceneData()
+        }
     }
 
     // MARK: - Real-time read path (any thread)
@@ -208,22 +216,14 @@ final class OverlayScriptRenderer: NSObject {
 
     // MARK: - Frame intake (main thread)
 
-    private var loggedFirstFrame = false
     private func handleFrame(_ body: [String: Any]) {
-        if !loggedFirstFrame {
-            loggedFirstFrame = true
-            Self.diag("first overlay frame received")
-        }
-        guard let b64 = body["b64"] as? String,
-              let data = Data(base64Encoded: b64, options: []),
-              let width = body["w"] as? Int,
-              let height = body["h"] as? Int,
-              width == canvasWidth,
-              height == canvasHeight,
-              data.count == width * height * 4,
-              let pixelBuffer = Self.makeOverlayPixelBuffer(data: data, width: width, height: height) else {
-            return
-        }
+        guard let expiry = scriptExpiry, Date() < expiry,
+              let frame = OverlayFramePolicy.decode(body, generation: frameGeneration, after: lastFrameSequence) else { return }
+        lastFrameSequence = frame.sequence
+        // The page keeps one unacknowledged frame. A slow native consumer pauses publication
+        // instead of accumulating megabyte messages; rendering and camera capture stay independent.
+        webView?.evaluateJavaScript("window.AICamera._ackFrame('\(frameGeneration)', \(frame.sequence))")
+        guard let pixelBuffer = Self.makeOverlayPixelBuffer(data: frame.pixels, width: canvasWidth, height: canvasHeight) else { return }
         slot.store(Frame(pixelBuffer: pixelBuffer, date: Date()))
     }
 
@@ -267,8 +267,8 @@ final class OverlayScriptRenderer: NSObject {
     // MARK: - Script injection and expiry (main thread)
 
     private func inject(script: String) {
-        Self.diag("inject() bytes=\(script.count)")
         let fps = scriptConfiguration.maximumFps
+        let currentGeneration = frameGeneration
         // The script is passed as a JSON string and run through indirect eval
         // inside the try/catch, so a syntax error in the script is thrown at
         // eval time and reported here instead of failing the whole injection.
@@ -287,18 +287,28 @@ final class OverlayScriptRenderer: NSObject {
           window.AICamera._reset();
           try {
             (0, eval)(\(scriptJSON));
-            window.AICamera._activate(\(fps));
+            window.AICamera._activate(\(fps), '\(currentGeneration)');
             window.AICamera.log('overlay script active');
           } catch (e) {
             window.AICamera.log('SCRIPT ERROR: ' + (e && e.message ? e.message : e) + ' | ' + diag);
           }
         })()
         """
-        webView?.evaluateJavaScript(js) { _, error in
+        webView?.evaluateJavaScript(js) { [weak self] _, error in
+            guard let self, self.frameGeneration == currentGeneration else { return }
             if let error {
                 self.logLine("Overlay script failed to run: \(error.localizedDescription)")
             }
         }
+    }
+
+    private func loadPage() {
+        pageReady = false
+        pendingSceneData = nil
+        sceneUpdateInFlight = false
+        webView?.stopLoading()
+        guard let pageURL else { return }
+        expectedNavigation = webView?.loadFileURL(pageURL, allowingReadAccessTo: pageURL.deletingLastPathComponent())
     }
 
     private func scheduleExpiry() {
@@ -318,21 +328,21 @@ final class OverlayScriptRenderer: NSObject {
 }
 
 extension OverlayScriptRenderer: WKNavigationDelegate {
-    /// The page is fully local. Cancel any navigation away from file:// URLs.
+    /// Only the bundled renderer document may navigate in this web view.
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction
     ) async -> WKNavigationActionPolicy {
-        guard navigationAction.request.url?.scheme == "file" else {
-            logLine("Blocked non-file navigation: \(navigationAction.request.url?.absoluteString ?? "?")")
+        guard navigationAction.request.url == pageURL else {
+            logLine("Blocked overlay navigation.")
             return .cancel
         }
         return .allow
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard webView === self.webView, navigation === expectedNavigation else { return }
         pageReady = true
-        Self.diag("didFinish (page ready)")
         if let pending = pendingScript {
             pendingScript = nil
             inject(script: pending)
@@ -340,17 +350,19 @@ extension OverlayScriptRenderer: WKNavigationDelegate {
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard webView === self.webView else { return }
         // The web-content process crashed. The overlay disappears (stale
         // slot) and the page is reloaded so a later script can run.
-        generation &+= 1
+        frameGeneration = UUID().uuidString
+        lastFrameSequence = -1
         scriptExpiry = nil
         pendingScript = nil
         pageReady = false
         slot.clear()
         logLine("Overlay renderer crashed; reloading.")
-        if let pageURL = Bundle.main.url(forResource: "overlay", withExtension: "html") {
-            webView.loadFileURL(pageURL, allowingReadAccessTo: pageURL.deletingLastPathComponent())
-        }
+        expiryTask?.cancel()
+        expiryTask = nil
+        loadPage()
     }
 }
 
@@ -370,7 +382,7 @@ private final class FrameMessageHandler: NSObject, WKScriptMessageHandler {
                 onFrame(body)
             }
         case "log":
-            onLog("\(message.body)")
+            if let line = message.body as? String { onLog(line) }
         default:
             break
         }

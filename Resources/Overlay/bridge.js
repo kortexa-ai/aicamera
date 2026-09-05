@@ -5,8 +5,12 @@
 // evaluateJavaScript and receives rendered frames as base64 strings through
 // the "frame" message handler (WKScriptMessage cannot carry binary).
 (function () {
+  var lastLog = -Infinity;
   function log(msg) {
-    try { window.webkit.messageHandlers.log.postMessage(String(msg)); } catch (e) {}
+    var now = performance.now();
+    if (now - lastLog < 250) return;
+    lastLog = now;
+    try { window.webkit.messageHandlers.log.postMessage(String(msg).slice(0, 512)); } catch (e) {}
   }
   var W = window.innerWidth;
   var H = window.innerHeight;
@@ -48,6 +52,8 @@
   var last = performance.now();
   var lastPost = 0;
   var seq = 0;
+  var generation = '';
+  var pendingFrame = null;
   // WebKit's WebGL2 readPixels only accepts an ArrayBufferView destination.
   var pixelView = new Uint8Array(W * H * 4);
 
@@ -67,6 +73,7 @@
     var encMs = performance.now() - t0;
     window.webkit.messageHandlers.frame.postMessage({
       seq: seq,
+      generation: generation,
       w: W,
       h: H,
       b64: b64,
@@ -75,6 +82,7 @@
       encMs: encMs,
       wallMs: Date.now()
     });
+    pendingFrame = seq;
     seq += 1;
   }
 
@@ -92,7 +100,7 @@
     var t1 = performance.now();
     renderer.render(scene, camera);
     var t2 = performance.now();
-    if (now - lastPost >= 1000 / TARGET_FPS - 1) {
+    if (pendingFrame === null && now - lastPost >= 1000 / TARGET_FPS - 1) {
       gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, pixelView);
       var t3 = performance.now();
       lastPost = now;
@@ -131,11 +139,16 @@
     }
     addDefaultLights();
   };
-  api._activate = function (fps) {
+  api._activate = function (fps, currentGeneration) {
+    generation = currentGeneration;
+    pendingFrame = null;
     if (fps) TARGET_FPS = Math.min(60, Math.max(1, fps));
     active = true;
     last = performance.now();
     lastPost = 0;
+  };
+  api._ackFrame = function (currentGeneration, sequence) {
+    if (generation === currentGeneration && pendingFrame === sequence) pendingFrame = null;
   };
   api._deactivate = function () {
     active = false;
