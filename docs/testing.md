@@ -358,3 +358,27 @@ xcrun swiftc -parse-as-library -O \
 
 This proves synthetic tool-to-pixel behavior only when it passes. Live microphone invocation,
 translated captions, and another participant's camera view remain distinct acceptance checks.
+
+## Native Realtime caption scheduling
+
+After full validation, compile the coordinator with its actual capture type dependencies and the
+local translation implementation. The harness never constructs the capture or driver controllers:
+
+```sh
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug -framework AICameraCore -framework llama \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  Sources/AICameraApp/PipelineCoordinator.swift \
+  Sources/AICameraApp/AudioPipelineController.swift Sources/AICameraApp/PCMBufferConverter.swift \
+  Sources/AICameraApp/DeviceDiscovery.swift Sources/AICameraApp/AudioDriverManager.swift \
+  Sources/AICameraShared/VirtualCameraConstants.swift Sources/AICameraShared/MediaDemandState.swift \
+  Sources/AICameraApp/BuiltinTranslationClient.swift \
+  Sources/AICameraApp/BuiltinTranslationModelController.swift scripts/validate-realtime-captions.swift \
+  -o /tmp/aicamera-realtime-caption-validation
+/tmp/aicamera-realtime-caption-validation
+```
+
+Use `--controlled-only` to skip real HY-MT2 inference. Controlled completions intentionally ignore
+cancellation to verify late-result rejection, one active/latest pending translation, partial/final
+handling, new-turn isolation, and Stop. The real-model pass publishes a synthetic English sentence
+as a Chinese caption through the coordinator. No media, network, or credentials are accessed.

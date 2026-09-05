@@ -1,5 +1,22 @@
 # Validation record
 
+## Native Realtime caption scheduling
+
+Date: 2026-09-05; host code from build 33
+
+- A native coordinator harness passed partial/final publication, nonblocking admission while a
+  translation is suspended, one active/latest pending work, superseded-result rejection, new-turn
+  isolation, and Stop. Controlled completions deliberately ignored cancellation to exercise the
+  coordinator's own guards. The actual HY-MT2 client then published synthetic English text as a
+  Chinese caption: admission took 0.000045 seconds and the final caption arrived in 0.746 seconds.
+  No microphone, camera, network, Keychain, or captured-media file was used.
+- This check proves scheduling/publication for the existing shared transcript route. Review also
+  found that Realtime events discard their speaker source, so AI replies use Show transcript and
+  do not honor Show agent response independently. A separate routing correction is required before
+  speaker-specific overlay acceptance can pass.
+- AGENTS.md now records the process-local legacy Keychain guards required for unattended probes;
+  no saved Keychain setting or ACL was changed.
+
 ## Build 33 overlay lifetime and message bounds
 
 Date: 2026-09-05

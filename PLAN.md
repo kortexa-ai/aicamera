@@ -33,6 +33,8 @@ Implementation and acceptance priorities:
 - [x] Verify local video inference, gesture overlays, and manual three.js composition during a
   camera test; stop the test and return to idle.
 - [ ] Verify translated captions and model-invoked overlay tools during live Realtime playback.
+  Native caption scheduling and HY-MT2 publication pass. Preserve Realtime speaker source so
+  Show transcript and Show agent response apply independently before final caption acceptance.
 - [x] Simplify Settings to the supported OpenAI and local routes, preserve drafts and truthful
   feature state, remove irrelevant controls, keep transfer/custom endpoints hidden, and verify
   with native UI/accessibility.

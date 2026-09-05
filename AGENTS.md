@@ -38,6 +38,12 @@ These rules apply to this repository.
   is needed, use an already-authorized environment credential when available; do not repeatedly
   compile new helper identities that each read the app's Keychain item. Do not broaden the item's
   access list or extract credentials into temporary files merely to avoid a prompt.
+- For unattended native credential probes, `LAContext.interactionNotAllowed` alone does not
+  suppress legacy login-Keychain ACL dialogs on this Mac. The standalone process must also set
+  `SecKeychainSetUserInteractionAllowed(false)` and use the legacy no-UI query guard before its
+  single read. These process-local guards do not change saved Keychain settings or item ACLs.
+  Treat interaction-required/authentication failures as an unavailable test credential and move
+  on; do not retry with UI enabled while Franci is away. See `scripts/validate-realtime-tools.swift`.
 - An accessory-only app can time out in Computer Use until it has a window. When native
   accessibility use is authorized, open its status item through System Events, then use Computer
   Use to inspect the popup and Settings. Do not launch a different DerivedData copy for UI tests.
