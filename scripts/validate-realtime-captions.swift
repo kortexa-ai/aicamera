@@ -51,6 +51,7 @@ private actor ControlledTranslation: TranslationClient {
 @main private struct RealtimeCaptionValidation {
     @MainActor static func main() async throws {
         try await controlledChecks()
+        try await talkCompletionChecks()
         try await speakerChecks()
         if CommandLine.arguments.contains("--controlled-only") { return }
         let controller = BuiltinTranslationModelController()
@@ -159,6 +160,44 @@ private actor ControlledTranslation: TranslationClient {
         try require(captions.texts.last == "translated-user-final", "AI translation replaced user caption")
         await coordinator.stop()
         print("Passed speaker routes: all display-switch combinations, interleaved sources, independent translated finals")
+    }
+
+    private static func talkCompletionChecks() async throws {
+        let captions = Captions(), client = ControlledTranslation()
+        let coordinator = makeCoordinator(client: client, captions: captions)
+        await coordinator.setRealtimeTranscriptionActive(true)
+        await coordinator.submitRealtimeTranscript(source: .local, text: "stop-active", isFinal: true)
+        try await waitUntil { await client.started == ["stop-active"] }
+        await coordinator.submitRealtimeTranscript(source: .remote, text: "stop-pending", isFinal: true)
+        // Match Talk Stop cleanup without stopping the still-active camera coordinator.
+        await coordinator.cancelRealtimeCaptions()
+        await coordinator.setRealtimeTranscriptionActive(false)
+        let beforeUser = captions.texts, beforeAgent = captions.agentTexts
+        await client.finish("stop-active")
+        try await Task.sleep(for: .milliseconds(50))
+        try require(captions.texts == beforeUser && captions.agentTexts == beforeAgent,
+                    "Talk Stop allowed a late translation to publish")
+        try require(await client.started == ["stop-active"], "Talk Stop started pending translation")
+
+        // A successful response may finish playing before its final caption is translated.
+        await coordinator.setRealtimeTranscriptionActive(true)
+        await coordinator.submitRealtimeTranscript(source: .remote, text: "normal-final", isFinal: true)
+        try await waitUntil { await client.started.contains("normal-final") }
+        await coordinator.setRealtimeTranscriptionActive(false)
+        await client.finish("normal-final")
+        try await waitUntil { captions.agentTexts.last == "translated-normal-final" }
+
+        // Cancellation of the event consumer must prevent a queued event from creating work.
+        let canceledEvent = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            await coordinator.submitRealtimeTranscript(source: .local, text: "canceled-event", isFinal: true)
+        }
+        await canceledEvent.value
+        try require(!captions.texts.contains("canceled-event"), "Canceled event consumer published a caption")
+        try require(!(await client.started).contains("canceled-event"), "Canceled event started translation")
+        try require(!captions.hasErrors, "Talk completion checks reported a pipeline error")
+        await coordinator.stop()
+        print("Passed Talk completion: cancel active/pending captions with camera still active, preserve normal final translation, reject canceled events, retry")
     }
 
     private static func waitUntil(seconds: Double = 3, _ condition: () async -> Bool) async throws {

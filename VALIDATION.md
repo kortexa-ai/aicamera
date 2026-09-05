@@ -1,5 +1,31 @@
 # Validation record
 
+## Build 36 Talk cancellation and final captions
+
+Date: 2026-09-05
+
+- A synthetic native check reproduced a delayed translation appearing after Talk-only cleanup
+  while the coordinator remained active. The previous Stop test stopped the entire pipeline.
+  Explicit Talk Stop/failure now cancels pending Realtime captions before transport teardown;
+  normal completion lets final translation finish. Canceled event consumers and superseded
+  transcript revisions cannot admit new translation work. A retired tool-result failure also
+  checks its session generation before reporting an error or closing the current conversation.
+- Controlled native checks pass active/pending cancellation with the coordinator still running,
+  normal final translation after completion, retry, and canceled-event rejection. Existing
+  speaker switches, interleaved captions, bounded scheduling, new-turn isolation, and pipeline
+  Stop checks still pass. Actual HY-MT2 publication of synthetic user/AI captions also passes.
+  No media, network, or credentials were used by the harness.
+- Full validation passed 151 Core tests, the unsigned four-target build, and the HAL harness.
+  The real-model rerun admitted a caption in 0.000032 seconds and published both translated
+  speakers by 0.484 seconds with existing local caches. These synthetic timings are not a latency
+  guarantee or live spoken acceptance.
+- The protected passwordless transaction installed signed build 36. Strict source/installed
+  signatures pass; bundle versions and the protected generation marker are 36. With a local camera
+  test active, Codex Talk reached Listening and timed out on silence, releasing only Talk's microphone
+  test. A subsequent explicit cancellation also retained the camera test. Stopping that test returned
+  the host to idle. No system component was installed or activated. Live spoken caption/tool and
+  playback-cancellation acceptance remain separate.
+
 ## Build 35 transcription migration
 
 Date: 2026-09-05

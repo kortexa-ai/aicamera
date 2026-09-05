@@ -96,7 +96,7 @@ actor PipelineCoordinator {
 
     func stop() async {
         isRunning = false
-        invalidateRealtimeCaptions()
+        cancelRealtimeCaptions()
         transcriptionGeneration &+= 1
         transcriptionTask?.cancel()
         transcriptionTask = nil
@@ -132,12 +132,13 @@ actor PipelineCoordinator {
 
     func submitRealtimeTranscript(source: RealtimeTranscriptSource, text: String, isFinal: Bool) async {
         let visible = source == .local ? configuration.overlays.showTranscript : configuration.overlays.showAgentResponse
-        guard isRunning, visible else { return }
+        guard isRunning, !Task.isCancelled, visible else { return }
         realtimeTranscriptRevisions[source, default: 0] &+= 1
         let revision = realtimeTranscriptRevisions[source, default: 0]
         let event = TranscriptEvent(text: text, mode: isFinal ? .final : .partial)
         await applyRealtimeCaption(event, source: source)
-        guard isFinal, configuration.pipeline.translation.enabled else { return }
+        guard isRunning, !Task.isCancelled, revision == realtimeTranscriptRevisions[source],
+              isFinal, configuration.pipeline.translation.enabled else { return }
         // Translation must not hold the Realtime event consumer while PCM/control events arrive.
         // Retain one running translation and replace the single pending finalized transcript.
         pendingRealtimeTranslation = (event, source, revision)
@@ -152,7 +153,9 @@ actor PipelineCoordinator {
         await publish()
     }
 
-    private func invalidateRealtimeCaptions() {
+    /// Talk can stop while camera processing remains active. Normal completion keeps final
+    /// translation work; explicit cancellation retires it before the transport closes.
+    func cancelRealtimeCaptions() {
         realtimeTranscriptRevisions[.local, default: 0] &+= 1
         realtimeTranscriptRevisions[.remote, default: 0] &+= 1
         realtimeTranslationTask?.cancel()
@@ -218,7 +221,7 @@ actor PipelineCoordinator {
     func setRealtimeTranscriptionActive(_ active: Bool) {
         realtimeTranscriptionActive = active
         guard active else { return }
-        invalidateRealtimeCaptions()
+        cancelRealtimeCaptions()
         // The explicitly armed Realtime turn owns conversation generation until it closes.
         conversationGeneration &+= 1
         conversationTask?.cancel()

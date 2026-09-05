@@ -45,6 +45,10 @@ Implementation and acceptance priorities:
 
 ## Current status
 
+- Build 36 cancels pending caption translations on Talk Stop/failure while the camera pipeline
+  stays active, and preserves final translation after normal completion. Retired tool-result errors
+  cannot close a newer conversation. Synthetic native checks cover the distinct completion paths.
+
 - Build 35 disables unsupported transcription during settings migration without reading Keychain
   or switching providers. It preserves old metadata, privacy grants, and independent local/Realtime
   features. OpenAI or Local Whisper must be selected explicitly to enable transcription again.

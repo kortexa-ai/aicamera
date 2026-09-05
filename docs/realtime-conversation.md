@@ -48,7 +48,9 @@ windows and resampler state are discarded at each transition, so audio from a Re
 be uploaded later in a batch transcription request. Translation of
 final captions has one active task and one replaceable pending value; it does not hold the event
 consumer while PCM and Stop events arrive. Transcript deltas accumulate within bounded captions.
-Late translation results cannot publish into a later turn or stopped pipeline.
+Explicit Stop and failure cancel pending caption translations even when the camera pipeline stays
+active. Normal completion lets final translation finish. New turns and pipeline shutdown reject
+retired work, and canceled event consumers cannot admit more captions.
 
 ## Bounded audio and event ownership
 

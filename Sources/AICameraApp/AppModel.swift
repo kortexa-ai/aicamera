@@ -912,6 +912,9 @@ final class AppModel: ObservableObject {
         let coordinator = pipeline
         let generation = realtimeGeneration
         Task { [weak self] in
+            if stopSpeech, self?.realtimeGeneration == generation {
+                await coordinator?.cancelRealtimeCaptions()
+            }
             await session?.close()
             guard let self, self.realtimeGeneration == generation else { return }
             await coordinator?.setRealtimeTranscriptionActive(false)
@@ -1098,6 +1101,7 @@ final class AppModel: ObservableObject {
                 output: output
             )
         } catch {
+            guard generation == realtimeGeneration, session === realtimeSession else { return }
             lastError = "Realtime tool result: \(error.localizedDescription)"
             closeRealtimeTransport(state: .failed, stopSpeech: true)
         }
