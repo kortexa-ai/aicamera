@@ -1,6 +1,5 @@
 import AICameraCore
 import Combine
-import CryptoKit
 import Foundation
 
 @MainActor
@@ -21,8 +20,9 @@ final class BuiltinTranslationModelController: ObservableObject {
     nonisolated private static let maximumDownloadBytes = 1_200 * 1_024 * 1_024
 
     @Published private(set) var state: State
+    @Published private(set) var progress: ModelDownloadProgress?
     let modelFileURL: URL
-    private let downloadModel: @Sendable () async throws -> URL
+    private let downloadModel: (@Sendable () async throws -> URL)?
     private var downloadTask: Task<Void, Never>?
     private var downloadGeneration: UInt64 = 0
     private var cachedClient: BuiltinTranslationClient?
@@ -33,7 +33,7 @@ final class BuiltinTranslationModelController: ObservableObject {
             in: .userDomainMask
         ).first!.appendingPathComponent("AI Camera/Models", isDirectory: true)
         modelFileURL = support.appendingPathComponent("Hy-MT2-1.8B-Q4_K_M.gguf")
-        self.downloadModel = downloadModel ?? { try await Self.downloadVerifiedModel() }
+        self.downloadModel = downloadModel
         state = FileManager.default.fileExists(atPath: modelFileURL.path) ? .ready : .notDownloaded
     }
 
@@ -44,12 +44,24 @@ final class BuiltinTranslationModelController: ObservableObject {
         downloadGeneration &+= 1
         let generation = downloadGeneration
         state = .downloading
+        progress = nil
         downloadTask = Task { [weak self] in
             guard let self else { return }
-            defer { if generation == downloadGeneration { downloadTask = nil } }
+            defer { if generation == downloadGeneration { downloadTask = nil; progress = nil } }
             do {
                 try Task.checkCancellation()
-                let temporaryURL = try await downloadModel()
+                let temporaryURL: URL
+                if let downloadModel { temporaryURL = try await downloadModel() }
+                else {
+                    temporaryURL = try await VerifiedModelDownload.download(.init(
+                        url: Self.modelURL, sha256: Self.expectedSHA256, maximumBytes: Int64(Self.maximumDownloadBytes)
+                    )) { [weak self] progress in
+                        Task { @MainActor in
+                            guard let self, self.downloadGeneration == generation, self.downloadTask != nil else { return }
+                            self.progress = progress
+                        }
+                    }
+                }
                 defer { try? FileManager.default.removeItem(at: temporaryURL) }
                 try Task.checkCancellation()
                 guard generation == downloadGeneration else { return }
@@ -102,54 +114,7 @@ final class BuiltinTranslationModelController: ObservableObject {
         downloadGeneration &+= 1
         downloadTask?.cancel()
         downloadTask = nil
+        progress = nil
     }
 
-    nonisolated private static func downloadVerifiedModel() async throws -> URL {
-        let (temporaryURL, response) = try await URLSession.shared.download(from: modelURL)
-        do {
-            try Task.checkCancellation()
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                throw ModelError.invalidResponse
-            }
-            let attributes = try FileManager.default.attributesOfItem(atPath: temporaryURL.path)
-            let byteCount = (attributes[.size] as? NSNumber)?.intValue ?? 0
-            guard byteCount > 0, byteCount <= maximumDownloadBytes else { throw ModelError.invalidSize }
-            let hashTask = Task.detached(priority: .utility) { try sha256(of: temporaryURL) }
-            let digest = try await withTaskCancellationHandler {
-                try await hashTask.value
-            } onCancel: {
-                hashTask.cancel()
-            }
-            try Task.checkCancellation()
-            guard digest == expectedSHA256 else { throw ModelError.integrityMismatch }
-            return temporaryURL
-        } catch {
-            try? FileManager.default.removeItem(at: temporaryURL)
-            throw error
-        }
-    }
-
-    nonisolated private static func sha256(of url: URL) throws -> String {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        var hash = SHA256()
-        while true {
-            try Task.checkCancellation()
-            let chunk = try handle.read(upToCount: 4 * 1_024 * 1_024) ?? Data()
-            if chunk.isEmpty { break }
-            hash.update(data: chunk)
-        }
-        return hash.finalize().map { String(format: "%02x", $0) }.joined()
-    }
-
-    private enum ModelError: LocalizedError {
-        case invalidResponse, invalidSize, integrityMismatch
-        var errorDescription: String? {
-            switch self {
-            case .invalidResponse: "The model server returned an invalid response."
-            case .invalidSize: "The downloaded translation model has an unexpected size."
-            case .integrityMismatch: "The downloaded translation model failed its integrity check."
-            }
-        }
-    }
 }

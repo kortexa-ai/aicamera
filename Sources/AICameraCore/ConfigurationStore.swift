@@ -214,7 +214,16 @@ public enum ConfigurationValidator {
               scriptOverlay.defaultTTLSeconds <= scriptOverlay.maximumTTLSeconds else {
             throw ConfigurationError.invalidOverlayConfiguration
         }
-        if conversation.transcriptionEnabled {
+        guard !conversation.transcriptionLanguage.isEmpty,
+              conversation.transcriptionLanguage.utf8.count <= 16,
+              conversation.transcriptionLanguage.allSatisfy({ $0.isASCII && ($0.isLetter || $0 == "-") }) else {
+            throw ConfigurationError.invalidText("transcription language")
+        }
+        // Keep old app versions from treating a local profile as a remote ASR configuration.
+        if conversation.transcriptionProvider == .whisper, conversation.transcriptionEndpointID != nil {
+            throw ConfigurationError.invalidText("local transcription endpoint")
+        }
+        if conversation.transcriptionEnabled, conversation.transcriptionProvider == .openAI {
             try requireEndpoint(
                 conversation.transcriptionEndpointID,
                 for: "conversation.asr",

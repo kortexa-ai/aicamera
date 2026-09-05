@@ -8,6 +8,10 @@ struct SettingsView: View {
     @ObservedObject private var loginItem: LoginItemController
     @ObservedObject private var builtinVision: BuiltinVisionModelController
     @ObservedObject private var builtinTranslation: BuiltinTranslationModelController
+    @ObservedObject private var builtinWhisper: BuiltinWhisperModelController
+    @State private var transcriptionProvider = TranscriptionProvider.openAI
+    @State private var transcriptionWhisperModel = BuiltinWhisperModel.base
+    @State private var didLoadDrafts = false
     @State private var voicePipelineMode = VoicePipelineMode.openAIRealtime
     @State private var realtimeBaseURL = ConfigurationController.openAIRealtimeBaseURL.absoluteString
     @State private var realtimeModel = ConfigurationController.defaultRealtimeModel
@@ -29,6 +33,7 @@ struct SettingsView: View {
         self.loginItem = model.loginItemController
         self.builtinVision = model.builtinVisionModelController
         self.builtinTranslation = model.builtinTranslationModelController
+        self.builtinWhisper = model.builtinWhisperModelController
         self._conversationDraftEnabled = State(
             initialValue: model.configurationController.configuration.pipeline.conversation.enabled
         )
@@ -246,77 +251,7 @@ struct SettingsView: View {
                 }
             }
 
-            settingsSection(
-                "Transcription",
-                enabled: transcriptionEnabledBinding,
-                disabledText: "Transcription and translation are disabled."
-            ) {
-                if transcriptionEnabled {
-                    LabeledContent("Provider", value: "OpenAI")
-                    Picker("Model", selection: $transcriptionModel) {
-                        ForEach(transcriptionModelChoices, id: \.self) { Text($0).tag($0) }
-                    }
-                    Picker("Language", selection: $transcriptionLanguage) {
-                        ForEach(Self.transcriptionLanguages, id: \.code) { language in
-                            Text(language.name).tag(language.code)
-                        }
-                    }
-                    if let transcriptionCredentialSummary {
-                        LabeledContent("API key") {
-                            HStack(spacing: 8) {
-                                Text(transcriptionCredentialSummary).monospaced()
-                                Button(role: .destructive) { removeOpenAICredential() } label: {
-                                    Image(systemName: "trash")
-                                }
-                                .buttonStyle(.borderless)
-                                .help("Remove the shared OpenAI API key")
-                            }
-                        }
-                    }
-                    SecureField(
-                        transcriptionCredentialSummary == nil ? "Add API key" : "Replace API key",
-                        text: $transcriptionCredential
-                    )
-                    HStack {
-                        Button(transcriptionCredentialSummary == nil ? "Save & Enable" : "Save Changes") {
-                            saveTranscriptionConfiguration()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        Spacer()
-                        Text("Shared with OpenAI Realtime · Stored in Keychain")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Text("Finalized audio windows are sent to OpenAI only while Transcription is enabled. An active Realtime conversation supplies its own transcript, so audio is not uploaded twice.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if let transcriptionMessage {
-                        Text(transcriptionMessage)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-
-                    Toggle("Translate", isOn: translationEnabledBinding)
-                        .disabled(!builtinTranslation.isReady)
-                    builtinTranslationControls
-                    if translationEnabled {
-                        Picker("From", selection: translationStringBinding(\.sourceLanguage)) {
-                            ForEach(Self.sourceLanguages, id: \.code) { language in
-                                Text(language.name).tag(language.code)
-                            }
-                        }
-                        Picker("To", selection: translationStringBinding(\.targetLanguage)) {
-                            ForEach(Self.targetLanguages, id: \.code) { language in
-                                Text(language.name).tag(language.code)
-                            }
-                        }
-                        Text("Translation runs on finalized transcript text and never blocks the live audio path.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            transcriptionSettings
 
             settingsSection(
                 "Tools",
@@ -374,7 +309,111 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .toggleStyle(.switch)
         .onAppear {
-            syncDrafts()
+            if !didLoadDrafts { syncDrafts(); didLoadDrafts = true }
+        }
+    }
+
+    private var transcriptionSettings: some View {
+        settingsSection("Transcription", enabled: transcriptionEnabledBinding,
+                        disabledText: "Transcription is off.", showsSetupWhenDisabled: true) {
+            Text(transcriptionEnabled
+                 ? "Active: \(configuration.configuration.pipeline.conversation.transcriptionProvider == .whisper ? "Local Whisper" : "OpenAI")"
+                 : "Transcription is off. Choose a provider and save to enable it.")
+                .font(.caption).foregroundStyle(.secondary)
+            Picker("Provider", selection: $transcriptionProvider) {
+                Text("OpenAI").tag(TranscriptionProvider.openAI)
+                Text("Local Whisper").tag(TranscriptionProvider.whisper)
+            }
+            if transcriptionProvider == .whisper {
+                Picker("Model", selection: $transcriptionWhisperModel) {
+                    ForEach(BuiltinWhisperModel.allCases) { Text("\($0.name) · \($0.downloadSize)").tag($0) }
+                }
+                .disabled(builtinWhisper.hasActiveDownload)
+                Text(transcriptionWhisperModel.summary).font(.caption).foregroundStyle(.secondary)
+                whisperModelControls
+                Text("Whisper transcribes audio in this app on your Mac. No API key or external transcription service is used.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Picker("Model", selection: $transcriptionModel) {
+                    ForEach(transcriptionModelChoices, id: \.self) { Text($0).tag($0) }
+                }
+                transcriptionCredentialControls
+                Text("OpenAI receives audio windows while its transcription provider is active. Realtime supplies its own transcript during Talk.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Picker("Language", selection: $transcriptionLanguage) {
+                ForEach(Self.transcriptionLanguages, id: \.code) { Text($0.name).tag($0.code) }
+            }
+            Button(transcriptionEnabled ? "Save Changes" : "Save & Enable") { saveTranscriptionConfiguration() }
+                .buttonStyle(.borderedProminent)
+                .disabled(transcriptionProvider == .whisper && !builtinWhisper.isReady(transcriptionWhisperModel))
+            if let transcriptionMessage {
+                Text(transcriptionMessage).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            Toggle("Translate", isOn: translationEnabledBinding)
+                .disabled(!transcriptionEnabled || !builtinTranslation.isReady)
+            builtinTranslationControls
+            if translationEnabled {
+                Picker("From", selection: translationStringBinding(\.sourceLanguage)) {
+                    ForEach(Self.sourceLanguages, id: \.code) { Text($0.name).tag($0.code) }
+                }
+                Picker("To", selection: translationStringBinding(\.targetLanguage)) {
+                    ForEach(Self.targetLanguages, id: \.code) { Text($0.name).tag($0.code) }
+                }
+                Text("Translation runs on finalized transcript text and never blocks the live audio path.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var transcriptionCredentialControls: some View {
+        if let transcriptionCredentialSummary {
+            LabeledContent("API key") {
+                HStack(spacing: 8) {
+                    Text(transcriptionCredentialSummary).monospaced()
+                    Button(role: .destructive) { removeOpenAICredential() } label: { Image(systemName: "trash") }
+                        .buttonStyle(.borderless).help("Remove the shared OpenAI API key")
+                }
+            }
+        }
+        SecureField(transcriptionCredentialSummary == nil ? "Add API key" : "Replace API key", text: $transcriptionCredential)
+        Text("Shared with OpenAI Realtime · Stored in Keychain").font(.caption).foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder private var whisperModelControls: some View {
+        switch builtinWhisper.state(for: transcriptionWhisperModel) {
+        case .notDownloaded:
+            Button("Download \(transcriptionWhisperModel.name) · \(transcriptionWhisperModel.downloadSize)") {
+                builtinWhisper.download(transcriptionWhisperModel)
+            }.disabled(builtinWhisper.hasActiveDownload)
+        case .downloading:
+            HStack {
+                if let fraction = builtinWhisper.progress?.fraction {
+                    ProgressView(value: fraction).frame(width: 130)
+                    Text(fraction, format: .percent.precision(.fractionLength(0)))
+                } else { ProgressView().controlSize(.small) }
+                Button("Cancel Download") { builtinWhisper.cancelDownload(transcriptionWhisperModel) }
+            }
+        case .ready:
+            HStack {
+                Label("Ready · \(transcriptionWhisperModel.downloadSize) on disk", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Button("Remove Model", role: .destructive) {
+                    if configuration.configuration.pipeline.conversation.transcriptionProvider == .whisper,
+                       configuration.configuration.pipeline.conversation.transcriptionWhisperModel == transcriptionWhisperModel {
+                        configuration.update { profile in
+                            profile.pipeline.conversation.transcriptionEnabled = false
+                            profile.pipeline.translation.enabled = false
+                            profile.overlays.showTranscript = false
+                        }
+                    }
+                    builtinWhisper.remove(transcriptionWhisperModel)
+                }
+            }
+        case let .failed(message):
+            Text(message).font(.caption).foregroundStyle(.red)
+            Button("Try Download Again") { builtinWhisper.download(transcriptionWhisperModel) }
+                .disabled(builtinWhisper.hasActiveDownload)
         }
     }
 
@@ -400,11 +439,17 @@ struct SettingsView: View {
         case .downloading:
             LabeledContent("Local model") {
                 HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Downloading \(selectedBuiltinVisionModel.downloadSize)…")
-                        .foregroundStyle(.secondary)
+                    ProgressView(value: builtinVision.downloadProgress).frame(width: 100)
+                    if builtinVision.isCancellingDownload {
+                        Text("Finishing cancellation…").foregroundStyle(.secondary)
+                    } else if builtinVision.downloadProgress == 1 {
+                        Text("Preparing model…").foregroundStyle(.secondary)
+                    } else if let fraction = builtinVision.downloadProgress {
+                        Text(fraction, format: .percent.precision(.fractionLength(0)))
+                    } else { Text("Starting download…").foregroundStyle(.secondary) }
                     Button("Cancel") { builtinVision.cancelDownload(selectedBuiltinVisionModel) }
                         .controlSize(.small)
+                        .disabled(builtinVision.isCancellingDownload)
                 }
             }
         case .ready:
@@ -453,9 +498,10 @@ struct SettingsView: View {
         case .downloading:
             LabeledContent("Local model") {
                 HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Downloading \(BuiltinTranslationModelController.downloadSize)…")
-                        .foregroundStyle(.secondary)
+                    ProgressView(value: builtinTranslation.progress?.fraction).frame(width: 100)
+                    if let fraction = builtinTranslation.progress?.fraction {
+                        Text(fraction, format: .percent.precision(.fractionLength(0)))
+                    } else { Text("Starting download…").foregroundStyle(.secondary) }
                     Button("Cancel") { builtinTranslation.cancelDownload() }
                         .controlSize(.small)
                 }
@@ -604,26 +650,15 @@ struct SettingsView: View {
     }
 
     private func syncTranscriptionDraft() {
-        transcriptionCredentialSummary = AppSecretResolver().maskedSecret(
-            account: ConfigurationController.openAICredentialAccount
-        )
-        guard let endpoint = transcriptionEndpoint else {
-            transcriptionModel = ConfigurationController.defaultTranscriptionModel
-            transcriptionLanguage = "auto"
-            transcriptionMessage = nil
-            return
-        }
-        guard endpoint.baseURL.host?.lowercased() == "api.openai.com" else {
-            transcriptionModel = ConfigurationController.defaultTranscriptionModel
-            transcriptionLanguage = "auto"
-            transcriptionMessage = "Unsupported legacy transcription configuration. Toggle Transcription off and on to replace it with OpenAI."
-            return
-        }
-        transcriptionModel = endpoint.model ?? ConfigurationController.defaultTranscriptionModel
-        let language = endpoint.options["language"]?.stringValue ?? "auto"
-        transcriptionLanguage = Self.transcriptionLanguages.contains(where: { $0.code == language })
-            ? language
-            : "auto"
+        let conversation = configuration.configuration.pipeline.conversation
+        transcriptionProvider = conversation.transcriptionProvider
+        transcriptionWhisperModel = conversation.transcriptionWhisperModel
+        transcriptionCredentialSummary = AppSecretResolver().maskedSecret(account: ConfigurationController.openAICredentialAccount)
+        let remote = transcriptionEndpoint ?? endpoint(withID: ConfigurationController.openAITranscriptionEndpointID)
+        transcriptionModel = remote?.model ?? ConfigurationController.defaultTranscriptionModel
+        let language = conversation.transcriptionProvider == .whisper
+            ? conversation.transcriptionLanguage : remote?.options["language"]?.stringValue ?? "auto"
+        transcriptionLanguage = Self.transcriptionLanguages.contains(where: { $0.code == language }) ? language : "auto"
         transcriptionMessage = nil
     }
 
@@ -719,6 +754,21 @@ struct SettingsView: View {
     }
 
     private func saveTranscriptionConfiguration() {
+        if transcriptionProvider == .whisper {
+            guard builtinWhisper.isReady(transcriptionWhisperModel) else {
+                transcriptionMessage = "Download the selected Whisper model before enabling local transcription."
+                return
+            }
+            configuration.update { profile in
+                ConfigurationController.installWhisperTranscriptionConfiguration(
+                    in: &profile, model: transcriptionWhisperModel, language: transcriptionLanguage
+                )
+                profile.overlays.enabled = true
+                profile.overlays.showTranscript = true
+            }
+            transcriptionMessage = configuration.validationMessage ?? "Local Whisper transcription enabled."
+            return
+        }
         let model = transcriptionModel.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty else {
             transcriptionMessage = "Choose a transcription model."
@@ -796,29 +846,17 @@ struct SettingsView: View {
     }
 
     private var transcriptionEnabledBinding: Binding<Bool> {
-        Binding(
-            get: { transcriptionEnabled },
-            set: { enabled in
+        Binding(get: { transcriptionEnabled }, set: { enabled in
+            if enabled { saveTranscriptionConfiguration() }
+            else {
                 configuration.update { profile in
-                    if enabled {
-                        ConfigurationController.installOpenAITranscriptionConfiguration(
-                            in: &profile,
-                            model: transcriptionModel,
-                            language: transcriptionLanguage
-                        )
-                        profile.overlays.enabled = true
-                        profile.overlays.showTranscript = true
-                    } else {
-                        profile.pipeline.conversation.transcriptionEnabled = false
-                        profile.pipeline.translation.enabled = false
-                        profile.overlays.showTranscript = false
-                    }
+                    profile.pipeline.conversation.transcriptionEnabled = false
+                    profile.pipeline.translation.enabled = false
+                    profile.overlays.showTranscript = false
                 }
-                transcriptionMessage = enabled && transcriptionCredentialSummary == nil
-                    ? "Add an OpenAI API key before transcription can start."
-                    : nil
+                transcriptionMessage = nil
             }
-        )
+        })
     }
 
     private var translationEnabledBinding: Binding<Bool> {
@@ -889,6 +927,7 @@ struct SettingsView: View {
         _ title: String,
         enabled: Binding<Bool>,
         disabledText: String,
+        showsSetupWhenDisabled: Bool = false,
         @ViewBuilder content: () -> Content
     ) -> some View {
         Section {
@@ -897,7 +936,7 @@ struct SettingsView: View {
                 .listRowInsets(EdgeInsets(top: 8, leading: 10, bottom: 8, trailing: 10))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
-            if enabled.wrappedValue {
+            if enabled.wrappedValue || showsSetupWhenDisabled {
                 content()
             } else {
                 Text(disabledText)
@@ -1186,6 +1225,9 @@ struct SettingsView: View {
         if stages.contains(where: { $0.enabled && $0.kind == .handGesture }) {
             descriptions.append("Gesture recognition processes video frames in app memory. Frames are not sent to an external service.")
         }
+        if transcriptionEnabled, configuration.configuration.pipeline.conversation.transcriptionProvider == .whisper {
+            descriptions.append("Local Whisper transcribes microphone audio in app memory. Audio is not sent to a transcription service.")
+        }
         if translationEnabled {
             descriptions.append("Built-in translation processes finalized transcript text in app memory. Text is not sent to an external service.")
         }
@@ -1222,7 +1264,7 @@ struct SettingsView: View {
                 isLoopback: EndpointLocation.isLoopback(endpoint.baseURL)
             ))
         }
-        if conversation.transcriptionEnabled,
+        if conversation.transcriptionEnabled, conversation.transcriptionProvider == .openAI,
            let endpoint = endpoint(withID: conversation.transcriptionEndpointID) {
             let description = endpoint.baseURL.host?.lowercased() == "api.openai.com"
                 ? "Transcription sends microphone audio to OpenAI. OpenAI processes it under the API data controls for the organization and project associated with your API key."
@@ -1235,7 +1277,7 @@ struct SettingsView: View {
                 isLoopback: EndpointLocation.isLoopback(endpoint.baseURL)
             ))
         }
-        if conversation.enabled, let endpoint = endpoint(withID: conversation.agentEndpointID) {
+        if conversation.enabled, !conversation.realtimeEnabled, let endpoint = endpoint(withID: conversation.agentEndpointID) {
             routes.append(.init(
                 feature: "Advanced conversation agent",
                 destination: endpoint.hostDisplayName,
@@ -1244,7 +1286,7 @@ struct SettingsView: View {
                 isLoopback: EndpointLocation.isLoopback(endpoint.baseURL)
             ))
         }
-        if conversation.enabled, let endpoint = endpoint(withID: conversation.speechEndpointID) {
+        if conversation.enabled, !conversation.realtimeEnabled, let endpoint = endpoint(withID: conversation.speechEndpointID) {
             routes.append(.init(
                 feature: "Advanced speech",
                 destination: endpoint.hostDisplayName,

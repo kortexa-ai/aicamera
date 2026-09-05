@@ -31,6 +31,7 @@ actor PipelineCoordinator {
     private let factory: AdapterFactory
     private let builtinDetectionClient: (any DetectionClient)?
     private let builtinTranslationClient: (any TranslationClient)?
+    private let builtinTranscriptionClient: (any TranscriptionClient)?
     private let onSnapshot: SnapshotHandler
     private let onSpeech: SpeechHandler
     private let onError: ErrorHandler
@@ -60,6 +61,7 @@ actor PipelineCoordinator {
         secrets: any SecretResolver,
         builtinDetectionClient: (any DetectionClient)? = nil,
         builtinTranslationClient: (any TranslationClient)? = nil,
+        builtinTranscriptionClient: (any TranscriptionClient)? = nil,
         onSnapshot: @escaping SnapshotHandler,
         onSpeech: @escaping SpeechHandler,
         onError: @escaping ErrorHandler
@@ -71,6 +73,7 @@ actor PipelineCoordinator {
         )
         self.builtinDetectionClient = builtinDetectionClient
         self.builtinTranslationClient = builtinTranslationClient
+        self.builtinTranscriptionClient = builtinTranscriptionClient
         self.onSnapshot = onSnapshot
         self.onSpeech = onSpeech
         self.onError = onError
@@ -174,7 +177,7 @@ actor PipelineCoordinator {
         }
         let isNewGesture = gesture.kind != lastObservedGestureKind
         lastObservedGestureKind = gesture.kind
-        guard conversation.enabled, !realtimeTranscriptionActive,
+        guard conversation.enabled, !conversation.realtimeEnabled, !realtimeTranscriptionActive,
               conversation.respondToGestures,
               isNewGesture,
               Date().timeIntervalSince(lastGestureResponse) >= conversation.gestureCooldownSeconds else { return }
@@ -405,11 +408,8 @@ actor PipelineCoordinator {
 
     private func runTranscription(utterance: AudioUtterance) async {
         let conversation = configuration.pipeline.conversation
-        guard let endpointID = conversation.transcriptionEndpointID,
-              let endpoint = configuration.endpoints.first(where: { $0.id == endpointID }) else { return }
         do {
-            let client = try factory.transcription(for: endpoint)
-            let configuredLanguage = endpoint.options["language"]?.stringValue
+            let (client, configuredLanguage) = try transcriptionSetup()
             let language = configuredLanguage == "auto" ? nil : configuredLanguage
             let transcript = try await client.transcribe(.init(
                 wavData: utterance.wavData,
@@ -422,7 +422,7 @@ actor PipelineCoordinator {
             guard isRunning, !realtimeTranscriptionActive else { return }
             await scene.applyTranscript(displayedTranscript)
             await publish()
-            if conversation.enabled, let command = agentCommand(
+            if conversation.enabled, !conversation.realtimeEnabled, let command = agentCommand(
                 for: transcript,
                 endedAtUptime: utterance.endedAtUptime,
                 conversation: conversation
@@ -434,6 +434,25 @@ actor PipelineCoordinator {
         } catch {
             onError("transcription: \(error.localizedDescription)")
         }
+    }
+
+    private func transcriptionSetup() throws -> (any TranscriptionClient, String?) {
+        let conversation = configuration.pipeline.conversation
+        if conversation.transcriptionProvider == .whisper {
+            guard let builtinTranscriptionClient else {
+                throw NSError(domain: "AICamera.Transcription", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "Download the selected Whisper model in Settings to use local transcription."
+                ])
+            }
+            return (builtinTranscriptionClient, conversation.transcriptionLanguage)
+        }
+        guard let endpointID = conversation.transcriptionEndpointID,
+              let endpoint = configuration.endpoints.first(where: { $0.id == endpointID }) else {
+            throw NSError(domain: "AICamera.Transcription", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "Configure OpenAI transcription in Settings."
+            ])
+        }
+        return (try factory.transcription(for: endpoint), endpoint.options["language"]?.stringValue)
     }
 
     private func translated(_ transcript: TranscriptEvent) async -> TranscriptEvent {

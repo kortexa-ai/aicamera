@@ -185,6 +185,11 @@ public enum ConversationActivationMode: String, Codable, CaseIterable, Sendable 
     case alwaysListening
 }
 
+public enum TranscriptionProvider: String, Codable, CaseIterable, Sendable {
+    case openAI
+    case whisper
+}
+
 public struct ConversationConfiguration: Codable, Equatable, Sendable {
     public static let defaultSystemPrompt = "You are an assistant present in a live camera conversation. Respond briefly and never claim to see facts that are not in the supplied scene context."
     public static let defaultWakePhrase = "Hey Kortexa"
@@ -194,6 +199,9 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
     public var realtimeEndpointID: String?
     public var transcriptionEnabled: Bool
     public var transcriptionEndpointID: String?
+    public var transcriptionProvider: TranscriptionProvider
+    public var transcriptionWhisperModel: BuiltinWhisperModel
+    public var transcriptionLanguage: String
     public var agentEndpointID: String?
     public var speechEndpointID: String?
     public var systemPrompt: String
@@ -215,6 +223,9 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
         realtimeEndpointID: String? = nil,
         transcriptionEnabled: Bool = false,
         transcriptionEndpointID: String? = nil,
+        transcriptionProvider: TranscriptionProvider = .openAI,
+        transcriptionWhisperModel: BuiltinWhisperModel = .base,
+        transcriptionLanguage: String = "auto",
         agentEndpointID: String? = nil,
         speechEndpointID: String? = nil,
         systemPrompt: String = Self.defaultSystemPrompt,
@@ -235,6 +246,9 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
         self.realtimeEndpointID = realtimeEndpointID
         self.transcriptionEnabled = transcriptionEnabled
         self.transcriptionEndpointID = transcriptionEndpointID
+        self.transcriptionProvider = transcriptionProvider
+        self.transcriptionWhisperModel = transcriptionWhisperModel
+        self.transcriptionLanguage = transcriptionLanguage
         self.agentEndpointID = agentEndpointID
         self.speechEndpointID = speechEndpointID
         self.systemPrompt = systemPrompt
@@ -257,6 +271,9 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
         case realtimeEndpointID
         case transcriptionEnabled
         case transcriptionEndpointID
+        case transcriptionProvider
+        case transcriptionWhisperModel
+        case transcriptionLanguage
         case agentEndpointID
         case speechEndpointID
         case systemPrompt
@@ -279,6 +296,9 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
         realtimeEnabled = try container.decodeIfPresent(Bool.self, forKey: .realtimeEnabled) ?? false
         realtimeEndpointID = try container.decodeIfPresent(String.self, forKey: .realtimeEndpointID)
         transcriptionEndpointID = try container.decodeIfPresent(String.self, forKey: .transcriptionEndpointID)
+        transcriptionProvider = try container.decodeIfPresent(TranscriptionProvider.self, forKey: .transcriptionProvider) ?? .openAI
+        transcriptionWhisperModel = try container.decodeIfPresent(BuiltinWhisperModel.self, forKey: .transcriptionWhisperModel) ?? .base
+        transcriptionLanguage = try container.decodeIfPresent(String.self, forKey: .transcriptionLanguage) ?? "auto"
         transcriptionEnabled = try container.decodeIfPresent(Bool.self, forKey: .transcriptionEnabled)
             ?? (transcriptionEndpointID != nil)
         agentEndpointID = try container.decodeIfPresent(String.self, forKey: .agentEndpointID)

@@ -11,8 +11,8 @@ A fresh profile uses the system-default hardware inputs and pure passthrough: no
 - Idle-only local camera and microphone tests show the processed preview and a bounded live input meter. Real client demand cancels testing immediately; inline settings buttons open the matching in-app device controls.
 - Optional launch at login so the menu-bar host is available before a virtual-device client opens.
 - Bounded gesture, object-detection, VLM, ASR, agent, and TTS stages with an ASR toggle and an independent transcription lane. Local detection offers lightweight YOLOv3 Tiny plus downloadable Apache-2.0 RF-DETR Medium and Large Core ML models.
-- OpenAI-compatible chat, vision, transcription, and speech adapters.
-- Kortexa `/detect` and raw-PCM `/transcribe/pcm` adapters.
+- OpenAI Realtime conversation through a saved API key and the host's selected microphone.
+- Independent transcription with OpenAI or embedded multilingual Whisper Base/Small, plus optional local HY-MT2 translation. Local weights have explicit downloads, progress, cancellation, integrity checks, and removal.
 - Hand gesture recognition with Apple Vision. Gesture events can trigger an agent response.
 - Detection boxes, gestures, transcripts, agent text, and status overlays.
 - Wake-phrase or gesture activation without a manual Ask button.
@@ -79,6 +79,7 @@ be imported directly.
 
 - [Architecture and media flow](docs/architecture.md)
 - [Profile and adapter configuration](docs/configuration.md)
+- [Embedded model downloads and provenance](docs/local-models.md)
 - [Signing, installation, and removal](docs/installation.md)
 - [Testing and diagnostics](docs/testing.md)
 - [Latest validation record and signing boundary](VALIDATION.md)

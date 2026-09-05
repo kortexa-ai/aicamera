@@ -1,5 +1,52 @@
 # Validation record
 
+## Build 26 embedded Whisper and streamed model downloads
+
+- `scripts/validate.sh` passed 130 Swift tests, metadata and installer checks, HAL harnesses, and
+  the unsigned four-target build. Focused tests cover bounded PCM input, old profile defaults,
+  local endpoint exclusion, streamed download limits, integrity failure, cancellation, and private
+  partial-file cleanup. The translation download-generation/removal/cache harness also passed
+  after migration to the shared downloader.
+- Whisper uses the official MIT-licensed v1.8.6 XCFramework and pinned Base/Small model artifacts.
+  [Provenance and checksums](docs/local-models.md) are documented. A narrow C bridge prevents the
+  two native engines' incompatible GGML headers from entering the same Swift module.
+- Native checks on this M4 Pro used only the SHA-256-pinned upstream 11-second JFK WAV fixture.
+  Both models recognized the expected speech in English and auto-detect modes, returned no text
+  for silence, reused cached clients, cancelled inference, recovered, and continued transcribing
+  with HY-MT2 loaded in the same process. No microphone, camera, Keychain, or private recording was
+  used by the harness.
+
+  | Model | First request including setup | Warm auto-detect | Cancellation return | Peak resident bytes with HY-MT2 |
+  |---|---:|---:|---:|---:|
+  | Base | 7.611 s | 0.227 s | 0.059 s | 1669283840 |
+  | Small Q5_1 | 8.268 s | 0.719 s | 0.002 s | 1743486976 |
+
+  These are single fixture measurements with existing filesystem/Metal cache state. They are
+  neither a broad accuracy benchmark nor a guaranteed interactive latency. Cold model/GPU setup
+  is visible on the first speech window; later pipeline starts reuse the client.
+- Whisper, translation, and vision now stream public weights to private temporary files with
+  received-size bounds and incremental SHA-256. UI progress is throttled; cancellation removes
+  partial data. Vision cancellation during non-interruptible Core ML compilation discards the
+  eventual result and keeps a single job until cleanup finishes.
+- `scripts/install-app.sh` installed signed Release build 26 through its protected passwordless
+  transaction. Strict nested verification passed for both source and `/Applications/AI Camera.app`;
+  both bundle versions and the protected install-generation marker read 26. The Release build
+  reports upstream quoted-include framework-header warnings and the existing AppIntents metadata
+  warning. Host installation did not update or activate the camera extension or HAL driver.
+- Native Settings acceptance verified provider setup while off, Base readiness, Save & Enable,
+  a disabled save for missing Small weights, determinate Small download progress, cancellation,
+  retry, and verified readiness. Model drafts survived switching to Privacy and back. Privacy
+  identifies Whisper as local while separately identifying configured Realtime egress. The saved
+  Whisper profile has no active remote ASR endpoint ID and preserves inert OpenAI metadata.
+- Small remained selected after quitting and relaunching the installed app. Removing that test
+  download immediately disabled transcription and captions and removed its readiness. Base was
+  then saved and enabled again, English-to-Chinese translation was restored, and closing Settings
+  returned the host to idle with both local tests stopped. Existing HY-MT2 and RF-DETR weights were
+  preserved.
+- Live microphone captions and translated captions during audible Realtime playback remain in
+  the host acceptance matrix. The fixture proves native inference; it does not prove the physical
+  microphone/speaker path or virtual-device behavior.
+
 ## Build 25 local translation correctness and reuse
 
 Date: 2026-09-05

@@ -12,7 +12,7 @@ final class ConfigurationController: ObservableObject {
     static let openAIAPIBaseURL = URL(string: "https://api.openai.com")!
     static let openAIRealtimeBaseURL = openAIAPIBaseURL
     static let openAITranscriptionEndpointID = "openai-transcription"
-    static let defaultTranscriptionModel = "gpt-transcribe"
+    nonisolated static let defaultTranscriptionModel = "gpt-transcribe"
     static let transcriptionModels = ["gpt-transcribe", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
     static let kortexaRealtimeURL = URL(string: "https://api.kortexa.ai/v1/realtime/calls")!
     static let defaultRealtimeModel = "gpt-realtime-2"
@@ -82,13 +82,25 @@ final class ConfigurationController: ObservableObject {
         profile.endpoints.removeAll(where: { $0.id == endpointID })
         profile.endpoints.append(endpoint)
         profile.pipeline.conversation.transcriptionEnabled = true
+        profile.pipeline.conversation.transcriptionProvider = .openAI
         profile.pipeline.conversation.transcriptionEndpointID = endpointID
+        profile.pipeline.conversation.transcriptionLanguage = language
         profile.privacy.networkMode = .allowListed
         if !profile.privacy.allowedHosts.map({ $0.lowercased() }).contains("api.openai.com") {
             profile.privacy.allowedHosts.append("api.openai.com")
         }
         profile.privacy.grants.removeAll(where: { $0.endpointID == endpointID })
         profile.privacy.grants.append(.init(endpointID: endpointID, allowedData: [.rawAudio]))
+    }
+
+    static func installWhisperTranscriptionConfiguration(
+        in profile: inout AICameraConfiguration, model: BuiltinWhisperModel, language: String
+    ) {
+        profile.pipeline.conversation.transcriptionProvider = .whisper
+        profile.pipeline.conversation.transcriptionWhisperModel = model
+        profile.pipeline.conversation.transcriptionLanguage = language
+        profile.pipeline.conversation.transcriptionEndpointID = nil
+        profile.pipeline.conversation.transcriptionEnabled = true
     }
 
     private func migrateUnsupportedTranscriptionConfiguration() {
@@ -109,6 +121,7 @@ final class ConfigurationController: ObservableObject {
         in candidate: inout AICameraConfiguration
     ) -> String? {
         guard candidate.pipeline.conversation.transcriptionEnabled,
+              candidate.pipeline.conversation.transcriptionProvider == .openAI,
               let endpointID = candidate.pipeline.conversation.transcriptionEndpointID,
               let endpoint = candidate.endpoints.first(where: { $0.id == endpointID }),
               endpoint.baseURL.host?.lowercased() != "api.openai.com" else { return nil }

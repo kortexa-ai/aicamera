@@ -1,7 +1,6 @@
 import AICameraCore
 import CoreImage
 import CoreML
-import CryptoKit
 import Foundation
 
 enum BuiltinVisionModel: String, CaseIterable, Identifiable {
@@ -73,10 +72,13 @@ final class BuiltinVisionModelController: ObservableObject {
     }
 
     static let defaultModel = BuiltinVisionModel.rfDetrMedium
-    private static let artifactRevision = "893b757bc958fab3af1c4dcc96c5d0244f782d35"
+    nonisolated private static let artifactRevision = "893b757bc958fab3af1c4dcc96c5d0244f782d35"
     private static let yoloURL = URL(string: "https://ml-assets.apple.com/coreml/models/Image/ObjectDetection/YOLOv3Tiny/YOLOv3TinyInt8LUT.mlmodel")!
     private static let yoloSHA256 = "cde8af2528d6eca1d1580fdd0f0147cb6613d40ba962656b5f683c65f571870e"
 
+    @Published private(set) var downloadProgress: Double?
+    @Published private(set) var isCancellingDownload = false
+    private var downloadGeneration: UInt64 = 0
     @Published private(set) var states: [BuiltinVisionModel: State] = [:]
     private let modelDirectory: URL
     private var downloadTask: Task<Void, Never>?
@@ -106,14 +108,27 @@ final class BuiltinVisionModelController: ObservableObject {
     func download(_ model: BuiltinVisionModel) {
         guard downloadTask == nil, !isReady(model) else { return }
         downloadingModel = model
+        downloadGeneration &+= 1
+        let generation = downloadGeneration
+        downloadProgress = nil
+        isCancellingDownload = false
         states[model] = .downloading
         downloadTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let compiled = switch model {
-                case .yoloV3Tiny: try await Self.downloadAndCompileYOLO()
-                case .rfDetrMedium, .rfDetrLarge: try await Self.downloadAndCompileRFDETR(model)
+                let progress: @Sendable (Double?) -> Void = { [weak self] fraction in
+                    Task { @MainActor in
+                        guard let self, self.downloadGeneration == generation, self.downloadingModel == model,
+                              !self.isCancellingDownload else { return }
+                        self.downloadProgress = fraction
+                    }
                 }
+                let compiled = switch model {
+                case .yoloV3Tiny: try await Self.downloadAndCompileYOLO(progress: progress)
+                case .rfDetrMedium, .rfDetrLarge: try await Self.downloadAndCompileRFDETR(model, progress: progress)
+                }
+                defer { try? FileManager.default.removeItem(at: compiled) }
+                try Task.checkCancellation()
                 try FileManager.default.createDirectory(
                     at: modelDirectory,
                     withIntermediateDirectories: true,
@@ -128,21 +143,24 @@ final class BuiltinVisionModelController: ObservableObject {
             } catch is CancellationError {
                 states[model] = .notDownloaded
             } catch {
-                states[model] = .failed(error.localizedDescription)
+                states[model] = Task.isCancelled ? .notDownloaded : .failed(error.localizedDescription)
             }
             downloadingModel = nil
             downloadTask = nil
+            downloadProgress = nil
+            isCancellingDownload = false
         }
     }
 
     func cancelDownload(_ model: BuiltinVisionModel) {
         guard downloadingModel == model else { return }
+        isCancellingDownload = true
         downloadTask?.cancel()
     }
 
     func remove(_ model: BuiltinVisionModel) {
         if downloadingModel == model {
-            downloadTask?.cancel()
+            cancelDownload(model)
             return
         }
         do {
@@ -179,11 +197,12 @@ final class BuiltinVisionModelController: ObservableObject {
         modelDirectory.appendingPathComponent(model.compiledDirectoryName, isDirectory: true)
     }
 
-    nonisolated private static func downloadAndCompileYOLO() async throws -> URL {
+    nonisolated private static func downloadAndCompileYOLO(progress: @escaping @Sendable (Double?) -> Void) async throws -> URL {
         let temporary = try await download(
             from: yoloURL,
             expectedSHA256: yoloSHA256,
-            maximumBytes: 12 * 1_024 * 1_024
+            maximumBytes: 12 * 1_024 * 1_024,
+            progress: { progress($0.fraction) }
         )
         defer { try? FileManager.default.removeItem(at: temporary) }
         return try await Task.detached(priority: .userInitiated) {
@@ -191,16 +210,21 @@ final class BuiltinVisionModelController: ObservableObject {
         }.value
     }
 
-    nonisolated private static func downloadAndCompileRFDETR(_ model: BuiltinVisionModel) async throws -> URL {
+    nonisolated private static func downloadAndCompileRFDETR(_ model: BuiltinVisionModel, progress: @escaping @Sendable (Double?) -> Void) async throws -> URL {
         let packageURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(UUID().uuidString).mlpackage", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: packageURL) }
-        for component in artifactComponents(for: model) {
+        let components = artifactComponents(for: model)
+        let maximumTotal = Double(components.reduce(0) { $0 + $1.maximumBytes })
+        var completedBytes: Int64 = 0
+        for component in components {
+            let previousBytes = completedBytes
             try Task.checkCancellation()
             let temporary = try await download(
                 from: component.url,
                 expectedSHA256: component.sha256,
-                maximumBytes: component.maximumBytes
+                maximumBytes: component.maximumBytes,
+                progress: { progress(min(0.99, Double(previousBytes + $0.receivedBytes) / maximumTotal)) }
             )
             defer { try? FileManager.default.removeItem(at: temporary) }
             let destination = packageURL.appendingPathComponent(component.relativePath)
@@ -208,40 +232,23 @@ final class BuiltinVisionModelController: ObservableObject {
                 at: destination.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
+            completedBytes += (try FileManager.default.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.int64Value ?? 0
             try FileManager.default.moveItem(at: temporary, to: destination)
         }
+        progress(1)
+        try Task.checkCancellation()
         return try await Task.detached(priority: .userInitiated) {
             try MLModel.compileModel(at: packageURL)
         }.value
     }
 
     nonisolated private static func download(
-        from url: URL,
-        expectedSHA256: String,
-        maximumBytes: Int
+        from url: URL, expectedSHA256: String, maximumBytes: Int,
+        progress: @escaping @Sendable (ModelDownloadProgress) -> Void
     ) async throws -> URL {
-        let (temporary, response) = try await URLSession.shared.download(from: url)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw ModelError.invalidResponse
-        }
-        let attributes = try FileManager.default.attributesOfItem(atPath: temporary.path)
-        let byteCount = (attributes[.size] as? NSNumber)?.intValue ?? 0
-        guard byteCount > 0, byteCount <= maximumBytes else { throw ModelError.invalidSize }
-        let digest = try sha256(of: temporary)
-        guard digest == expectedSHA256 else { throw ModelError.integrityMismatch }
-        return temporary
-    }
-
-    nonisolated private static func sha256(of url: URL) throws -> String {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        var hash = SHA256()
-        while true {
-            let chunk = try handle.read(upToCount: 4 * 1_024 * 1_024) ?? Data()
-            if chunk.isEmpty { break }
-            hash.update(data: chunk)
-        }
-        return hash.finalize().map { String(format: "%02x", $0) }.joined()
+        try await VerifiedModelDownload.download(
+            .init(url: url, sha256: expectedSHA256, maximumBytes: Int64(maximumBytes)), progress: progress
+        )
     }
 
     nonisolated private static func artifactComponents(for model: BuiltinVisionModel) -> [ArtifactComponent] {
@@ -286,19 +293,7 @@ final class BuiltinVisionModelController: ObservableObject {
         let maximumBytes: Int
     }
 
-    private enum ModelError: LocalizedError {
-        case invalidResponse
-        case invalidSize
-        case integrityMismatch
 
-        var errorDescription: String? {
-            switch self {
-            case .invalidResponse: "The model server returned an invalid response."
-            case .invalidSize: "The downloaded model has an unexpected size."
-            case .integrityMismatch: "The downloaded model failed its integrity check."
-            }
-        }
-    }
 }
 
 private final class YOLOCoreMLDetectionClient: DetectionClient, @unchecked Sendable {

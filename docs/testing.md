@@ -84,7 +84,7 @@ Use a signed app installed in `/Applications`.
 ### Conversation
 
 1. Disable Conversation, enable Transcription, save an OpenAI API key, and confirm finalized speech appears as transcript without starting an agent turn. Confirm the key remains masked and is stored only in Keychain.
-2. Confirm the Transcription card identifies OpenAI as its provider and offers no custom or embedded provider before those implementations are complete. Load a legacy loopback ASR profile with the shared OpenAI key present, relaunch, and confirm the active transcription endpoint migrates to canonical OpenAI without deleting the inert legacy endpoint definition.
+2. Confirm Transcription offers OpenAI and Local Whisper, with setup available while disabled. Load a legacy remote ASR profile with the shared OpenAI key present and confirm it migrates to canonical OpenAI without deleting inert endpoint metadata. A saved Whisper profile must remain local across relaunch and must have no active ASR endpoint ID.
 3. Enable local translation and confirm it consumes the transcript while Conversation remains disabled.
 4. Enable OpenAI Realtime while Transcription remains enabled. Confirm the Realtime transcript is displayed and no separate `/v1/audio/transcriptions` request is made during the active session.
 5. Confirm a wake phrase and command in one final transcript starts one agent turn in the separate pipeline.
@@ -103,8 +103,9 @@ until a supported route is selected. Do not start remote services for this pass.
 For built-in vision, download a model, confirm its readiness, and use a local camera test to verify
 detections and gesture overlays. Test removal and cancellation without saving camera frames.
 For translation, verify complete Unicode output and cancellation against synthetic text, then
-confirm captions continue to update while Realtime speech plays. Embedded Whisper and dedicated
-Codex login remain pending until their download/authentication and runtime paths are implemented.
+confirm captions continue to update while Realtime speech plays. Test embedded Whisper with the
+native and Settings procedures below. Dedicated Codex login requires separate authentication and
+runtime acceptance.
 
 ### OpenAI Realtime Talk (host only)
 
@@ -163,6 +164,53 @@ limits without downloading or loading weights.
 The model client stays cached across microphone/camera pipeline restarts. This reduces repeated
 model setup at the cost of retaining the loaded model while the app runs. Removal releases the
 cache; an existing pipeline retains its own reference until it stops.
+
+### Native local Whisper
+
+Run `scripts/validate.sh` first. Download Whisper Base and HY-MT2 through Settings. Fetch only the
+pinned public upstream fixture (this procedure never captures microphone audio):
+
+```sh
+curl --fail --location \
+  https://raw.githubusercontent.com/ggml-org/whisper.cpp/v1.8.6/samples/jfk.wav \
+  -o /tmp/aicamera-whisper-jfk.wav
+xcrun clang -std=c11 -Wall -Wextra -Werror \
+  -F build/DerivedData-Validation/Build/Products/Debug \
+  -c Sources/AICameraApp/WhisperBridge.c -o /tmp/aicamera-whisper-bridge.o
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug \
+  -framework AICameraCore -framework llama -framework whisper \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  -import-objc-header Sources/AICameraApp/WhisperBridge.h \
+  Sources/AICameraApp/BuiltinWhisperClient.swift \
+  Sources/AICameraApp/BuiltinWhisperModelController.swift \
+  Sources/AICameraApp/BuiltinTranslationClient.swift \
+  Sources/AICameraApp/BuiltinTranslationModelController.swift \
+  scripts/validate-local-whisper.swift /tmp/aicamera-whisper-bridge.o \
+  -o /tmp/aicamera-local-whisper-validation
+/tmp/aicamera-local-whisper-validation /tmp/aicamera-whisper-jfk.wav base
+```
+
+After downloading Small, repeat the last command with `small-q5_1`. The harness checks the fixture's
+SHA-256 before use, then verifies English/auto recognition, silence, cancellation, recovery, cached
+client identity, coexistence with translation, latency, and peak resident memory. It never reads
+Keychain or downloads a model implicitly. The automated suite covers WAV bounds, old profile
+defaults, local endpoint exclusion, verified download success/failure/cancellation, and partial-file
+cleanup without native weights.
+
+In the signed installed app, also verify:
+
+1. With Transcription off, choose Local Whisper. The OpenAI key controls disappear. Download progress,
+   Cancel, retry, readiness, size, and Remove must match the selected model. Cancelling or removing
+   must not let an old completion mark the model ready later.
+2. Save Base, change a draft, switch Settings tabs and return. The draft persists and the active
+   provider status remains truthful. Save Small and confirm the selected model persists on relaunch.
+3. In Privacy, confirm Whisper is local. Its saved profile has no active ASR endpoint ID. OpenAI
+   credentials and inert endpoint definitions survive switching providers.
+4. With Conversation off, run a local microphone test and speak. Confirm local transcripts and optional
+   translations appear without an ASR network request. Stop and verify hardware release without recording.
+5. Remove a model downloaded for this test, confirm the active lane is disabled, then download and
+   enable it again. Do not remove pre-existing user weights solely for acceptance.
 
 ### Product identity and Settings lifecycle
 

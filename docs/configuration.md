@@ -58,7 +58,7 @@ Configuration changes are applied by stopping current lanes, replacing the immut
 | `openAIVision` | `/v1/chat/completions` | JPEG frame and prompt |
 | `openAITranscription` | `/v1/audio/transcriptions` | PCM16 WAV |
 | `openAISpeech` | `/v1/audio/speech` | response text, voice, and speech format request |
-| `openAIRealtime` | `/v1/realtime/calls` | realtime session options and live conversation media |
+| `openAIRealtime` | `wss://api.openai.com/v1/realtime` | session options and bounded PCM conversation audio |
 | `kortexaDetection` | `/detect` | multipart JPEG and confidence/model fields |
 | `kortexaPCMTranscription` | `/transcribe/pcm?sample_rate=16000` | raw signed PCM16 mono bytes |
 
@@ -118,16 +118,24 @@ Local object-detection weights are explicit downloads. The app verifies pinned S
 
 ## Transcription and conversation
 
-Transcription is an independent AI feature. It can remain enabled when Conversation is disabled,
-and finalized microphone windows are then sent to the selected ASR endpoint for transcript display
-and optional local translation. Settings configures OpenAI first, uses `gpt-transcribe` by default,
-and stores the shared OpenAI API key in Keychain. Disabling Transcription also disables translation
-and transcript display; it does not affect microphone passthrough.
+Transcription is independent of Conversation. In **Settings → AI → Transcription**, choose
+**OpenAI** or **Local Whisper** and save the choice. OpenAI uses `gpt-transcribe` by default and
+shares the Realtime API key in Keychain. Whisper runs in process and needs no credential or audio
+endpoint. Download Base (148 MB) or Small (190 MB), choose a language or Auto-detect, then use
+**Save & Enable**. The current provider remains active until the new choice is saved; the status
+line identifies that active provider. Setup remains available while transcription is off.
 
-Normal Settings currently exposes OpenAI only. Embedded Whisper is tracked separately and will not
-appear as a provider until its weights can be downloaded, verified, inspected, and removed with the
-same local-model lifecycle used by the embedded vision and translation models. Custom transcription
-endpoints remain a profile-level compatibility capability and are not offered in the product UI yet.
+Final transcripts can feed local translation and captions with Conversation disabled. Disabling
+Transcription also disables translation and transcript display, without affecting microphone
+passthrough. Removing the active Whisper model disables its transcription lane first. See
+[model provenance and storage](local-models.md) for download bounds, licenses, and removal.
+
+`transcriptionProvider` is `openAI` (the default for older profiles) or `whisper`.
+`transcriptionWhisperModel` is `base` or `small-q5_1`; `transcriptionLanguage` defaults to `auto`.
+A Whisper profile must omit `transcriptionEndpointID`. This also prevents an older app that ignores
+the new provider field from silently using a retained remote ASR route. Inert endpoint metadata and
+credential references remain available for switching back. Custom transcription endpoints remain
+a profile compatibility capability and are not offered in normal Settings.
 
 Conversation selects realtime, agent, and speech endpoint IDs. Settings offers mutually exclusive
 **Separate ASR + agent + TTS**, **OpenAI Realtime**, and **Compatible Realtime** voice pipelines.
@@ -135,14 +143,19 @@ Saving either Realtime choice disables transcription-driven replies and gesture-
 replies, preventing the separate response path from running concurrently. Independent Transcription
 may remain enabled; while a Realtime session is active, its transcript is reused and batch ASR is
 suppressed so the same audio is not uploaded twice.
-Set `realtimeEnabled` and `realtimeEndpointID` to use an `openAIRealtime` endpoint. Signaling uses the
-endpoint's HTTP(S) base URL and `POST /v1/realtime/calls`. Existing profiles default realtime to
-disabled when these keys are absent.
+Set `realtimeEnabled` and `realtimeEndpointID` to use an `openAIRealtime` endpoint. The supported
+transport connects to public OpenAI over WebSocket and uses 24 kHz mono PCM from host capture.
+Compatible endpoint metadata can still round-trip, but the current transport rejects those routes.
+Existing profiles default realtime to disabled when these keys are absent.
 
 Canonical OpenAI and each compatible host use distinct Keychain account references so changing a
 base URL cannot silently send one provider's saved bearer token to another provider.
 
-The legacy transcription, agent, and speech roles remain valid as fallback paths and can coexist with realtime. These roles can be omitted independently. `transcriptionEnabled` controls ASR independently of `conversation.enabled`, without disabling microphone passthrough or barge-in. `utteranceSeconds` controls fixed 16 kHz ASR windows from 0.5 through 30 seconds. The current speech gate rejects all-silence windows; it is not a full VAD.
+Legacy agent and speech roles are inactive whenever Realtime is configured. Independent ASR resumes
+when a Realtime turn ends, using new capture windows. `transcriptionEnabled` controls ASR independently
+of `conversation.enabled`, without disabling microphone passthrough. `utteranceSeconds` controls
+fixed 16 kHz ASR windows from 0.5 through 30 seconds. The speech gate rejects silence; it is not a
+full VAD. Whisper keeps one active request and a bounded pending window outside media callbacks.
 
 `activationMode` is `wakePhrase` or `alwaysListening`. Checked-in profiles use `wakePhrase`. In that mode, `respondToFinalTranscripts` allows only accepted final ASR text to reach the agent: a leading, case-insensitive `wakePhrase` either prefixes a command or arms the next speech-bearing utterance for `wakeWindowSeconds` (1 through 30). The phrase must contain at least one letter or number and is limited to 128 characters. The deadline uses each utterance's monotonic capture time, so ASR latency cannot extend or shorten the physical window. Fixed ASR windows can still split a phrase at a boundary; bounded overlap is deferred.
 

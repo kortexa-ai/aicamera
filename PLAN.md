@@ -21,7 +21,7 @@ Implementation and acceptance priorities:
 - [ ] Add a dedicated Codex sign-in/refresh/sign-out path based on the public Realtime flow used
   by `esp32-voice`, with isolated credentials. Verify authentication and speech independently from
   billing attribution; do not claim that a subscription includes API usage without evidence.
-- [ ] Implement embedded Whisper with explicit verified model downloads, progress, cancellation,
+- [x] Implement embedded Whisper with explicit verified model downloads, progress, cancellation,
   removal, a local provider choice, and measured in-process transcription.
 - [x] Correct local translation Unicode handling, model/client reuse, cancellation, output limits,
   and late download completion; verify synthetic native output, recovery, and latency.
@@ -34,8 +34,8 @@ Implementation and acceptance priorities:
 
 ## Current status
 
-- Build 25 corrects local translation text assembly and cancellation, preserves the loaded client across pipeline restarts, and prevents removed downloads from reappearing. Build 24 replaced the separate WebRTC capture path with public OpenAI WebSocket audio from the host's selected microphone. Transcription remains OpenAI-only until embedded Whisper has real model download and runtime support.
-- The installed host is signed build 25 in `/Applications`. Its validated HAL driver remains build 12 because these host changes do not alter or reinstall the driver. Realtime no-speech/Stop and synthetic local-translation checks pass; audible speech, tools, and live translated-caption acceptance remain open.
+- Build 26 adds embedded multilingual Whisper Base/Small with verified streamed downloads, explicit local provider selection, and bounded inference. Whisper, translation, and vision share download progress, size limits, integrity checks, and cancellation cleanup. Build 25 corrected translation Unicode and client reuse; build 24 moved public OpenAI Realtime onto host-owned microphone PCM.
+- The installed host is signed build 26 in `/Applications`. Its validated HAL driver remains build 12 because these host changes do not alter or reinstall the driver. Realtime no-speech/Stop, native local translation, and public-fixture Whisper checks pass; audible Realtime speech, tools, and live translated-caption acceptance remain open.
 - Build-12 microphone acceptance passed four normal cycles, short-lived clients, two simultaneous clients with `0 → 1 → 2 → 1 → 0` demand, forced client exit, local-test takeover, and host quit/relaunch while demand remained active. Callback flow, physical Yeti acquisition, prompt teardown, and return to idle all passed without recording media.
 - A bounded QuickTime check exposed and selected **AI Camera** without recording, but the build-10 extension could not deliver camera demand to the host. The extension runs inside `cmiodalassistant`, whose service container is isolated from the GUI user's app-group container; sandbox logs confirmed that the shared JSON-file transport is not usable across those processes.
 - Build 13 replaces that file transport with a bounded timestamped `NSData` snapshot on the read-only CoreMediaIO custom device property `4cc_aicd_glob_0000`. The host resolves the camera by stable UID, reads the raw property bytes through the legacy C API, and rejects missing, malformed, future-dated, or stale snapshots. Build 14 preserves that behavior and passes 89 Swift tests, full non-installing validation, the strict and sanitizer HAL harnesses, an unsigned four-target build, strict Release signing without `get-task-allow`, and `git diff --check`.

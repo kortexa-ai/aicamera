@@ -71,6 +71,7 @@ final class AppModel: ObservableObject {
     let loginItemController = LoginItemController()
     let builtinVisionModelController = BuiltinVisionModelController()
     let builtinTranslationModelController = BuiltinTranslationModelController()
+    let builtinWhisperModelController = BuiltinWhisperModelController()
 
     private var pipeline: PipelineCoordinator?
     private var videoController: VideoPipelineController?
@@ -628,7 +629,8 @@ final class AppModel: ObservableObject {
             configuration: configuration.capture,
             utteranceSeconds: configuration.pipeline.conversation.utteranceSeconds,
             transcriptionEnabled: configuration.pipeline.conversation.transcriptionEnabled
-                && configuration.pipeline.conversation.transcriptionEndpointID != nil,
+                && (configuration.pipeline.conversation.transcriptionProvider == .whisper
+                    || configuration.pipeline.conversation.transcriptionEndpointID != nil),
             onUtterance: { utterance in
                 guard pipelineGate.isActive, laneGate.isActive else { return }
                 Task {
@@ -684,6 +686,9 @@ final class AppModel: ObservableObject {
             ),
             builtinTranslationClient: configuration.pipeline.translation.enabled
                 ? builtinTranslationModelController.makeTranslationClient()
+                : nil,
+            builtinTranscriptionClient: configuration.pipeline.conversation.transcriptionProvider == .whisper
+                ? builtinWhisperModelController.makeTranscriptionClient(model: configuration.pipeline.conversation.transcriptionWhisperModel)
                 : nil,
             onSnapshot: { [weak self] snapshot in
                 guard gate.isActive else { return }
