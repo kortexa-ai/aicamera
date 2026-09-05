@@ -92,9 +92,11 @@ The underlying schema-versioned file is stored at:
 
 It contains credential references, not secret values. Invalid or newer-schema files are preserved
 and block automatic capture until repaired or reset through the app. The schema retains older
-endpoint metadata for compatibility, but loading a configuration disables unsupported conversation
-and remote video stages. Legacy transcription is migrated to the configured OpenAI service when
-its shared key exists, otherwise it is disabled. No custom-endpoint controls are offered.
+endpoint metadata for compatibility, but loading a configuration disables unsupported conversation,
+transcription, and remote video stages. Migration does not read credentials, select a different
+service, or add privacy grants. Select OpenAI or Local Whisper explicitly in AI before enabling
+transcription again. Supported OpenAI routes, local Whisper, and independent Realtime translation
+remain unchanged. No custom-endpoint controls are offered.
 
 Remote requests remain subject to HTTPS, an exact host allowlist, and an endpoint-specific grant
 for every data class sent (`rawAudio`, `rawFrame`, `transcript`, `sceneMetadata`, `promptText`).

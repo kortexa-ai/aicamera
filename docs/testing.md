@@ -84,7 +84,7 @@ Use a signed app installed in `/Applications`.
 ### Conversation
 
 1. Disable Conversation, enable Transcription, save an OpenAI API key, and confirm finalized speech appears as transcript without starting an agent turn. Confirm the key remains masked and is stored only in Keychain.
-2. Confirm Transcription offers OpenAI and Local Whisper, with setup available while disabled. Load a legacy remote ASR profile with the shared OpenAI key present and confirm it migrates to canonical OpenAI without deleting inert endpoint metadata. A saved Whisper profile must remain local across relaunch and must have no active ASR endpoint ID.
+2. Confirm Transcription offers OpenAI and Local Whisper, with setup available while disabled. Load legacy remote ASR settings and confirm transcription is disabled while endpoint metadata and privacy grants remain unchanged, regardless of saved credentials. Choose OpenAI or Local Whisper explicitly to enable transcription. A saved Whisper configuration must remain local across relaunch and must have no active ASR endpoint ID.
 3. Enable local translation and confirm it consumes the transcript while Conversation remains disabled.
 4. Enable OpenAI Realtime while Transcription remains enabled. Confirm the Realtime transcript is displayed and no separate `/v1/audio/transcriptions` request is made during the active session.
 5. Confirm a wake phrase and command in one final transcript starts one agent turn in the separate pipeline.
@@ -106,6 +106,23 @@ For translation, verify complete Unicode output and cancellation against synthet
 confirm captions continue to update while Realtime speech plays. Test embedded Whisper with the
 native and Settings procedures below. Dedicated Codex login requires separate authentication and
 runtime acceptance.
+
+### Settings migration without credential access
+
+After `scripts/validate.sh`, run the actual settings controller against disposable synthetic files:
+
+```sh
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug -framework AICameraCore \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  Sources/AICameraApp/ConfigurationController.swift scripts/validate-configuration-migration.swift \
+  -o /tmp/aicamera-configuration-migration-validation
+/tmp/aicamera-configuration-migration-validation
+```
+
+The harness covers startup, reload, hidden import, persistence, idempotence, explicit OpenAI setup,
+Whisper relaunch, and preservation of invalid files. It links no credential resolver and never
+opens media or network devices. The user's actual settings file is not used.
 
 ### OpenAI Realtime Talk (host only)
 

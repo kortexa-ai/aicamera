@@ -71,7 +71,8 @@ Conversation, Transcription, and local vision is available while those features 
 shows enabled data routes. Settings import/export and custom endpoints are hidden for now.
 
 Settings are saved at `~/Library/Application Support/AI Camera/profile.json`. Loading older settings
-preserves endpoint metadata but disables unsupported conversation and remote video routes.
+preserves endpoint metadata but disables unsupported conversation, transcription, and remote video
+routes. Migration never selects a different service or enables new microphone uploads.
 
 ## Documentation
 

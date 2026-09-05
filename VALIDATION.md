@@ -1,5 +1,27 @@
 # Validation record
 
+## Build 35 transcription migration
+
+Date: 2026-09-05
+
+- Startup, reload, and hidden import now disable unsupported transcription without looking for
+  a Keychain credential or moving audio to another service. Strict public OpenAI base-URL matching
+  rejects custom paths, ports, user info, query/fragment values, wrong adapters, and missing endpoints.
+  Existing endpoint metadata and grants remain unchanged. Local Whisper, supported public Realtime,
+  and independent caption/translation settings are preserved.
+- Five additional Core tests cover supported/unsupported transcription, missing routes, exact
+  metadata preservation, and Whisper with inert old endpoint metadata. Full validation passed
+  151 tests, the unsigned four-target build, and the HAL harness without installing system software.
+- The native harness compiles the actual configuration controller with no credential resolver.
+  Disposable synthetic-file checks passed startup/reload/import, persisted disablement, idempotence,
+  explicit OpenAI setup, local Whisper relaunch, and preservation of invalid files. The user's
+  settings, credentials, network, and media were not used by the harness.
+- The protected passwordless transaction installed signed build 35. Strict source and installed
+  signatures pass; both bundle versions and the protected generation marker are 35. Native Settings
+  and Privacy checks confirm the saved Codex, Whisper Base, translation, and local vision routes
+  remain intact, with transfer/custom endpoints hidden. The app is idle with both capture tests
+  stopped. No system component was installed or activated.
+
 ## Build 34 installed-app Realtime lifecycle
 
 Date: 2026-09-05

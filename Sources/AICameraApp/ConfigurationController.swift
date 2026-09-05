@@ -121,31 +121,8 @@ final class ConfigurationController: ObservableObject {
     private func normalizeSupportedConfiguration(
         in candidate: inout AICameraConfiguration
     ) -> String? {
-        var messages: [String] = []
-        if SupportedConfigurationPolicy.disableUnsupportedRoutes(in: &candidate) {
-            messages.append("Disabled unsupported conversation/video routes. Set up OpenAI Realtime or local vision in AI.")
-        }
-        if let message = normalizeTranscription(in: &candidate) { messages.append(message) }
-        return messages.isEmpty ? nil : messages.joined(separator: " ")
-    }
-
-    private func normalizeTranscription(in candidate: inout AICameraConfiguration) -> String? {
-        guard candidate.pipeline.conversation.transcriptionEnabled,
-              candidate.pipeline.conversation.transcriptionProvider == .openAI,
-              let endpointID = candidate.pipeline.conversation.transcriptionEndpointID,
-              let endpoint = candidate.endpoints.first(where: { $0.id == endpointID }),
-              endpoint.baseURL.host?.lowercased() != "api.openai.com" else { return nil }
-
-        if AppSecretResolver().maskedSecret(account: Self.openAICredentialAccount) != nil {
-            Self.installOpenAITranscriptionConfiguration(in: &candidate)
-            return "Replaced the unsupported legacy transcription service with OpenAI."
-        } else {
-            candidate.pipeline.conversation.transcriptionEnabled = false
-            candidate.pipeline.conversation.transcriptionEndpointID = nil
-            candidate.pipeline.translation.enabled = false
-            candidate.overlays.showTranscript = false
-            return "Disabled an unsupported legacy transcription service. Add an OpenAI API key to enable Transcription."
-        }
+        guard SupportedConfigurationPolicy.disableUnsupportedRoutes(in: &candidate) else { return nil }
+        return "Disabled unsupported services. Select OpenAI or a local model in AI to enable those features."
     }
 
     func update(_ change: (inout AICameraConfiguration) -> Void) {

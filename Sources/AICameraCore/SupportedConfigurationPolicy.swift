@@ -1,12 +1,19 @@
 import Foundation
 
-/// The normal desktop product supports public Realtime and local video processing.
+/// The normal desktop product supports public OpenAI audio and local media processing.
 /// Preserve older endpoint definitions for profile transfer, but do not activate them.
 public enum SupportedConfigurationPolicy {
     public static func isPublicRealtime(_ endpoint: EndpointConfiguration) -> Bool {
+        endpoint.adapter == .openAIRealtime && hasPublicOpenAIBaseURL(endpoint)
+    }
+
+    public static func isPublicTranscription(_ endpoint: EndpointConfiguration) -> Bool {
+        endpoint.adapter == .openAITranscription && hasPublicOpenAIBaseURL(endpoint)
+    }
+
+    private static func hasPublicOpenAIBaseURL(_ endpoint: EndpointConfiguration) -> Bool {
         let url = endpoint.baseURL
-        return endpoint.adapter == .openAIRealtime
-            && url.scheme == "https" && url.host == "api.openai.com"
+        return url.scheme == "https" && url.host == "api.openai.com"
             && (url.port == nil || url.port == 443)
             && url.user == nil && url.password == nil
             && url.query == nil && url.fragment == nil
@@ -31,6 +38,15 @@ public enum SupportedConfigurationPolicy {
             let endpoint = profile.endpoints.first { $0.id == conversation.realtimeEndpointID }
             if !conversation.realtimeEnabled || endpoint.map(isPublicRealtime) != true {
                 profile.pipeline.conversation.enabled = false
+                changed = true
+            }
+        }
+        if conversation.transcriptionEnabled, conversation.transcriptionProvider == .openAI {
+            let endpoint = profile.endpoints.first { $0.id == conversation.transcriptionEndpointID }
+            if endpoint.map(isPublicTranscription) != true {
+                // A saved credential does not authorize moving microphone audio to another service.
+                // Keep independent Realtime translation and the old metadata unchanged.
+                profile.pipeline.conversation.transcriptionEnabled = false
                 changed = true
             }
         }

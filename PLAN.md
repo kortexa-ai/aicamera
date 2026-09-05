@@ -45,6 +45,10 @@ Implementation and acceptance priorities:
 
 ## Current status
 
+- Build 35 disables unsupported transcription during settings migration without reading Keychain
+  or switching providers. It preserves old metadata, privacy grants, and independent local/Realtime
+  features. OpenAI or Local Whisper must be selected explicitly to enable transcription again.
+
 - Build 34 preserves user/AI speaker identity through Realtime caption routing. Each display switch
   controls its own source, translations have independent revisions, and new-turn/Stop invalidation
   rejects retired work. Native tests cover switch combinations and interleaved translated captions.
