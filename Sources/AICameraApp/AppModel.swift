@@ -72,6 +72,7 @@ final class AppModel: ObservableObject {
     let builtinVisionModelController = BuiltinVisionModelController()
     let builtinTranslationModelController = BuiltinTranslationModelController()
     let builtinWhisperModelController = BuiltinWhisperModelController()
+    let codexAuthController = CodexAuthController()
 
     private var pipeline: PipelineCoordinator?
     private var videoController: VideoPipelineController?
@@ -736,6 +737,35 @@ final class AppModel: ObservableObject {
 
     // MARK: - Realtime conversation
 
+    /// Checks a saved credential and model without opening capture or sending a user utterance.
+    func testRealtimeConnection(authentication: RealtimeAuthentication, model: String, voice: String) async throws {
+        let secret: String?
+        if authentication == .codex { secret = try await codexAuthController.realtimeCredential() }
+        else {
+            secret = try await AppSecretResolver().resolve(.init(
+                kind: .bearerKeychain, reference: ConfigurationController.openAICredentialAccount
+            ))
+        }
+        try Task.checkCancellation()
+        guard let secret, !secret.isEmpty else { throw RealtimeSessionFailure.invalidCredential }
+        let endpoint = EndpointConfiguration(
+            id: "connection-test", adapter: .openAIRealtime,
+            baseURL: ConfigurationController.openAIRealtimeBaseURL,
+            model: model, options: ["voice": .string(voice)]
+        )
+        let session = RealtimeConversationSession(signalingURL: endpoint.baseURL, credential: .init(value: "Bearer " + secret))
+        let request = RealtimeSessionConfiguration.request(
+            endpoint: endpoint, conversation: .init(), profile: .default, toolsAvailable: false
+        )
+        do {
+            try await session.connect(session: request)
+            await session.close()
+        } catch {
+            await session.close()
+            throw error
+        }
+    }
+
     func toggleRealtimeConversation() {
         if realtimeConversationActive {
             stopRealtimeConversation()
@@ -797,7 +827,14 @@ final class AppModel: ObservableObject {
             do {
                 await coordinator?.setRealtimeTranscriptionActive(true)
                 try Task.checkCancellation()
-                guard let secret = try await AppSecretResolver().resolve(endpoint.auth), !secret.isEmpty else {
+                let signalingURL = try Self.realtimeSignalingURL(for: endpoint)
+                let secret: String?
+                if conversation.realtimeAuthentication == .codex {
+                    secret = try await self.codexAuthController.realtimeCredential()
+                } else {
+                    secret = try await AppSecretResolver().resolve(endpoint.auth)
+                }
+                guard let secret, !secret.isEmpty else {
                     throw NSError(
                         domain: "AICamera.Realtime",
                         code: 1,
@@ -805,10 +842,11 @@ final class AppModel: ObservableObject {
                     )
                 }
                 guard !Task.isCancelled, generation == self.realtimeGeneration else { return }
-                let signalingURL = try Self.realtimeSignalingURL(for: endpoint)
                 let session = RealtimeConversationSession(
                     signalingURL: signalingURL,
-                    credential: .init(field: endpoint.auth.header, value: endpoint.auth.prefix + secret)
+                    credential: conversation.realtimeAuthentication == .codex
+                        ? .init(value: "Bearer " + secret)
+                        : .init(field: endpoint.auth.header, value: endpoint.auth.prefix + secret)
                 )
                 audioController.setRealtimeAudioHandler { [weak session] data, capturedAt in
                     session?.appendInputPCM(data, capturedAt: capturedAt)
@@ -1341,6 +1379,7 @@ final class AppModel: ObservableObject {
 
     private func stopForTermination() {
         stopRealtimeConversation()
+        codexAuthController.stop()
         cameraPermissionGeneration &+= 1
         microphonePermissionGeneration &+= 1
         cameraPermissionTask?.cancel()

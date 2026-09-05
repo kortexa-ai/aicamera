@@ -212,6 +212,38 @@ In the signed installed app, also verify:
 5. Remove a model downloaded for this test, confirm the active lane is disabled, then download and
    enable it again. Do not remove pre-existing user weights solely for acceptance.
 
+### Codex login
+
+After `scripts/validate.sh`, the following native check uses the installed CLI with a disposable,
+empty Codex home. It checks initialization, device-code response validation, cancellation notification,
+empty-account logout, helper restart, and overlapping startup/shutdown. It neither opens a browser nor completes a login, reads
+desktop credentials, or requests inference:
+
+```sh
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug -framework AICameraCore \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  Sources/AICameraApp/CodexAppServer.swift scripts/validate-codex-auth.swift \
+  -o /tmp/aicamera-codex-auth-validation
+/tmp/aicamera-codex-auth-validation
+```
+
+In the signed installed app:
+
+1. With Conversation off, choose Codex login. Verify its setup is accessible, account status loads,
+   and Save cannot enable a login that is incomplete. Changing the draft must not change the active
+   authentication choice or erase the saved OpenAI API key.
+2. Start a login, cancel it, and confirm a later completion cannot mark it signed in. Start again
+   and let the user complete the official browser ceremony. Verify the account appears and no token
+   value is exposed in the UI or logs.
+3. Use Test Connection and confirm no capture starts. Cancel and change the selected model during
+   a test; a late result must not update the new draft. Save Codex, perform a bounded Realtime turn,
+   and verify actual speech separately from account sign-in. Verify the Privacy statement describes
+   the selected credential source accurately.
+4. Refresh and run another turn. Sign out; verify Conversation stops, the dedicated account clears,
+   and the normal desktop Codex session remains available. Switch explicitly to the saved API key
+   and confirm it still works. Do not claim subscription billing from a successful socket handshake.
+
 ### Product identity and Settings lifecycle
 
 1. Confirm Finder, `/Applications`, Dock, App Switcher, Login Items, and the popup header use the same full-color production icon.

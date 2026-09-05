@@ -196,6 +196,7 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
 
     public var enabled: Bool
     public var realtimeEnabled: Bool
+    public var realtimeAuthentication: RealtimeAuthentication
     public var realtimeEndpointID: String?
     public var transcriptionEnabled: Bool
     public var transcriptionEndpointID: String?
@@ -220,6 +221,7 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
     public init(
         enabled: Bool = false,
         realtimeEnabled: Bool = false,
+        realtimeAuthentication: RealtimeAuthentication = .apiKey,
         realtimeEndpointID: String? = nil,
         transcriptionEnabled: Bool = false,
         transcriptionEndpointID: String? = nil,
@@ -243,6 +245,7 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
     ) {
         self.enabled = enabled
         self.realtimeEnabled = realtimeEnabled
+        self.realtimeAuthentication = realtimeAuthentication
         self.realtimeEndpointID = realtimeEndpointID
         self.transcriptionEnabled = transcriptionEnabled
         self.transcriptionEndpointID = transcriptionEndpointID
@@ -268,6 +271,7 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case enabled
         case realtimeEnabled
+        case realtimeAuthentication
         case realtimeEndpointID
         case transcriptionEnabled
         case transcriptionEndpointID
@@ -294,6 +298,7 @@ public struct ConversationConfiguration: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try container.decode(Bool.self, forKey: .enabled)
         realtimeEnabled = try container.decodeIfPresent(Bool.self, forKey: .realtimeEnabled) ?? false
+        realtimeAuthentication = try container.decodeIfPresent(RealtimeAuthentication.self, forKey: .realtimeAuthentication) ?? .apiKey
         realtimeEndpointID = try container.decodeIfPresent(String.self, forKey: .realtimeEndpointID)
         transcriptionEndpointID = try container.decodeIfPresent(String.self, forKey: .transcriptionEndpointID)
         transcriptionProvider = try container.decodeIfPresent(TranscriptionProvider.self, forKey: .transcriptionProvider) ?? .openAI

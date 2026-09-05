@@ -18,9 +18,10 @@ Implementation and acceptance priorities:
   legacy responses. Keep network, translation, and tool work off media callbacks.
 - [ ] Complete API-key Realtime acceptance: silent connection/response probe, one utterance,
   transcript/translation, overlay tools, cancellation, error recovery, and a second turn.
-- [ ] Add a dedicated Codex sign-in/refresh/sign-out path based on the public Realtime flow used
-  by `esp32-voice`, with isolated credentials. Verify authentication and speech independently from
-  billing attribution; do not claim that a subscription includes API usage without evidence.
+- [x] Add a dedicated Codex sign-in/refresh/sign-out path based on the public Realtime flow used
+  by `esp32-voice`, with isolated credentials. Sign-in, managed refresh, public session acceptance,
+  and a user-heard response pass; playback speed and the remaining speech matrix stay open.
+  Subscription coverage of Realtime usage remains unverified.
 - [x] Implement embedded Whisper with explicit verified model downloads, progress, cancellation,
   removal, a local provider choice, and measured in-process transcription.
 - [x] Correct local translation Unicode handling, model/client reuse, cancellation, output limits,
@@ -34,8 +35,8 @@ Implementation and acceptance priorities:
 
 ## Current status
 
-- Build 26 adds embedded multilingual Whisper Base/Small with verified streamed downloads, explicit local provider selection, and bounded inference. Whisper, translation, and vision share download progress, size limits, integrity checks, and cancellation cleanup. Build 25 corrected translation Unicode and client reuse; build 24 moved public OpenAI Realtime onto host-owned microphone PCM.
-- The installed host is signed build 26 in `/Applications`. Its validated HAL driver remains build 12 because these host changes do not alter or reinstall the driver. Realtime no-speech/Stop, native local translation, and public-fixture Whisper checks pass; audible Realtime speech, tools, and live translated-caption acceptance remain open.
+- Build 29 adds a separate Codex login through the installed official CLI, managed refresh, explicit API-key/Codex selection, and a silent public Realtime connection test. It preserves desktop credentials and never silently falls back to the API key. Build 26 added embedded Whisper and shared verified model downloads; build 25 corrected translation text and reuse; build 24 moved Realtime onto host-owned PCM.
+- The signed host in `/Applications` uses the validated build-12 HAL driver without changing or reinstalling it. Codex sign-in, refresh, public connection, and a user-heard reply pass. The user reports slightly accelerated response playback; sample-rate/conversion diagnosis, tools, and live translated-caption acceptance remain open. Native local translation and public-fixture Whisper checks pass.
 - Build-12 microphone acceptance passed four normal cycles, short-lived clients, two simultaneous clients with `0 → 1 → 2 → 1 → 0` demand, forced client exit, local-test takeover, and host quit/relaunch while demand remained active. Callback flow, physical Yeti acquisition, prompt teardown, and return to idle all passed without recording media.
 - A bounded QuickTime check exposed and selected **AI Camera** without recording, but the build-10 extension could not deliver camera demand to the host. The extension runs inside `cmiodalassistant`, whose service container is isolated from the GUI user's app-group container; sandbox logs confirmed that the shared JSON-file transport is not usable across those processes.
 - Build 13 replaces that file transport with a bounded timestamped `NSData` snapshot on the read-only CoreMediaIO custom device property `4cc_aicd_glob_0000`. The host resolves the camera by stable UID, reads the raw property bytes through the legacy C API, and rejects missing, malformed, future-dated, or stale snapshots. Build 14 preserves that behavior and passes 89 Swift tests, full non-installing validation, the strict and sanitizer HAL harnesses, an unsigned four-target build, strict Release signing without `get-task-allow`, and `git diff --check`.

@@ -80,6 +80,7 @@ be imported directly.
 - [Architecture and media flow](docs/architecture.md)
 - [Profile and adapter configuration](docs/configuration.md)
 - [Embedded model downloads and provenance](docs/local-models.md)
+- [Separate Codex login and authentication boundaries](docs/codex-login.md)
 - [Signing, installation, and removal](docs/installation.md)
 - [Testing and diagnostics](docs/testing.md)
 - [Latest validation record and signing boundary](VALIDATION.md)

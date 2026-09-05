@@ -1,5 +1,40 @@
 # Validation record
 
+## Build 29 separate Codex login
+
+Date: 2026-09-05
+
+- Authentication uses only the installed official Codex CLI's public account RPCs, with AI Camera's
+  own home and OS Keychain namespace. It neither creates an agent thread nor reads the desktop or
+  `esp32-voice` credential. The stored profile selects Codex with endpoint auth kind `none`, so older
+  app builds cannot silently use the saved API key. No `auth.json` was created in the dedicated home.
+- Five Core tests cover device URL/code validation, credential/header bounds, expiry refresh hints,
+  Keychain namespace hashing, JSONL framing, legacy API-key defaults, and rejection of key fallback.
+  The full validation suite passed 135 Swift tests, metadata/installer checks, HAL harnesses, and
+  the unsigned four-target build before signed acceptance.
+- The native harness with installed CLI 0.153.4 passed isolated empty-account initialization,
+  device-code response validation and cancellation notification, empty-account logout, and helper
+  restart. It also passes three stop-during-start/replacement cycles: an abandoned startup cannot
+  terminate or launch over its replacement. The harness opens no browser and completes no login.
+- Signed build 28 passed strict deep verification for source and installed app; both versions and
+  the protected install-generation marker read 28. The user completed the app's separate device
+  login. Account status survived the signed host update, and Save selected Codex explicitly.
+  Test Connection accepted the credential on public OpenAI Realtime without opening capture.
+  Refresh Login succeeded, followed by another successful public connection.
+- Build 29 adds generation guards for helper startup and credential cleanup. Full validation still
+  passes 135 tests; the protected passwordless installer installed it at `/Applications/AI Camera.app`.
+  Source and installed signatures pass strict deep verification; source, installed, and protected
+  marker versions are 29. Neither system component was updated or activated.
+- The user heard a spoken Codex Realtime reply and reported a slight playback speed-up. This
+  establishes an audible response for this account, with an unresolved playback correctness issue.
+  It does not establish subscription billing coverage. Tool continuation, translated captions,
+  real-account sign-out, and broader speech/error acceptance remain in the manual matrix.
+- Setup is available while Conversation is off. Incomplete Codex login cannot be saved or enabled;
+  changing the authentication draft leaves the saved route active until Save. Connection tests use
+  a separate cancellable session and generation-bound status; model/voice/auth changes and Settings
+  closure cancel the test. UI attempts to cancel a live successful handshake completed too quickly
+  to establish the manual cancellation check; the native helper cancellation check is separate.
+
 ## Build 26 embedded Whisper and streamed model downloads
 
 - `scripts/validate.sh` passed 130 Swift tests, metadata and installer checks, HAL harnesses, and

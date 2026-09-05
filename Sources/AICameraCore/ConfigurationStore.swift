@@ -249,6 +249,14 @@ public enum ConfigurationValidator {
         }
 
         var grantedEndpointIDs = Set<String>()
+        if conversation.realtimeAuthentication == .codex {
+            guard let id = conversation.realtimeEndpointID,
+                  let endpoint = configuration.endpoints.first(where: { $0.id == id }),
+                  endpoint.adapter == .openAIRealtime, endpoint.baseURL.scheme == "https",
+                  endpoint.baseURL.host == "api.openai.com", endpoint.auth.kind == .none else {
+                throw ConfigurationError.invalidText("Codex Realtime endpoint")
+            }
+        }
         for grant in configuration.privacy.grants {
             guard endpointIDs.contains(grant.endpointID) else {
                 throw ConfigurationError.privacyGrantReferencesMissingEndpoint(grant.endpointID)

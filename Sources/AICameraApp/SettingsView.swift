@@ -9,6 +9,8 @@ struct SettingsView: View {
     @ObservedObject private var builtinVision: BuiltinVisionModelController
     @ObservedObject private var builtinTranslation: BuiltinTranslationModelController
     @ObservedObject private var builtinWhisper: BuiltinWhisperModelController
+    @ObservedObject private var codexAuth: CodexAuthController
+    @State private var realtimeAuthentication = RealtimeAuthentication.apiKey
     @State private var transcriptionProvider = TranscriptionProvider.openAI
     @State private var transcriptionWhisperModel = BuiltinWhisperModel.base
     @State private var didLoadDrafts = false
@@ -19,6 +21,8 @@ struct SettingsView: View {
     @State private var realtimeCredential = ""
     @State private var realtimeCredentialSummary: String?
     @State private var realtimeMessage: String?
+    @State private var realtimeConnectionTest: Task<Void, Never>?
+    @State private var realtimeConnectionTestID = UUID()
     @State private var transcriptionModel = ConfigurationController.defaultTranscriptionModel
     @State private var transcriptionLanguage = "auto"
     @State private var transcriptionCredential = ""
@@ -34,6 +38,7 @@ struct SettingsView: View {
         self.builtinVision = model.builtinVisionModelController
         self.builtinTranslation = model.builtinTranslationModelController
         self.builtinWhisper = model.builtinWhisperModelController
+        self.codexAuth = model.codexAuthController
         self._conversationDraftEnabled = State(
             initialValue: model.configurationController.configuration.pipeline.conversation.enabled
         )
@@ -55,6 +60,7 @@ struct SettingsView: View {
         }
         .frame(width: 740, height: 540)
         .background(SettingsWindowLifecycle())
+        .onDisappear { cancelConnectionTest() }
     }
 
     private var generalSettings: some View {
@@ -188,52 +194,64 @@ struct SettingsView: View {
             settingsSection(
                 "Conversation",
                 enabled: conversationEnabledBinding,
-                disabledText: "Conversational features are disabled."
+                disabledText: "Conversational features are disabled.",
+                showsSetupWhenDisabled: true
             ) {
-                if conversationEnabled {
-                    Picker("Setup", selection: $voicePipelineMode) {
-                        Text("Realtime").tag(VoicePipelineMode.openAIRealtime)
-                        Text("Advanced").tag(VoicePipelineMode.compatibleRealtime)
+                Group {
+                    LabeledContent("Service", value: "OpenAI Realtime")
+                    Text(configuration.configuration.pipeline.conversation.enabled
+                         ? "Active: \(configuration.configuration.pipeline.conversation.realtimeAuthentication == .codex ? "Codex login" : "API key")"
+                         : "Conversation is off. Configure sign-in and save to enable it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Picker("Sign in with", selection: $realtimeAuthentication) {
+                        Text("API key").tag(RealtimeAuthentication.apiKey)
+                        Text("Codex login").tag(RealtimeAuthentication.codex)
                     }
-                    .pickerStyle(.segmented)
-                    .onChange(of: voicePipelineMode) { _, mode in handleVoicePipelineSelection(mode) }
-
-                    if voicePipelineMode == .openAIRealtime {
-                        LabeledContent("Service", value: "OpenAI Realtime")
-                    } else {
-                        TextField("Compatible base URL", text: $realtimeBaseURL)
-                        Toggle("Use Hermes", isOn: $useHermes)
-                            .onChange(of: useHermes) { _, enabled in
-                                if enabled { realtimeModel = ConfigurationController.hermesRealtimeModel }
-                            }
+                    .onChange(of: realtimeAuthentication) { _, choice in
+                        cancelConnectionTest()
+                        if choice == .codex { codexAuth.loadStatus() }
                     }
                     Picker("Model", selection: $realtimeModel) {
                         ForEach(realtimeModelChoices, id: \.self) { Text($0).tag($0) }
                     }
+                    .onChange(of: realtimeModel) { _, _ in cancelConnectionTest() }
                     Picker("Voice", selection: $realtimeVoice) {
                         ForEach(realtimeVoiceChoices, id: \.self) { Text($0.capitalized).tag($0) }
                     }
-                    if let realtimeCredentialSummary {
-                        LabeledContent("API key") {
-                            HStack(spacing: 8) {
-                                Text(realtimeCredentialSummary).monospaced()
-                                Button(role: .destructive) { removeRealtimeCredential() } label: {
-                                    Image(systemName: "trash")
+                    .onChange(of: realtimeVoice) { _, _ in cancelConnectionTest() }
+                    if realtimeAuthentication == .codex {
+                        codexLoginControls
+                    } else {
+                        if let realtimeCredentialSummary {
+                            LabeledContent("API key") {
+                                HStack(spacing: 8) {
+                                    Text(realtimeCredentialSummary).monospaced()
+                                    Button(role: .destructive) { removeRealtimeCredential() } label: {
+                                        Image(systemName: "trash")
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .help("Remove saved API key")
                                 }
-                                .buttonStyle(.borderless)
-                                .help("Remove saved API key")
                             }
                         }
+                        SecureField(
+                            realtimeCredentialSummary == nil ? "Add API key" : "Replace API key",
+                            text: $realtimeCredential
+                        )
                     }
-                    SecureField(
-                        realtimeCredentialSummary == nil ? "Add API key" : "Replace API key",
-                        text: $realtimeCredential
-                    )
                     HStack {
-                        Button(realtimeCredentialSummary == nil ? "Save & Enable" : "Save Changes") {
+                        Button(configuration.configuration.pipeline.conversation.enabled ? "Save Changes" : "Save & Enable") {
                             saveRealtimeConfiguration()
                         }
                             .buttonStyle(.borderedProminent)
+                            .disabled(realtimeAuthentication == .codex && (!codexAuth.isSignedIn || codexAuth.isBusy))
+                        if realtimeConnectionTest != nil {
+                            Button("Cancel Test") { cancelConnectionTest() }
+                        } else {
+                            Button("Test Connection") { testRealtimeConnection() }
+                                .disabled(model.realtimeConversationActive || codexAuth.isBusy
+                                    || (realtimeAuthentication == .codex ? !codexAuth.isSignedIn : realtimeCredentialSummary == nil))
+                        }
                         Spacer()
                         Text("Stored in macOS Keychain")
                             .font(.caption)
@@ -311,6 +329,36 @@ struct SettingsView: View {
         .onAppear {
             if !didLoadDrafts { syncDrafts(); didLoadDrafts = true }
         }
+    }
+
+    @ViewBuilder private var codexLoginControls: some View {
+        if let account = codexAuth.accountLabel {
+            LabeledContent("Account", value: account)
+            HStack {
+                Button("Refresh Login") { codexAuth.refreshLogin() }
+                Button("Sign Out") {
+                    cancelConnectionTest()
+                    model.stopRealtimeConversation()
+                    if configuration.configuration.pipeline.conversation.realtimeAuthentication == .codex {
+                        configuration.update { $0.pipeline.conversation.enabled = false }
+                        conversationDraftEnabled = false
+                    }
+                    codexAuth.signOut()
+                }
+            }.disabled(codexAuth.isBusy)
+        } else if let code = codexAuth.deviceCode {
+            LabeledContent("Sign-in code") { Text(code).monospaced().textSelection(.enabled) }
+            HStack {
+                Button("Open Sign-in Page") { codexAuth.openSignInPage() }
+                Button("Cancel Sign-in") { codexAuth.cancelSignIn() }
+            }
+        } else {
+            Button("Sign In to Codex") { codexAuth.signIn() }.disabled(codexAuth.isBusy)
+        }
+        if codexAuth.isBusy { ProgressView().controlSize(.small) }
+        if let message = codexAuth.message { Text(message).font(.caption).foregroundStyle(.secondary) }
+        Text("Uses the installed Codex CLI with a separate login for AI Camera. Realtime access depends on your account; subscription coverage of this audio usage is not verified.")
+            .font(.caption).foregroundStyle(.secondary)
     }
 
     private var transcriptionSettings: some View {
@@ -625,6 +673,8 @@ struct SettingsView: View {
 
     private func syncRealtimeDraft() {
         let conversation = configuration.configuration.pipeline.conversation
+        realtimeAuthentication = conversation.realtimeAuthentication
+        if realtimeAuthentication == .codex { codexAuth.loadStatus() }
         guard conversation.realtimeEnabled,
               let endpointID = conversation.realtimeEndpointID,
               let endpoint = configuration.configuration.endpoints.first(where: { $0.id == endpointID }) else {
@@ -640,9 +690,7 @@ struct SettingsView: View {
         realtimeModel = endpoint.model ?? ConfigurationController.defaultRealtimeModel
         realtimeVoice = endpoint.options["voice"]?.stringValue ?? ConfigurationController.defaultRealtimeVoice
         useHermes = endpoint.options["kortexaAgent"]?.stringValue == "hermes"
-        voicePipelineMode = endpoint.baseURL.host?.lowercased() == "api.openai.com"
-            ? .openAIRealtime
-            : .compatibleRealtime
+        voicePipelineMode = .openAIRealtime
         realtimeCredentialSummary = AppSecretResolver().maskedSecret(
             account: ConfigurationController.realtimeCredentialAccount(for: endpoint.baseURL)
         )
@@ -677,10 +725,38 @@ struct SettingsView: View {
         refreshRealtimeCredentialSummary()
     }
 
+    private func testRealtimeConnection() {
+        let authentication = realtimeAuthentication, selectedModel = realtimeModel, voice = realtimeVoice
+        let id = UUID()
+        realtimeConnectionTestID = id
+        realtimeMessage = "Checking the saved credential and selected model…"
+        realtimeConnectionTest = Task { @MainActor in
+            defer { if realtimeConnectionTestID == id { realtimeConnectionTest = nil } }
+            do {
+                try await model.testRealtimeConnection(authentication: authentication, model: selectedModel, voice: voice)
+                try Task.checkCancellation()
+                guard realtimeConnectionTestID == id else { return }
+                realtimeMessage = "Connected to public OpenAI Realtime. No microphone audio was sent; use Talk to test speech."
+            } catch {
+                guard realtimeConnectionTestID == id else { return }
+                realtimeMessage = Task.isCancelled ? "Connection test cancelled." : error.localizedDescription
+            }
+        }
+    }
+
+    private func cancelConnectionTest() {
+        guard realtimeConnectionTest != nil else { return }
+        realtimeConnectionTestID = UUID()
+        realtimeConnectionTest?.cancel(); realtimeConnectionTest = nil
+        realtimeMessage = "Connection test cancelled."
+    }
+
     private func saveRealtimeConfiguration() {
-        let rawURL = voicePipelineMode == .openAIRealtime
-            ? ConfigurationController.openAIRealtimeBaseURL.absoluteString
-            : realtimeBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard realtimeAuthentication != .codex || (codexAuth.isSignedIn && !codexAuth.isBusy) else {
+            realtimeMessage = "Complete Codex sign-in before enabling this conversation option."
+            return
+        }
+        let rawURL = ConfigurationController.openAIRealtimeBaseURL.absoluteString
         guard let baseURL = URL(string: rawURL), baseURL.host != nil else {
             realtimeMessage = "Enter a valid Realtime base URL."
             return
@@ -693,12 +769,12 @@ struct SettingsView: View {
         }
         let endpointID = "openai-realtime"
         let credentialAccount = ConfigurationController.realtimeCredentialAccount(for: baseURL)
-        guard realtimeCredentialSummary != nil || !realtimeCredential.isEmpty else {
+        guard realtimeAuthentication == .codex || realtimeCredentialSummary != nil || !realtimeCredential.isEmpty else {
             realtimeMessage = "Add an API key to enable Realtime."
             return
         }
         do {
-            if !realtimeCredential.isEmpty {
+            if realtimeAuthentication == .apiKey, !realtimeCredential.isEmpty {
                 try AppSecretResolver().store(
                     realtimeCredential,
                     account: credentialAccount
@@ -715,7 +791,7 @@ struct SettingsView: View {
                 adapter: .openAIRealtime,
                 baseURL: baseURL,
                 model: model,
-                auth: .init(
+                auth: realtimeAuthentication == .codex ? .init() : .init(
                     kind: .bearerKeychain,
                     reference: credentialAccount
                 ),
@@ -727,6 +803,7 @@ struct SettingsView: View {
                 profile.endpoints.append(endpoint)
                 profile.pipeline.conversation.enabled = true
                 profile.pipeline.conversation.realtimeEnabled = true
+                profile.pipeline.conversation.realtimeAuthentication = realtimeAuthentication
                 profile.pipeline.conversation.realtimeEndpointID = endpointID
                 profile.pipeline.conversation.respondToFinalTranscripts = false
                 profile.pipeline.conversation.respondToGestures = false
@@ -820,7 +897,7 @@ struct SettingsView: View {
         }
     }
 
-    private var conversationEnabled: Bool { conversationDraftEnabled }
+    private var conversationEnabled: Bool { configuration.configuration.pipeline.conversation.enabled }
 
 
     private var realtimeModelChoices: [String] {
@@ -871,10 +948,10 @@ struct SettingsView: View {
 
     private var conversationEnabledBinding: Binding<Bool> {
         Binding(
-            get: { conversationDraftEnabled },
+            get: { conversationEnabled },
             set: { enabled in
-                conversationDraftEnabled = enabled
-                if !enabled {
+                if enabled { saveRealtimeConfiguration() }
+                else {
                     configuration.update { $0.pipeline.conversation.enabled = false }
                 }
             }
@@ -960,6 +1037,7 @@ struct SettingsView: View {
     }
 
     private func removeRealtimeCredential() {
+        cancelConnectionTest()
         let url = voicePipelineMode == .openAIRealtime
             ? ConfigurationController.openAIRealtimeBaseURL
             : URL(string: realtimeBaseURL)
@@ -1254,7 +1332,9 @@ struct SettingsView: View {
            let endpoint = endpoint(withID: conversation.realtimeEndpointID) {
             let destination = endpoint.hostDisplayName
             let description = endpoint.baseURL.host?.lowercased() == "api.openai.com"
-                ? "Conversation sends microphone audio to OpenAI Realtime. OpenAI processes it under the API data controls for the organization and project associated with your API key."
+                ? (conversation.realtimeAuthentication == .codex
+                   ? "Conversation sends microphone audio to public OpenAI Realtime using AI Camera's separate Codex login. Account access and subscription coverage of this audio usage are not guaranteed."
+                   : "Conversation sends microphone audio to OpenAI Realtime. OpenAI processes it under the API data controls for the organization and project associated with your API key.")
                 : "Conversation sends microphone audio to \(destination), using the service configured in AI."
             routes.append(.init(
                 feature: "Conversation",

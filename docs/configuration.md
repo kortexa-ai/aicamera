@@ -70,6 +70,12 @@ For streamed PCM, `x-sample-rate` on the response takes precedence over numeric 
 
 ## Authentication
 
+OpenAI Realtime offers an API key or a separate Codex login. `realtimeAuthentication` is `apiKey`
+by default for older profiles, or `codex`. A Codex endpoint must be canonical OpenAI and have
+`auth.kind: none`: its credential comes from the isolated login controller, so neither current nor
+older builds can silently substitute a saved API key. The separate OpenAI transcription provider
+continues to require an API key. See [Codex sign-in and support boundaries](codex-login.md).
+
 The Kortexa API key field appears under the development-only Smarty controls, beside
 the features that use it. The key authenticates HTTPS AI requests routed by `api.kortexa.ai` to
 Smarty. Pure passthrough, local Apple Vision gesture detection, virtual-device maintenance, and
