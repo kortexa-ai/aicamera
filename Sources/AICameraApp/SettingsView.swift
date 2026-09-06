@@ -60,10 +60,10 @@ struct SettingsView: View {
         ScrollViewReader { proxy in
             Form {
                 if !configuration.isConfigurationUsable {
-                    Section("Profile repair required") {
-                        Text(configuration.validationMessage ?? "The saved profile is invalid.")
+                    Section("Settings repair required") {
+                        Text(configuration.validationMessage ?? "The saved settings are invalid.")
                             .foregroundStyle(.red)
-                        Text("Open AI, then reset to safe defaults. Automatic camera and microphone capture is blocked until the profile is valid.")
+                        Text("Open AI, then reset to safe defaults. Automatic camera and microphone capture is blocked until the settings are valid.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

@@ -2011,7 +2011,7 @@ final class AppModel: ObservableObject {
         if isStopping || pipelineStopTask != nil {
             statusText = "Applying changes…"
         } else if !configurationController.isConfigurationUsable {
-            statusText = "Profile repair required"
+            statusText = "Settings repair required"
         } else if cameraTestActive && microphoneTestActive {
             statusText = cameraIsActive && microphoneIsActive
                 ? "Testing camera and microphone"

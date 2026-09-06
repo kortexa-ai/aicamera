@@ -41,7 +41,7 @@ final class ConfigurationController: ObservableObject {
             } catch {
                 // Preserve invalid or newer-schema profiles instead of silently replacing them.
                 self.configuration = .default
-                self.validationMessage = "The saved profile was not changed: \(error.localizedDescription)"
+                self.validationMessage = "The saved settings were not changed: \(error.localizedDescription)"
                 self.isConfigurationUsable = false
             }
         } else {
@@ -49,7 +49,7 @@ final class ConfigurationController: ObservableObject {
             do {
                 try store.save(.default)
             } catch {
-                self.validationMessage = "The default profile could not be saved: \(error.localizedDescription)"
+                self.validationMessage = "The default settings could not be saved: \(error.localizedDescription)"
             }
         }
         migrateUnsupportedConfiguration()
@@ -118,7 +118,7 @@ final class ConfigurationController: ObservableObject {
 
     func update(_ change: (inout AICameraConfiguration) -> Void) {
         guard isConfigurationUsable else {
-            validationMessage = "Repair and save the profile in AI before changing other settings."
+            validationMessage = "Repair and save the settings in AI before making other changes."
             return
         }
         var candidate = configuration
@@ -142,7 +142,7 @@ final class ConfigurationController: ObservableObject {
             configuration = candidate
             isConfigurationUsable = true
             validationMessage = nil
-            profileTransferMessage = migrationMessage ?? "Imported \(candidate.profileName)."
+            profileTransferMessage = migrationMessage ?? "Settings imported."
         } catch {
             profileTransferMessage = "Import failed: \(error.localizedDescription)"
         }
@@ -151,7 +151,7 @@ final class ConfigurationController: ObservableObject {
     func exportProfile(to url: URL) {
         do {
             try ProfileTransfer.write(configuration, to: url)
-            profileTransferMessage = "Exported profile without secret values."
+            profileTransferMessage = "Settings exported without secret values."
         } catch {
             profileTransferMessage = "Export failed: \(error.localizedDescription)"
         }

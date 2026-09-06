@@ -139,7 +139,7 @@ struct ControlCenterView: View {
                         .textSelection(.enabled)
                     HStack {
                         if !model.configurationController.isConfigurationUsable {
-                            Button("Repair Profile") { presentSettings(.advanced) }
+                            Button("Repair Settings") { presentSettings(.advanced) }
                         }
                         if model.currentError != nil {
                             Button("Retry") { model.retryDemand() }
