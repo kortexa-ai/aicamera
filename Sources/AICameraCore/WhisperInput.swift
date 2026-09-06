@@ -6,17 +6,18 @@ public enum BuiltinWhisperModel: String, Codable, CaseIterable, Identifiable, Se
     case large = "large-v3-q5_0"
 
     public var id: String { rawValue }
-    public var name: String {
+    public var name: String { "Whisper \(sizeName)" }
+    public var sizeName: String {
         switch self {
-        case .base: "Whisper Base"
-        case .small: "Whisper Small"
-        case .large: "Whisper Large"
+        case .base: "Base"
+        case .small: "Small"
+        case .large: "Large"
         }
     }
     public var downloadSize: String {
         switch self {
-        case .base: "148 MB"
-        case .small: "190 MB"
+        case .base: "0.148 GB"
+        case .small: "0.190 GB"
         case .large: "1.08 GB"
         }
     }

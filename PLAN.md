@@ -42,9 +42,18 @@ Implementation and acceptance priorities:
   feature state, remove irrelevant controls, keep transfer/custom endpoints hidden, and verify
   with native UI/accessibility.
 - [x] Complete full validation and signed Release host installation. Virtual-camera activation
-  and extension/device acceptance are deferred at the user's request; do not activate components.
+  and QuickTime device acceptance passed after the user completed the Media Extension update.
+  Future system-component changes still require explicit operator action.
 
 ## Current status
+
+- Build 38 aligns Whisper and vision around Size, description/download size, and Model controls,
+  centers captions at the bottom, and uses only AI Camera in the top-left status label.
+  Gesture label visibility has one control in Overlays; detector and box controls remain available.
+- Live camera publication and near-real-time translated captions are user-confirmed on build 37.
+  Follow-ups: [multiple caption languages](https://github.com/kortexa-ai/aicamera/issues/50), with
+  original transcription as a language track, and [mute-aware caption privacy](https://github.com/kortexa-ai/aicamera/issues/51).
+  The mute integration is not implemented yet; it must clear visible and pending caption output.
 
 - Build 37 aligns Whisper and translation model controls, adds hardware-gated Whisper Large v3,
   and wraps camera extension recovery guidance. An enabled-but-unpublished camera no longer

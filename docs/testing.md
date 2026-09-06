@@ -431,3 +431,16 @@ pass publishes synthetic English sentences as Chinese user and AI captions throu
   are separate checks. With operator authorization, use the normal extension update or system
   off/on controls, then verify publication in a fresh camera client. Never delete OS-managed
   extension directories or automatically reboot as part of validation.
+
+### Model selector and caption presentation acceptance
+
+- Whisper uses a Size segmented selector with Base/Small and Large on eligible hardware.
+  Vision uses the same Size → description/download size → Model status/actions layout with
+  Tiny/Medium/Large. Its description names YOLOv3 or RF-DETR and explains the tier benefit.
+- Provider text says Whisper. All local model status rows say Model. Descriptions include
+  download size in GB; selected names and removal/download behavior remain unchanged.
+- Show gesture labels appears once, in Overlays. Gestures remains a processing toggle under
+  Vision & Gestures. Object detection and Show detection boxes remain independently controllable.
+- In a camera preview, confirm the upper-left label says only AI Camera. Translated/original
+  transcript captions occupy the bottom center with an inset from the edge, including long
+  captions at smaller frame sizes. Existing single-line truncation remains unchanged. AI-response placement remains separate.

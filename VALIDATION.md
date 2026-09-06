@@ -1,5 +1,27 @@
 # Validation record
 
+## Build 38: consistent model controls and caption placement
+
+- Full `scripts/validate.sh` passes 153 Swift tests, the unsigned four-target build, metadata and
+  script checks, and the HAL harness after the final user refinements. No system component changed.
+- Protected signed Release installation completed. Source and installed strict nested signatures
+  pass; both app versions and the protected installation generation marker report 38.
+- Installed Settings/accessibility confirms Whisper, its Base/Small/Large segmented Size selector,
+  the description with GB download size, and Model status/actions. Vision uses the same order with
+  Tiny/Medium/Large and YOLOv3/RF-DETR family information. Downloaded model choices are preserved.
+- Show gesture labels appears once under Overlays. Object detection remains enabled, Gestures
+  remains under Vision & Gestures, and the user's Show detection boxes off setting is preserved.
+  No inference or display preferences were changed during the review.
+- Synthetic native renderer review at 1280×720 and 640×480 confirms AI Camera at the top left and
+  captions at the bottom center with an 18-point inset. Long captions retain their existing bounded
+  single-line truncation. Generated gray frames and sample English/Chinese text were used; no
+  captured media was saved. No GPU latency measurement or isolated compute window was needed.
+- The user had confirmed working QuickTime camera output and near-real-time live translated
+  captions on build 37. Build 38 resumed existing camera/microphone demand with that installed
+  camera extension. Multilingual captions and calling-app mute privacy are tracked separately
+  in issues 50 and 51; they are not implemented by this UI change.
+
+
 ## Build 37: camera recovery and local model selection
 
 - Full `scripts/validate.sh`: 153 Swift tests, all four unsigned Xcode targets, metadata/script

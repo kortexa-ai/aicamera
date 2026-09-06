@@ -18,11 +18,19 @@ enum BuiltinVisionModel: String, CaseIterable, Identifiable {
         }
     }
 
+    var sizeName: String {
+        switch self {
+        case .yoloV3Tiny: "Tiny"
+        case .rfDetrMedium: "Medium"
+        case .rfDetrLarge: "Large"
+        }
+    }
+
     var downloadSize: String {
         switch self {
-        case .yoloV3Tiny: "9 MB"
-        case .rfDetrMedium: "58 MB"
-        case .rfDetrLarge: "59 MB"
+        case .yoloV3Tiny: "0.009 GB"
+        case .rfDetrMedium: "0.058 GB"
+        case .rfDetrLarge: "0.059 GB"
         }
     }
 
@@ -37,11 +45,11 @@ enum BuiltinVisionModel: String, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .yoloV3Tiny:
-            "Apple's compact detector. Best when memory and battery use matter most."
+            "Fastest, with the lowest memory and battery use."
         case .rfDetrMedium:
-            "A modern, accurate detector with comfortable real-time performance on Apple silicon."
+            "Balances accuracy and speed on Apple silicon."
         case .rfDetrLarge:
-            "The highest-quality local option. Best on M4 Pro, M3 Max, and faster Macs."
+            "Highest accuracy, with more processing use. Best on M4 Pro, M3 Max, and faster Macs."
         }
     }
 

@@ -286,9 +286,6 @@ struct SettingsView: View {
                 Group {
                     builtinVisionControls
                     Toggle("Gestures", isOn: gesturesEnabledBinding)
-                    if gesturesEnabled {
-                        Toggle("Show gesture labels", isOn: overlayBoolBinding(\.showGestureLabels))
-                    }
                 }
             }
 
@@ -354,19 +351,22 @@ struct SettingsView: View {
         settingsSection("Transcription", enabled: transcriptionEnabledBinding,
                         disabledText: "Transcription is off.", showsSetupWhenDisabled: true) {
             Text(transcriptionEnabled
-                 ? "Active: \(configuration.configuration.pipeline.conversation.transcriptionProvider == .whisper ? "Local Whisper" : "OpenAI")"
+                 ? "Active: \(configuration.configuration.pipeline.conversation.transcriptionProvider == .whisper ? "Whisper" : "OpenAI")"
                  : "Transcription is off. Choose a provider and save to enable it.")
                 .font(.caption).foregroundStyle(.secondary)
             Picker("Provider", selection: $transcriptionProvider) {
                 Text("OpenAI").tag(TranscriptionProvider.openAI)
-                Text("Local Whisper").tag(TranscriptionProvider.whisper)
+                Text("Whisper").tag(TranscriptionProvider.whisper)
             }
             if transcriptionProvider == .whisper {
-                Picker("Model", selection: $transcriptionWhisperModel) {
-                    ForEach(builtinWhisper.availableModels) { Text("\($0.name) · \($0.downloadSize)").tag($0) }
+                Picker("Size", selection: $transcriptionWhisperModel) {
+                    ForEach(builtinWhisper.availableModels) { Text($0.sizeName).tag($0) }
                 }
+                .pickerStyle(.segmented)
                 .disabled(builtinWhisper.hasActiveDownload)
-                Text(transcriptionWhisperModel.summary).font(.caption).foregroundStyle(.secondary)
+                Text("\(transcriptionWhisperModel.summary) \(transcriptionWhisperModel.downloadSize) download.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 whisperModelControls
                 Text("Whisper transcribes audio in this app on your Mac. No API key or external transcription service is used.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -420,13 +420,13 @@ struct SettingsView: View {
     @ViewBuilder private var whisperModelControls: some View {
         switch builtinWhisper.state(for: transcriptionWhisperModel) {
         case .notDownloaded:
-            LabeledContent("Local model") {
+            LabeledContent("Model") {
                 Button("Download \(transcriptionWhisperModel.name) · \(transcriptionWhisperModel.downloadSize)") {
                     builtinWhisper.download(transcriptionWhisperModel)
                 }.disabled(builtinWhisper.hasActiveDownload)
             }
         case .downloading:
-            LabeledContent("Local model") {
+            LabeledContent("Model") {
                 HStack(spacing: 8) {
                     ProgressView(value: builtinWhisper.progress?.fraction).frame(width: 100)
                     if let fraction = builtinWhisper.progress?.fraction {
@@ -437,7 +437,7 @@ struct SettingsView: View {
                 }
             }
         case .ready:
-            LabeledContent("Local model") {
+            LabeledContent("Model") {
                 HStack(spacing: 8) {
                     Label(transcriptionWhisperModel.name, systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
@@ -460,7 +460,7 @@ struct SettingsView: View {
                 }
             }
         case let .failed(message):
-            LabeledContent("Local model") {
+            LabeledContent("Model") {
                 Button("Try Download Again") { builtinWhisper.download(transcriptionWhisperModel) }
                     .disabled(builtinWhisper.hasActiveDownload)
             }
@@ -473,22 +473,26 @@ struct SettingsView: View {
         Toggle("Object detection", isOn: builtinObjectDetectionBinding)
             .disabled(!builtinVision.isReady(selectedBuiltinVisionModel))
 
-        Picker("Detector", selection: builtinVisionModelBinding) {
+        Picker("Size", selection: builtinVisionModelBinding) {
             ForEach(BuiltinVisionModel.allCases) { visionModel in
-                Text("\(visionModel.name) — \(visionModel.summary)").tag(visionModel)
+                Text(visionModel.sizeName).tag(visionModel)
             }
         }
+        .pickerStyle(.segmented)
         .disabled(builtinVision.hasActiveDownload)
+        Text("\(selectedBuiltinVisionModel.name) · \(selectedBuiltinVisionModel.downloadSize) download. \(selectedBuiltinVisionModel.detail)")
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
 
         switch builtinVision.state(for: selectedBuiltinVisionModel) {
         case .notDownloaded:
-            LabeledContent("Local model") {
+            LabeledContent("Model") {
                 Button("Download \(selectedBuiltinVisionModel.name) · \(selectedBuiltinVisionModel.downloadSize)") {
                     builtinVision.download(selectedBuiltinVisionModel)
                 }
             }
         case .downloading:
-            LabeledContent("Local model") {
+            LabeledContent("Model") {
                 HStack(spacing: 8) {
                     ProgressView(value: builtinVision.downloadProgress).frame(width: 100)
                     if builtinVision.isCancellingDownload {
@@ -504,7 +508,7 @@ struct SettingsView: View {
                 }
             }
         case .ready:
-            LabeledContent("Local model") {
+            LabeledContent("Model") {
                 HStack(spacing: 8) {
                     Label(selectedBuiltinVisionModel.name, systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
@@ -516,14 +520,11 @@ struct SettingsView: View {
                 }
             }
         case .failed(let message):
-            LabeledContent("Local model") {
+            LabeledContent("Model") {
                 Button("Try Download Again") { builtinVision.download(selectedBuiltinVisionModel) }
             }
             Text(message).font(.caption).foregroundStyle(.red)
         }
-        Text(selectedBuiltinVisionModel.detail)
-            .font(.caption)
-            .foregroundStyle(.secondary)
         if selectedBuiltinVisionModel != .yoloV3Tiny {
             Text("RF-DETR by Roboflow · Apache 2.0")
                 .font(.caption)
@@ -538,7 +539,7 @@ struct SettingsView: View {
     private var builtinTranslationControls: some View {
         switch builtinTranslation.state {
         case .notDownloaded:
-            LabeledContent("Local model") {
+            LabeledContent("Model") {
                 Button("Download \(BuiltinTranslationModelController.modelName) · \(BuiltinTranslationModelController.downloadSize)") {
                     builtinTranslation.download()
                 }
@@ -547,7 +548,7 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         case .downloading:
-            LabeledContent("Local model") {
+            LabeledContent("Model") {
                 HStack(spacing: 8) {
                     ProgressView(value: builtinTranslation.progress?.fraction).frame(width: 100)
                     if let fraction = builtinTranslation.progress?.fraction {
@@ -558,7 +559,7 @@ struct SettingsView: View {
                 }
             }
         case .ready:
-            LabeledContent("Local model") {
+            LabeledContent("Model") {
                 HStack(spacing: 8) {
                     Label(BuiltinTranslationModelController.modelName, systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
@@ -570,7 +571,7 @@ struct SettingsView: View {
                 }
             }
         case .failed(let message):
-            LabeledContent("Local model") {
+            LabeledContent("Model") {
                 Button("Try Download Again") { builtinTranslation.download() }
             }
             Text(message).font(.caption).foregroundStyle(.red)
@@ -809,7 +810,7 @@ struct SettingsView: View {
                 profile.overlays.enabled = true
                 profile.overlays.showTranscript = true
             }
-            transcriptionMessage = configuration.validationMessage ?? "Local Whisper transcription enabled."
+            transcriptionMessage = configuration.validationMessage ?? "Whisper transcription enabled."
             return
         }
         let model = transcriptionModel.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1192,7 +1193,7 @@ struct SettingsView: View {
             descriptions.append("Gesture recognition processes video frames in app memory. Frames are not sent to an external service.")
         }
         if transcriptionEnabled, configuration.configuration.pipeline.conversation.transcriptionProvider == .whisper {
-            descriptions.append("Local Whisper transcribes microphone audio in app memory. Audio is not sent to a transcription service.")
+            descriptions.append("Whisper transcribes microphone audio in app memory. Audio is not sent to a transcription service.")
         }
         if translationEnabled {
             descriptions.append("Built-in translation processes finalized transcript text in app memory. Text is not sent to an external service.")

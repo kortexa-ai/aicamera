@@ -161,7 +161,8 @@ final class OverlayRenderer {
             drawLabel("AI: \(response)", at: CGPoint(x: 14, y: 52), accent: accent, context: context, maximumWidth: width - 28)
         }
         if configuration.showTranscript, let transcript = snapshot.transcript?.text, !transcript.isEmpty {
-            drawLabel(transcript, at: CGPoint(x: 14, y: height - 48), accent: accent, context: context, maximumWidth: width - 28)
+            drawLabel(transcript, at: CGPoint(x: width / 2, y: height - 18), accent: accent,
+                      context: context, maximumWidth: width - 28, bottomCentered: true)
         }
         context.restoreGState()
     }
@@ -171,10 +172,12 @@ final class OverlayRenderer {
         at point: CGPoint,
         accent: NSColor,
         context: CGContext,
-        maximumWidth: CGFloat = 520
+        maximumWidth: CGFloat = 520,
+        bottomCentered: Bool = false
     ) {
         let style = NSMutableParagraphStyle()
         style.lineBreakMode = .byTruncatingTail
+        if bottomCentered { style.alignment = .center }
         let attributed = NSAttributedString(
             string: text,
             attributes: [
@@ -187,7 +190,12 @@ final class OverlayRenderer {
             with: CGSize(width: maximumWidth - 16, height: 80),
             options: [.usesLineFragmentOrigin, .usesFontLeading]
         ).size
-        let background = CGRect(x: point.x, y: point.y, width: min(maximumWidth, textSize.width + 16), height: textSize.height + 10)
+        let labelWidth = min(maximumWidth, textSize.width + 16)
+        let labelHeight = textSize.height + 10
+        let origin = bottomCentered
+            ? CGPoint(x: point.x - labelWidth / 2, y: point.y - labelHeight)
+            : point
+        let background = CGRect(origin: origin, size: CGSize(width: labelWidth, height: labelHeight))
         context.setFillColor(NSColor.black.withAlphaComponent(0.68).cgColor)
         context.fill(background)
         context.setFillColor(accent.cgColor)

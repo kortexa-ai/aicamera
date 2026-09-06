@@ -81,7 +81,7 @@ actor PipelineCoordinator {
 
     func started() async {
         guard isRunning else { return }
-        await scene.setStatus("AI Camera proxy live · \(configuration.privacy.networkMode.rawValue)")
+        await scene.setStatus("AI Camera")
         await publish()
         guard isRunning else { return }
         expiryTask?.cancel()
