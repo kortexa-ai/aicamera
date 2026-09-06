@@ -56,6 +56,10 @@ Codex uses a separate login owned by AI Camera, with refresh and sign-out contro
 off Conversation when that login is active. See [authentication boundaries](codex-login.md).
 Realtime access and subscription coverage depend on the account; the app does not promise that
 Realtime audio usage is included in a subscription.
+The Codex login description includes a yellow **Use at your own risk** warning: Realtime works
+with this login in our testing, but we have not found public confirmation from OpenAI that this
+use is approved, and we do not know how OpenAI may respond. Observed access does not establish
+approval or future availability.
 
 **Test Connection** checks the saved credential and selected model without acquiring the microphone
 or generating a spoken response. **Agent** in the menu toolbar starts a conversation using the selected

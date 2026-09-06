@@ -1,5 +1,17 @@
 # Validation record
 
+## Build 52: Codex login approval warning
+
+- The Codex login description now shows a yellow, fully wrapped “Use at your own risk” warning.
+  It distinguishes observed Realtime access from unconfirmed OpenAI approval and states that
+  OpenAI's response is unknown. The API-key description and authentication behavior are unchanged.
+- Full local validation passes: 182 Swift tests, rendered-installer metadata checks, unsigned
+  app/framework/extension/driver builds, plist/entitlement checks, and the HAL harness.
+- Signed installed Settings inspection confirms the complete yellow warning is visible without
+  clipping. Protected installation and strict source/installed signature verification pass;
+  the host and generation marker report 52. Camera extension 44 has the same CodeDirectory hash
+  and registration roster as before the host updates; the embedded audio driver remains 12.
+
 ## Build 51: quick controls and a simpler desktop UI
 
 - Full local validation passes: 182 Swift tests, twenty rendered-installer metadata cases,

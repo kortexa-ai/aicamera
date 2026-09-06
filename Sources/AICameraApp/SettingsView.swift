@@ -352,6 +352,10 @@ struct SettingsView: View {
         if let message = codexAuth.message { Text(message).font(.caption).foregroundStyle(.secondary) }
         Text("Uses the installed Codex CLI with a separate login for AI Camera. Realtime access depends on your account; subscription coverage of this audio usage is not verified.")
             .font(.caption).foregroundStyle(.secondary)
+        Text("Use at your own risk. OpenAI Realtime works with Codex login in our testing, but we haven’t found public confirmation from OpenAI that this use is approved. We don’t know how OpenAI may respond.")
+            .font(.caption)
+            .foregroundStyle(.yellow)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var transcriptionSettings: some View {
