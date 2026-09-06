@@ -49,6 +49,9 @@ Implementation and acceptance priorities:
 - [x] Complete full validation and signed Release host installation. Virtual-camera activation
   and QuickTime device acceptance passed after the user completed the Media Extension update.
   Future system-component changes still require explicit operator action.
+- [x] Version the camera extension independently of host UI/AI changes. Preserve signed identity,
+  protected replacement/rollback, and host-generation checks while validating each component version
+  independently. An unchanged enabled extension must remain usable across a host-only update.
 
 ## Current status
 

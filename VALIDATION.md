@@ -1,5 +1,12 @@
 # Validation record
 
+## Build 45: host updates preserve the enabled camera extension
+
+- All 175 Swift tests and full build/script/metadata/HAL validation pass. Twenty additional temporary-plist cases execute the actual rendered installer metadata guards, including different valid host/component versions and rejection of missing, malformed, or altered versions. The camera target must declare both its own build and marketing version.
+- Protected installation upgraded the host from 44 to 45 while preserving camera extension 0.1.0/44. Source and installed host strict nested signatures pass. Both host bundles and the protected host marker report 45; their embedded camera extensions report 44.
+- The embedded camera extension's CodeDirectory hash and Info.plist hash match the pre-update bundle. All AI Camera system-extension registration rows, including the enabled 44 row, are unchanged after host installation. No extension activation/deactivation/update, driver installation, or authorization prompt was requested.
+- Installed menu inspection shows Camera Ready and Microphone Ready, with no camera Update action. QuickTime New Movie Recording selected AI Camera and AI Camera Microphone; the host served both external lanes with Camera Ready and no extension replacement. The temporary preview was closed without recording and the agent stopped; the host is unmuted and idle. Real extension-code or protocol updates still require advancing its component version and separate operator acceptance; signing does not bypass macOS replacement approval.
+
 ## Build 44: closed-fist mute takes precedence over pinch
 
 - The new regressions reproduce the previous failure: 72 compact closed-fist variants with thumb–index proximity (three thumb offsets, four rotations, three scales, mirrored/unmirrored hands) classify as pinch, and the held victory → fist sequence emits no mute. All these checks pass after compact four-finger flexion is tested before thumb–index contact.

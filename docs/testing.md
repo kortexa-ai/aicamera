@@ -583,3 +583,22 @@ fills, then expect Connecting â†’ Listening. Ask a question and check Thinking â
 Use the menu error when the orb says Agent unavailable. Hold a fist and verify Muted, cleared
 captions, and silenced AI Camera Microphone. Explicitly Unmute in the menu before the next start.
 Do not press QuickTime Record or save captured media for this check.
+
+
+## Independent camera-extension versions
+
+`scripts/validate.sh` executes `validate-install-versions.py` against the rendered protected installer.
+Twenty temporary-plist cases exercise the actual source, staged, and final metadata guards: different
+valid host/component versions, same-version compatibility, invalid/missing versions, altered staged
+or final versions, and incorrect identities. Only bounded read/check fragments execute; no signing,
+privileged transaction, process shutdown, app replacement, or system-component request occurs.
+The check also requires explicit camera-extension build and marketing settings in `project.yml`.
+
+For a signed host-only update, record the enabled camera extension and its version before installing.
+Verify source and installed host signatures/versions and the protected host-generation marker.
+Separately verify the embedded extension version, signature, and CodeDirectory hash. The host version
+may advance while the camera extension stays unchanged. The enabled extension registration must
+remain unchanged and the menu must show Camera Ready, without an extension Update action. Confirm
+that an independent client can still select the virtual camera. Do not activate/deactivate a component
+as part of this check. A real component change still requires a component build-version increment
+and separate operator-approved replacement acceptance.

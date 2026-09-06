@@ -27,6 +27,7 @@ osascript "$VALIDATION_TMP/install-app-render.applescript" \
     'ai.kortexa.aicamera.camera-extension' \
     > "$VALIDATION_TMP/install-app-root-command.sh"
 /bin/sh -n "$VALIDATION_TMP/install-app-root-command.sh"
+python3 scripts/validate-install-versions.py "$VALIDATION_TMP/install-app-root-command.sh"
 grep -Fq 'certificate leaf[subject.OU] = ${dq}${team}${dq}' \
     "$VALIDATION_TMP/install-app-root-command.sh"
 grep -Fq 'verify_identity "$dst" "$installed_ext"' \

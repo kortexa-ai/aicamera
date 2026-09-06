@@ -23,7 +23,7 @@ settings:
     SWIFT_VERSION: "5.10"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "44"
+    CURRENT_PROJECT_VERSION: "45"
     CODE_SIGN_STYLE: Automatic
     CLANG_ENABLE_MODULES: true
   configs:
@@ -98,6 +98,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.kortexa.aicamera.camera-extension
         PRODUCT_NAME: ai.kortexa.aicamera.camera-extension
+        # Independent of the host: bump only when this component or its shared protocol changes.
+        CURRENT_PROJECT_VERSION: "44"
+        MARKETING_VERSION: "0.1.0"
         INFOPLIST_FILE: Resources/CameraExtension/Info.plist
         CODE_SIGN_ENTITLEMENTS: Resources/CameraExtension/AICameraCameraExtension.entitlements
         ENABLE_HARDENED_RUNTIME: true
