@@ -23,12 +23,13 @@ tools whose capabilities are available in the current session.
 
 The current host implementation provides `save_note`, `list_notes`, `delete_note`, `show_card`,
 `clear_cards`, `render_overlay`, `clear_overlay`, `wait_for_user`, `sleep_agent`, `get_camera_state`,
-`set_translation`, `set_camera_layout`, and the opt-in `get_weather_forecast`. Notes require enabled Tools; visual tools also require an active camera,
+`set_translation`, `set_camera_layout`, `calculate`, and the opt-in `get_weather_forecast`. Notes and
+calculation require enabled Tools; visual tools also require an active camera,
 and translation control requires configured caption translation. Independent input pause and
 one-question mode are available on `main`. U.S. weather forecasts use the public NWS service with
 explicit approximate-location permission; see [weather forecasts](weather-forecasts.md). Market
 quotes and worldwide weather, spoken translation,
-external image/slide assets, timers, calculation, and face anchors below remain planned capabilities.
+external image/slide assets, timers, and face anchors below remain planned capabilities.
 The current presentation mode uses the existing generated three.js scene with a bounded camera inset.
 
 | Job | Tool family | Example |

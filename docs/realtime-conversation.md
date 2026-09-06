@@ -134,6 +134,25 @@ The opt-in `get_weather_forecast` tool provides sourced U.S. NWS forecasts; see
 are not available through this provider. Instructions
 require the agent to say when it cannot verify current facts and to report tool success honestly.
 
+## Local arithmetic
+
+With Tools enabled, `calculate` checks a decimal expression before the agent states or displays a
+computed result. It accepts numbers, parentheses, and `+`, `-`, `*`, `/`. For a percentage, use an
+explicit expression such as `200 * 15 / 100`. The tool does not evaluate code, access files, look
+up prices, or infer units. It works without a camera; displaying a result still requires one.
+
+The parser limits input to 512 UTF-8 bytes, 64 operations, 16 nesting levels, and 12 fractional
+digits per literal. Magnitude cannot exceed 10^24 at any step. Each operation rounds to at most
+12 decimal places and the result reports whether rounding occurred. Division by zero, invalid
+syntax, excessive precision, and out-of-range intermediate values produce a clear error. The
+response retains the expression and a decimal string instead of converting the result to a
+binary floating-point number.
+
+This verifies arithmetic, not its assumptions. The agent must preserve the user's units, explain
+any material rounding, and use a current source when an input depends on a price or exchange
+rate. For example, `(19.99 - 17.50) * 12` gives `29.88`; a card can label that as an annual difference
+only when the two provided prices are monthly and use the same currency.
+
 ## Live caption translation controls
 
 With Tools enabled, `get_camera_state` reports current translation configuration/on-off state,

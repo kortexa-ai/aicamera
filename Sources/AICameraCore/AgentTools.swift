@@ -7,11 +7,14 @@ public struct AgentToolCapabilities: Equatable, Sendable {
     public var cameraState: Bool
     public var translation: Bool
     public var weather: Bool
+    public var calculation: Bool
     public init(visuals: Bool = false, notes: Bool = false, conversationControls: Bool = false,
-                cameraState: Bool = false, translation: Bool = false, weather: Bool = false) {
+                cameraState: Bool = false, translation: Bool = false, weather: Bool = false,
+                calculation: Bool = false) {
         self.visuals = visuals; self.notes = notes; self.conversationControls = conversationControls
         self.cameraState = cameraState; self.translation = translation
         self.weather = weather
+        self.calculation = calculation
     }
 }
 
@@ -29,6 +32,7 @@ public enum AgentToolCommand: Equatable, Sendable {
     case cameraInset(AgentCameraInsetRequest)
     case resetView
     case weatherForecast(AgentWeatherRequest)
+    case calculate(String)
 
     public static func parse(name: String, arguments: String, script: ScriptOverlayConfiguration) -> Self? {
         if let overlay = RealtimeOverlayCommand.parse(name: name, arguments: arguments, configuration: script) {
@@ -38,6 +42,11 @@ public enum AgentToolCommand: Equatable, Sendable {
               let value = try? JSONDecoder().decode(JSONValue.self, from: data),
               case let .object(object) = value else { return nil }
         switch name {
+        case "calculate":
+            guard Set(object.keys) == ["expression"], let expression = object["expression"]?.stringValue,
+                  !expression.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  expression.utf8.count <= AgentCalculation.maximumExpressionBytes else { return nil }
+            return .calculate(expression)
         case "get_weather_forecast":
             guard Set(object.keys).isSubset(of: ["latitude", "longitude", "units"]),
                   let latitude = object["latitude"]?.numberValue,
@@ -192,6 +201,11 @@ public enum AgentToolCatalog {
                 "units": ["type": "string", "enum": AgentWeatherUnits.allCases.map(\.rawValue), "description": "Temperature units; default celsius."]
             ], required: ["latitude", "longitude"]))
         }
+        if capabilities.calculation {
+            result.append(tool("calculate", "Evaluate bounded local decimal arithmetic using numbers, parentheses, +, -, *, and /. Up to 512 UTF-8 bytes, 64 operations, 16 nesting levels, 12 fractional digits per literal, and magnitude at most 10^24 at every step. Each operation rounds to at most 12 decimal places; the result reports rounding. No variables, exponent notation, functions, percent operator, unit conversions, or current-data lookup.", properties: [
+                "expression": string("Arithmetic only, e.g. (19.99 * 12) - (17.50 * 12), or 200 * 15 / 100 for 15 percent of 200.")
+            ], required: ["expression"]))
+        }
         if capabilities.cameraState {
             result.append(tool("get_camera_state", "Read AI Camera's current translation, agent-listening, and privacy-mute state. Does not read saved notes, credentials, endpoints, or media."))
         }
@@ -253,6 +267,9 @@ public enum AgentToolCatalog {
         }
         if capabilities.weather {
             text += "\nUse get_weather_forecast for U.S. forecast requests, then show a concise sourced card if visual tools are available. Ask which place when it is not explicit. Use approximate coordinates of a public place, never device location or an address inferred from notes. Check the returned nearCity/state against the requested place; if they do not match, clarify rather than claim the forecast is for the requested city. Label predictions as forecasts, preserve temperature units and period, and include NWS plus the issuance time on a card. The service does not provide live stock prices, current weather observations, or worldwide coverage. A failed lookup is not permission to invent data."
+        }
+        if capabilities.calculation {
+            text += "\nUse calculate to check arithmetic before stating or displaying a computed comparison. Keep units outside the expression and label the result with the user's units and assumptions. Use a real lookup for changing inputs such as market prices or exchange rates; calculation does not verify them. Percentages use division by 100. Preserve the tool's rounding qualification, and do not claim precision beyond the inputs."
         }
         if capabilities.cameraState {
             text += "\nUse get_camera_state when the current feature state matters. Never infer that a configured feature is currently on."

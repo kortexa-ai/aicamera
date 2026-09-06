@@ -46,6 +46,8 @@ Implementation and acceptance priorities:
 - [x] Add opt-in U.S. weather forecasts with approximate-location permission, bounded public HTTP,
   source/issuance/units, and lookup-to-card continuation. Worldwide weather and market data still
   need provider decisions; see [#59](https://github.com/kortexa-ai/aicamera/issues/59).
+- [x] Add bounded local decimal calculation so the agent can check arithmetic before showing a
+  comparison. Report rounding and retain units/assumptions; calculation does not verify live facts.
 - [ ] Add further sourced information providers, spoken translation/external presentation assets, and
   face-tracked graphics in the staged companion roadmap. Validate new listening/tool interactions
   with live speech after synthetic transport and native UI acceptance.

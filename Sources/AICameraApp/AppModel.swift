@@ -1166,7 +1166,8 @@ final class AppModel: ObservableObject {
                         notes: profile.overlays.script.enabled, conversationControls: true,
                         cameraState: profile.overlays.script.enabled,
                         translation: profile.overlays.script.enabled && self.translationConfigured,
-                        weather: AgentWeatherPolicy.isAvailable(in: profile)
+                        weather: AgentWeatherPolicy.isAvailable(in: profile),
+                        calculation: profile.overlays.script.enabled
                     )
                 )
                 try await session.connect(session: request)
@@ -1494,6 +1495,10 @@ final class AppModel: ObservableObject {
             return ["ok": false, "error": "Unknown tool or invalid arguments."]
         }
         switch command {
+        case let .calculate(expression):
+            guard configuration.enabled else { return ["ok": false, "error": "Tools are disabled in Settings."] }
+            do { return try AgentCalculation.evaluate(expression).toolResult }
+            catch { return ["ok": false, "error": error.localizedDescription] }
         case let .weatherForecast(request):
             let profile = configurationController.configuration
             guard AgentWeatherPolicy.isAvailable(in: profile) else {

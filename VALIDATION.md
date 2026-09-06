@@ -822,3 +822,14 @@ or location access. Native forecast cards rendered and were visually reviewed at
 fixture passed lookup → card → response continuation. These checks did not use a live model,
 record or capture media, change installed settings, or replace the published/installed release.
 Spoken tool selection and live-call acceptance remain separate checks.
+
+## Local arithmetic for visual answers
+
+Full local validation passes 226 Swift tests plus the native weather/card/Realtime/caption,
+installer, and HAL fixtures. Calculation tests cover decimal-price comparisons, precedence,
+parentheses, signed values, percentages expressed arithmetically, division by zero, intermediate
+range limits, literal/input/nesting/operation bounds, and strict tool capability/argument gating.
+Repeating fractions and tiny values report per-operation rounding to 12 decimal places. A
+calculation → existing information card → response continuation fixture preserves the input
+assumptions. No code-evaluation engine, network, media capture, account, installed settings, or
+system-component change was involved. Actual spoken tool selection remains provider acceptance.
