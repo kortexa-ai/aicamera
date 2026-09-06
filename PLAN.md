@@ -15,9 +15,10 @@ are historical roadmap context.
 
 Implementation and acceptance priorities:
 
-- [x] Make local Talk audible through speakers/headphones, use the selected physical microphone,
-  close each one-shot gate on VAD/Stop/deadlines, release Talk-owned capture, and prevent concurrent
-  legacy responses. Keep network, translation, and tool work off media callbacks.
+- [x] Make explicit agent activation available through held victory or the menu while a call is
+  active. Keep one server conversation across turns, close input during replies, and send replies
+  to local speakers/headphones plus the virtual microphone when selected by a call. Fist engages
+  privacy mute; manual Unmute remains separate. Keep inference/network work off media callbacks.
 - [ ] Complete API-key Realtime acceptance: silent connection/response probe, one utterance,
   transcript/translation, overlay tools, cancellation, error recovery, and a second turn.
   Installed-app connection, retry to Listening, no-speech capture release, and preservation of
@@ -60,10 +61,12 @@ Implementation and acceptance priorities:
 - Native-model shutdown now closes admission, cancels pipeline work, waits for cached and still-live
   replaced Whisper/HY-MT2 clients to release native contexts, then permits AppKit termination.
   Public-fixture checks cover loaded models and cancellation during loading with retained owners.
-- Next: deliberate Realtime activation/mute using held victory
-  and fist gestures with a manual fallback, followed by live overlay tools and multilingual captions.
-  Activation must work during external camera/microphone demand and remain separate from enabling
-  Realtime configuration. Synthetic event/media validation is the default acceptance path.
+- Realtime now has deliberate held-victory/menu activation and held-fist privacy mute. Enabling
+  its configuration stays separate from activation. Input is closed during replies and reopens
+  after both reply outputs drain; the same session retains conversation context. Call demand is
+  independent of agent demand. A change of microphone routing stops the agent for an explicit restart.
+- Next: live overlay tools, then multilingual captions. Synthetic event/media validation remains
+  the default acceptance path; live gesture/provider/call acceptance is a separate check.
 
 - Build 37 aligns Whisper and translation model controls, adds hardware-gated Whisper Large v3,
   and wraps camera extension recovery guidance. An enabled-but-unpublished camera no longer
@@ -152,7 +155,7 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 - [x] Restrict normal Settings choices to models and media services verified as running on Smarty; store the Kortexa API credential beside those AI controls in Keychain and keep maintenance credential-free.
 - [x] Restore a mutually exclusive voice-pipeline selector for separate ASR/agent/TTS, canonical OpenAI Realtime, or a custom OpenAI-compatible Realtime endpoint.
 - [ ] Add the bounded WebRTC conversation session described in `docs/realtime-conversation.md`: canonical OpenAI Realtime, self-hosted OpenAI-compatible Realtime, and an explicitly experimental ChatGPT/Codex subscription provider; keep separate ASR, agent, and TTS stages as the selectable fallback.
-- [ ] Add one-shot **Talk** activation with server VAD and **Stop**: connect with microphone egress closed, transmit only during an explicitly armed utterance, close the gate on VAD stop/timeout/cancellation, and route decoded remote PCM through the existing bounded virtual-microphone mixer.
+- [x] Add explicit agent start/stop with server VAD and bounded utterances: connect with microphone egress closed, admit audio only while armed, pause during replies, and route bounded PCM to the call and local output.
 - [ ] Add Realtime Settings for provider, endpoint, model, voice, and Keychain-backed credentials or OAuth; profiles store secret references only. Test the standard protocol against canonical OpenAI and `api.server`.
 - [x] Normalize public Realtime function calls into one bounded local `render_overlay`/`clear_overlay`
   executor. API-key and separate Codex login use this same public contract; private delegation is

@@ -69,6 +69,46 @@ final class RealtimeSessionPolicyTests: XCTestCase {
         XCTAssertEqual(gate.expire(at: 123), .response)
     }
 
+    func testContinuousConversationWaitsWithoutIdleTimeoutButBoundsActualSpeech() {
+        var gate = RealtimeTurnGate()
+        XCTAssertTrue(gate.arm(at: 10, continuous: true))
+        XCTAssertNil(gate.expire(at: 600))
+        XCTAssertTrue(gate.isOpen)
+        gate.speechStarted(at: 600)
+        gate.speechStarted(at: 610)
+        XCTAssertEqual(gate.deadline, 630)
+        XCTAssertEqual(gate.expire(at: 630), .utterance)
+    }
+
+    func testResponseCompletionKeepsInputClosedUntilPlaybackExplicitlyRearms() {
+        var gate = RealtimeTurnGate()
+        XCTAssertTrue(gate.arm(at: 1, continuous: true))
+        gate.speechStarted(at: 2)
+        gate.speechStopped(at: 3)
+        XCTAssertFalse(gate.arm(at: 4, continuous: true))
+        XCTAssertTrue(gate.responseCompleted())
+        XCTAssertFalse(gate.responseCompleted())
+        XCTAssertEqual(gate.phase, .awaitingPlayback)
+        XCTAssertFalse(gate.isOpen)
+        XCTAssertNil(gate.expire(at: 500))
+        XCTAssertTrue(gate.arm(at: 501, continuous: true))
+        XCTAssertTrue(gate.isOpen)
+        gate.close()
+        XCTAssertFalse(gate.arm(at: 502, continuous: true))
+        XCTAssertFalse(gate.continueResponse(at: 502))
+    }
+
+    func testToolContinuationHasItsOwnDeadlineAndCannotOverlapAResponse() {
+        var gate = RealtimeTurnGate()
+        XCTAssertTrue(gate.continueResponse(at: 1))
+        XCTAssertFalse(gate.continueResponse(at: 2))
+        XCTAssertTrue(gate.responseCompleted())
+        XCTAssertTrue(gate.continueResponse(at: 10))
+        XCTAssertEqual(gate.deadline, 130)
+        XCTAssertFalse(gate.isOpen)
+        XCTAssertEqual(gate.expire(at: 130), .response)
+    }
+
     func testOrdinaryConversationDeclaresVADAndInputTranscriptionWithoutTools() throws {
         let request = RealtimeSessionConfiguration.request(
             endpoint: endpoint, conversation: .init(), profile: .default, toolsAvailable: false

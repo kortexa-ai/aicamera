@@ -14,14 +14,25 @@ public struct MediaDemandDecision: Equatable, Sendable {
         cameraAuthorized: Bool,
         microphoneRequested: Bool,
         microphoneAvailable: Bool,
-        microphoneAuthorized: Bool
+        microphoneAuthorized: Bool,
+        agentMicrophoneRequested: Bool = false,
+        microphoneMuted: Bool = false
     ) -> Self {
         Self(
             cameraShouldRun: configurationUsable
                 && cameraRequested && cameraAvailable && cameraAuthorized,
             microphoneShouldRun: configurationUsable
-                && microphoneRequested && microphoneAvailable && microphoneAuthorized
+                && !microphoneMuted && (microphoneRequested || agentMicrophoneRequested)
+                && microphoneAvailable && microphoneAuthorized
         )
+    }
+    /// Switching between local replies and call publication needs a fresh audio graph.
+    /// A live agent must stop before that switch; a later explicit activation uses the new graph.
+    public static func agentRequiresRouteRestart(
+        previousPublication: Bool?, clientRequested: Bool, agentRequested: Bool
+    ) -> Bool {
+        guard agentRequested, let previousPublication else { return false }
+        return previousPublication != clientRequested
     }
 }
 

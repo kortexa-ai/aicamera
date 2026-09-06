@@ -74,6 +74,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
     private var latestInputLevel: Float = 0
     private var pendingMicrophoneBuffers = 0
     private var pendingSpeechBuffers = 0
+    private var speechMonitor: SpeechOutputMonitor?
     private var speechPCMStaging = Data()
     private var speechPCMStreamSampleRate: Int?
     private var speechPCMStreamFinishing = false
@@ -195,12 +196,12 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         }
     }
 
-    /// Local Talk replies go to the selected system output, without microphone monitoring.
+    /// Agent replies reach local speakers/headphones, including while the main graph serves a call.
     /// Ordinary microphone testing does not start an output engine.
     func enableLocalSpeechPlayback() throws {
         try captureControlQueue.sync {
             guard started else { throw AudioPipelineError(message: "Start the microphone first.") }
-            if outputEngine.isRunning { return }
+
             var address = AudioObjectPropertyAddress(
                 mSelector: kAudioHardwarePropertyDefaultOutputDevice,
                 mScope: kAudioObjectPropertyScopeGlobal,
@@ -213,7 +214,16 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
                   !DeviceDiscovery.isDuplexVirtualAudioDevice(deviceID) else {
                 throw AudioPipelineError(message: "Choose speakers or headphones as the macOS sound output for Talk.")
             }
-            try configureSpeechOutput(deviceID: deviceID, includeMicrophone: false)
+            if outputEngine.isRunning {
+                let needsMonitor = processingQueue.sync { publishToVirtualMicrophone && speechMonitor == nil }
+                if needsMonitor {
+                    let monitor = SpeechOutputMonitor(format: mixFormat, gain: Float(configuration.speechGain))
+                    try monitor.start(deviceID: deviceID)
+                    processingQueue.sync { speechMonitor = monitor }
+                }
+            } else {
+                try configureSpeechOutput(deviceID: deviceID, includeMicrophone: false)
+            }
         }
     }
 
@@ -231,6 +241,10 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
 
     func disableLocalSpeechPlayback() {
         captureControlQueue.sync {
+            processingQueue.sync {
+                speechMonitor?.stop()
+                speechMonitor = nil
+            }
             let isLocalOutput = processingQueue.sync { !publishToVirtualMicrophone && speechOutputEnabled }
             guard isLocalOutput else { return }
             processingQueue.sync {
@@ -266,6 +280,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
     func silenceForPrivacy() {
         outputEngine.mainMixerNode.outputVolume = 0
         processingQueue.sync {
+            speechMonitor?.silence()
             asrPCM.removeAll(keepingCapacity: false)
             realtimeAudioHandler = nil
             resetSpeechPlayback(stopPlayer: true)
@@ -301,6 +316,8 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         captureCallbackQueue.sync {}
         processingQueue.sync {
             processingActive = false
+            speechMonitor?.stop()
+            speechMonitor = nil
             publishToVirtualMicrophone = false
             speechOutputEnabled = false
             smoothedInputLevel = 0
@@ -533,19 +550,30 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         }
         pendingSpeechBuffers += 1
         let generation = speechPlaybackGeneration
-        speechPlayer.scheduleBuffer(mixed, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-            self?.processingQueue.async { [weak self] in
-                guard let self, generation == self.speechPlaybackGeneration else { return }
-                self.pendingSpeechBuffers = max(0, self.pendingSpeechBuffers - 1)
-                if self.speechPCMStreamSampleRate != nil {
-                    self.drainSpeechPCM()
-                    self.admitPendingSpeechIngressIfPossible()
-                } else if self.pendingSpeechBuffers == 0 {
-                    self.activeSpeechID = nil
-                    let completion = self.speechPlaybackCompletion
-                    self.speechPlaybackCompletion = nil
-                    completion?(true)
-                }
+        let completionGroup = DispatchGroup()
+        completionGroup.enter()
+        if let speechMonitor {
+            completionGroup.enter()
+            guard speechMonitor.schedule(mixed, completion: { completionGroup.leave() }) else {
+                completionGroup.leave()
+                completionGroup.leave()
+                throw AudioPipelineError(message: "Local agent reply output stopped.")
+            }
+        }
+        speechPlayer.scheduleBuffer(mixed, completionCallbackType: .dataPlayedBack) { _ in
+            completionGroup.leave()
+        }
+        completionGroup.notify(queue: processingQueue) { [weak self] in
+            guard let self, generation == self.speechPlaybackGeneration else { return }
+            self.pendingSpeechBuffers = max(0, self.pendingSpeechBuffers - 1)
+            if self.speechPCMStreamSampleRate != nil {
+                self.drainSpeechPCM()
+                self.admitPendingSpeechIngressIfPossible()
+            } else if self.pendingSpeechBuffers == 0 {
+                self.activeSpeechID = nil
+                let completion = self.speechPlaybackCompletion
+                self.speechPlaybackCompletion = nil
+                completion?(true)
             }
         }
         if !speechPlayer.isPlaying { speechPlayer.play() }
@@ -553,7 +581,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
 
     private func resetSpeechPlayback(stopPlayer: Bool) {
         speechPlaybackGeneration &+= 1
-        if stopPlayer { speechPlayer.stop() }
+        if stopPlayer { speechPlayer.stop(); speechMonitor?.reset() }
         pendingSpeechBuffers = 0
         speechPCMStaging.removeAll(keepingCapacity: true)
         speechPCMStreamSampleRate = nil

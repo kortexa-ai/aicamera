@@ -1,5 +1,15 @@
 # Validation record
 
+## Build 42: deliberate Realtime activation and consecutive turns
+
+- Full `scripts/validate.sh` passes 168 Swift tests, the unsigned four-target build, metadata/script checks, and the HAL harness. The demand tests cover agent activation during camera-only demand, release of only agent-owned capture, preservation of call microphone demand, privacy mute with video retained, permission/configuration denial, and explicit restart on call routing changes.
+- The production WebSocket session passes an in-memory socket fixture: unarmed/pre-arm/old-turn PCM denial, consecutive turns without reconnecting, response/playback input gating, tool continuation, duplicate/late audio and tool rejection, and cancellation while connecting. Continuous silence does not expire an explicitly started agent; actual utterances and responses remain bounded.
+- The actual local reply monitor passes generated offline PCM/gain and mute/reset silence at 44.1/48 kHz. A 100 ms all-zero buffer on the current physical output verifies the hardware playback-drain callback without capturing input or requiring a listener. The host waits for call and local reply output completion before rearming.
+- Native caption privacy and the existing controlled caption scheduling/speaker/cancellation regressions pass after integration. Gesture tests cover dwell, confidence, stale frames, latching, and direct victory-to-fist transitions; capture timestamps also fence queued controls after a camera restart.
+- Installed UI inspection confirms Start agent, Agent muted while privacy mute is on, explicit Unmute restoring availability, and the gesture guidance in Settings. The app remains idle, with the agent off and the original unmuted preference restored. Physical gesture and live provider/call acceptance remain separate.
+- Protected signed Release source/installed strict nested signatures pass; both bundle versions and the protected installation marker report 42. No driver or camera extension changed.
+- One optional public Codex Realtime-to-overlay probe stopped at the guarded credential read: Keychain returned OSStatus -25293 (interaction required/unavailable to this helper). No login prompt, credential refresh, microphone capture, network session, or recorded media resulted. Live overlay/provider acceptance remains open.
+
 ## Build 40: orderly native-model shutdown
 
 - Full `scripts/validate.sh` passes 161 Swift tests, the unsigned four-target build, metadata/script checks, and the HAL harness.

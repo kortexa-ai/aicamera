@@ -30,6 +30,7 @@ actor PipelineCoordinator {
     private let scene = SceneState()
     private let privacyMute: PrivacyMuteState
     private let onGestureControl: @Sendable (GestureControlAction) -> Void
+    private let onGestureControlWithTimestamp: (@Sendable (GestureControlAction, TimeInterval) -> Void)?
     private var gestureControls = GestureControlGate()
     private let factory: AdapterFactory
     private let builtinDetectionClient: (any DetectionClient)?
@@ -66,6 +67,7 @@ actor PipelineCoordinator {
         secrets: any SecretResolver,
         privacyMute: PrivacyMuteState = PrivacyMuteState(),
         onGestureControl: @escaping @Sendable (GestureControlAction) -> Void = { _ in },
+        onGestureControlWithTimestamp: (@Sendable (GestureControlAction, TimeInterval) -> Void)? = nil,
         builtinDetectionClient: (any DetectionClient)? = nil,
         builtinTranslationClient: (any TranslationClient)? = nil,
         builtinTranscriptionClient: (any TranscriptionClient)? = nil,
@@ -78,6 +80,7 @@ actor PipelineCoordinator {
         self.configuration = configuration
         self.privacyMute = privacyMute
         self.onGestureControl = onGestureControl
+        self.onGestureControlWithTimestamp = onGestureControlWithTimestamp
         self.factory = AdapterFactory(
             secrets: secrets,
             privacy: PrivacyGate(configuration: configuration.privacy)
@@ -202,7 +205,8 @@ actor PipelineCoordinator {
     func submit(gestures: [GestureObservation], frameID: FrameID, capturedAt: TimeInterval = ProcessInfo.processInfo.systemUptime) async {
         guard isRunning else { return }
         if let action = gestureControls.observe(gestures, capturedAt: capturedAt, now: ProcessInfo.processInfo.systemUptime) {
-            onGestureControl(action)
+            if let onGestureControlWithTimestamp { onGestureControlWithTimestamp(action, capturedAt) }
+            else { onGestureControl(action) }
         }
         _ = await scene.applyGestures(gestures, frameID: frameID)
         await publish()

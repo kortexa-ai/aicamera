@@ -124,7 +124,7 @@ The harness covers startup, reload, hidden import, persistence, idempotence, exp
 Whisper relaunch, and preservation of invalid files. It links no credential resolver and never
 opens media or network devices. The user's actual settings file is not used.
 
-### OpenAI Realtime Talk (host only)
+### OpenAI Realtime agent (host only)
 
 Before listening acceptance, check conversion with a synthetic five-second tone. This uses the
 production PCM conversion helper and opens no audio device or media file:
@@ -151,27 +151,34 @@ speech-format or Realtime failure and cannot count as caption/tool acceptance. L
 defaults and volume unchanged, restore temporary in-app authentication selections, and stop both
 local capture tests when finished. Do not enable credential prompts to force a standalone probe.
 
-1. With both virtual devices idle, select a physical microphone in Settings, enable Conversation,
-   select OpenAI, and save the model/voice using the existing masked API key. Choose speakers or
-   headphones as the macOS output. No virtual-device installation or activation is required.
-2. Press **Talk — one utterance**. Confirm the input is the selected microphone and the state
-   passes from connecting to listening. Stay silent: after ten seconds of listening, the turn
-   must report no speech, restore Talk, and release the microphone if Talk started its test.
-3. Start another turn and say a short request. Confirm the transcript accumulates, listening
-   closes after the utterance, the reply is audible once with no microphone monitoring, and its
-   full final audio plays before Talk returns to idle. Do not record the utterance or output.
-4. Press Stop during connection, listening, and playback. Confirm prompt release and no late
-   audio, transcript, or tool side effects. Start another turn to verify recovery.
-5. Start **Test microphone** before Talk. Stop or finish Talk and confirm the existing microphone
-   test stays active. Then stop that test explicitly and confirm capture drains.
-6. Leave independent transcription and Translate enabled during Talk. Confirm no separate batch
-   ASR request starts during the turn or later uploads its partial audio window. Final captions
-   may translate without delaying speech, and stale translations must not reach a later turn.
-7. Enable Tools and start a local camera test. Request an overlay, then clear it. Confirm each
-   tool executes once, the continuation waits for all results, and the spoken result follows.
-   Stop the camera test and verify a later Talk cannot claim it rendered an overlay.
-8. Test a rejected model/credential and network loss. Confirm a bounded error, capture release,
-   and a usable retry. Never include secrets or captured media in logs or acceptance evidence.
+1. Select a physical microphone, enable Conversation, and save the existing model/voice and
+   credential configuration. Choose speakers or headphones as the macOS output. Enabling
+   Realtime alone must not activate its microphone egress.
+2. Press **Start agent**, or hold a victory sign for about one second with Gestures enabled and
+   the camera active. Confirm connecting then listening. The agent stays armed during silence;
+   an actual utterance has a 30-second limit and a server response has a 120-second limit.
+3. Say a short request. Input closes at VAD stop and remains closed while the reply plays.
+   The final audio must drain before listening resumes in the same conversation. A follow-up
+   must retain context. Do not record the utterance or output.
+4. Use **Stop agent** during connection, listening, and playback. Confirm no late audio or tool
+   side effects and that only agent-owned microphone demand is released. A live call or an
+   independently started microphone test must continue using its own media demand.
+5. Hold a fist to engage AI Camera's broader privacy mute: audio output stops, both caption
+   tracks/script overlay clear, and the agent stops. Victory must not unmute it. Use **Unmute**
+   explicitly before starting again. Repeated held poses must not retrigger; stale camera
+   results must not start an agent after capture restarts.
+6. Start the agent while a call already uses AI Camera. When the call selects AI Camera
+   Microphone, replies must reach that output and the local speakers/headphones once, with no
+   local microphone monitoring. Both reply outputs must finish before the next listening turn.
+   Changing whether a call uses the virtual microphone stops the agent while the graph rebuilds;
+   start it explicitly again after that routing change.
+7. Keep Transcription and Translate enabled. Realtime owns ASR during its session; stopping it
+   restores independent transcription with a fresh audio window. Caption translation must not
+   delay speech. Enable Tools and request an overlay and a clear; each call executes once and
+   the spoken continuation follows the tool results.
+8. Test failed credentials, connection cancellation, and network/output loss. Confirm a visible
+   error and usable retry. Stop or Mute must remain available. A stalled final playback is
+   bounded to 125 seconds. Never include secrets or captured media in acceptance evidence.
 
 Virtual-camera activation and device acceptance are a separate operator-authorized pass.
 
@@ -397,6 +404,7 @@ xcrun swiftc -parse-as-library -O \
   -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
   Sources/AICameraApp/PipelineCoordinator.swift \
   Sources/AICameraApp/AudioPipelineController.swift Sources/AICameraApp/PCMBufferConverter.swift \
+  Sources/AICameraApp/SpeechOutputMonitor.swift \
   Sources/AICameraApp/DeviceDiscovery.swift Sources/AICameraApp/AudioDriverManager.swift \
   Sources/AICameraShared/VirtualCameraConstants.swift Sources/AICameraShared/MediaDemandState.swift \
   Sources/AICameraApp/BuiltinTranslationClient.swift \
@@ -468,6 +476,7 @@ xcrun swiftc -parse-as-library -O \
   -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
   Sources/AICameraApp/PipelineCoordinator.swift \
   Sources/AICameraApp/AudioPipelineController.swift Sources/AICameraApp/PCMBufferConverter.swift \
+  Sources/AICameraApp/SpeechOutputMonitor.swift \
   Sources/AICameraApp/DeviceDiscovery.swift Sources/AICameraApp/AudioDriverManager.swift \
   Sources/AICameraShared/VirtualCameraConstants.swift Sources/AICameraShared/MediaDemandState.swift \
   scripts/validate-caption-privacy.swift -o /tmp/aicamera-caption-privacy-validation
@@ -516,3 +525,35 @@ Neither accepts a forced kill as success. An installed-host Quit/relaunch check 
 SwiftUI's delegate wiring. UI Quit is posted as an AppKit event so the calling Swift task can return
 before the [termination modal loop](https://developer.apple.com/documentation/appkit/nsapplication/terminatereply/terminatelater)
 waits for asynchronous cleanup.
+
+
+## Synthetic Realtime activation and reply output
+
+After full validation, exercise the production WebSocket session with an in-memory socket. The
+fixture preserves the public session URL validation and supplies synthetic credentials to the fake
+socket only; it makes no network or Keychain requests:
+
+```sh
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug -framework AICameraCore \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  Sources/AICameraApp/RealtimeConversationSession.swift scripts/validate-realtime-activation.swift \
+  -o /tmp/aicamera-realtime-activation-validation
+/tmp/aicamera-realtime-activation-validation
+xcrun swiftc -parse-as-library -O Sources/AICameraApp/SpeechOutputMonitor.swift \
+  scripts/validate-speech-monitor.swift -o /tmp/aicamera-speech-monitor-validation
+/tmp/aicamera-speech-monitor-validation
+```
+
+Demand tests cover call/agent ownership, privacy mute with video retained, required authorization,
+and explicit restart on microphone routing changes. Session checks cover closed/unarmed input,
+timestamps before each arm, multiple turns without
+reconnecting, input closure during response/playback, explicit rearming, tool continuation,
+duplicate/late audio and tool events, and cancellation while connecting. Core tests cover continuous
+idle, fixed utterance/response limits, playback gating, and closed-session denial. The monitor check
+renders generated PCM offline at 44.1/48 kHz for gain and mute/reset silence, then sends 100 ms of
+zeros to the current physical output to verify its real playback-completion callback. It does not
+capture input, record media, alter device defaults, or require a listener.
+
+The wire lifecycle follows [OpenAI's WebSocket audio guidance](https://developers.openai.com/api/docs/guides/realtime-conversations#handling-audio-with-websockets).
+These checks do not replace live provider/call acceptance of a gesture-started conversation.

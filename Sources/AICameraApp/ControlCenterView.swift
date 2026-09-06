@@ -95,8 +95,8 @@ struct ControlCenterView: View {
                 Button(action: model.toggleRealtimeConversation) {
                     Label(
                         model.realtimeConversationActive
-                            ? "Stop — \(model.realtimeConversationState.rawValue)"
-                            : "Talk — one utterance",
+                            ? "Stop agent — \(model.realtimeConversationState.rawValue)"
+                            : (model.privacyMuted ? "Agent muted" : "Start agent"),
                         systemImage: model.realtimeConversationActive ? "stop.fill" : "waveform.and.mic"
                     )
                     .frame(maxWidth: .infinity)
@@ -104,7 +104,7 @@ struct ControlCenterView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(model.realtimeConversationActive ? .red : .accentColor)
                 .disabled(!model.realtimeConversationActive && !model.canStartRealtimeConversation)
-                .help("Send microphone audio only for one VAD-bounded Realtime utterance.")
+                .help("Hold a victory sign to start the agent. It stays active between replies; hold a fist to mute audio and captions.")
             }
 
             #if DEBUG

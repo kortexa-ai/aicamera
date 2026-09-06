@@ -5,10 +5,15 @@ public protocol RealtimeConversationClient: AnyObject, Sendable {
     var events: AsyncStream<RealtimeSessionEvent> { get }
     func connect(session: [String: Any]) async throws
     func armOneShotAudio() async throws
+    func armConversationAudio() async throws
     func appendInputPCM(_ data: Data, capturedAt: TimeInterval)
     func completeFunctionCall(callID: String, output: String) async throws
     func requestContinuation(_ response: [String: Any]) async throws
     func close() async
+}
+
+public extension RealtimeConversationClient {
+    func armConversationAudio() async throws { try await armOneShotAudio() }
 }
 
 public struct RealtimeFunctionCall: Sendable, Equatable {
@@ -53,9 +58,9 @@ public enum RealtimeSessionFailure: String, LocalizedError, Sendable {
     case noSpeechTimeout, utteranceTimeout, responseTimeout
     public var errorDescription: String? {
         switch self {
-        case .noSpeechTimeout: return "No speech detected. Press Talk to try again."
-        case .utteranceTimeout: return "The 30-second listening limit was reached. Press Talk to try again."
-        case .responseTimeout: return "The response timed out. Press Talk to try again."
+        case .noSpeechTimeout: return "No speech detected. Start the agent to try again."
+        case .utteranceTimeout: return "The 30-second listening limit was reached. Start the agent to try again."
+        case .responseTimeout: return "The response timed out. Start the agent to try again."
         case .connectionFailed: return "OpenAI could not connect. Check the network, model, and credential."
         case .serverError: return "OpenAI could not complete this response. Check the model and credential, then try another turn."
         default: return "Realtime connection failed (\(rawValue))."
@@ -63,10 +68,10 @@ public enum RealtimeSessionFailure: String, LocalizedError, Sendable {
     }
 }
 
-/// Pure one-utterance policy. Only a new transport may start another turn.
+/// Bounded utterances within an explicitly armed conversation. Input stays closed during replies.
 /// The transport owns this value on its serial queue and uses monotonic time.
 public struct RealtimeTurnGate: Sendable {
-    public enum Phase: Equatable, Sendable { case ready, listening, responding, closed }
+    public enum Phase: Equatable, Sendable { case ready, listening, responding, awaitingPlayback, closed }
     public enum Timeout: Equatable, Sendable { case noSpeech, utterance, response }
     public private(set) var phase: Phase = .ready
     public private(set) var deadline: TimeInterval?
@@ -77,18 +82,20 @@ public struct RealtimeTurnGate: Sendable {
     public var isOpen: Bool { phase == .listening }
 
     @discardableResult
-    public mutating func arm(at now: TimeInterval) -> Bool {
-        guard phase == .ready, now.isFinite else { return false }
+    public mutating func arm(at now: TimeInterval, continuous: Bool = false) -> Bool {
+        guard (phase == .ready || phase == .awaitingPlayback), now.isFinite else { return false }
         phase = .listening
         armedAt = now
-        deadline = now + 10
-        timeout = .noSpeech
+        deadline = continuous ? nil : now + 10
+        timeout = continuous ? nil : .noSpeech
         return true
     }
 
-    public mutating func speechStarted() {
-        guard isOpen, let armedAt else { return }
-        deadline = armedAt + 30
+    public mutating func speechStarted(at now: TimeInterval? = nil) {
+        guard isOpen, timeout != .utterance, let armedAt else { return }
+        let start = now ?? armedAt
+        guard start.isFinite else { return }
+        deadline = start + 30
         timeout = .utterance
     }
 
@@ -97,6 +104,24 @@ public struct RealtimeTurnGate: Sendable {
         phase = .responding
         deadline = now + 120
         timeout = .response
+    }
+
+    @discardableResult
+    public mutating func responseCompleted() -> Bool {
+        guard phase == .responding else { return false }
+        phase = .awaitingPlayback
+        deadline = nil
+        timeout = nil
+        return true
+    }
+
+    @discardableResult
+    public mutating func continueResponse(at now: TimeInterval) -> Bool {
+        guard (phase == .ready || phase == .awaitingPlayback), now.isFinite else { return false }
+        phase = .responding
+        deadline = now + 120
+        timeout = .response
+        return true
     }
 
     @discardableResult

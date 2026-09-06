@@ -258,7 +258,7 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    Text("Realtime handles listening and spoken replies in one low-latency session. Raw camera frames are never sent by this configuration.")
+                    Text("Hold a victory sign with Gestures enabled, or use Start agent in the menu. The agent stays active between replies. Hold a fist to mute AI Camera audio and captions; unmute explicitly in the menu before starting again. Realtime sends microphone audio while listening. Raw camera frames are never sent by this configuration.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if let realtimeMessage {

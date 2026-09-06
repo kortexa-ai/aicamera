@@ -1,6 +1,23 @@
 import AICameraCore
 import Foundation
 
+/// Injected only by synthetic transport tests; production uses URLSession's WebSocket task.
+protocol RealtimeWebSocket: Sendable {
+    func resume()
+    func receive() async throws -> URLSessionWebSocketTask.Message
+    func send(_ message: URLSessionWebSocketTask.Message) async throws
+    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?)
+}
+extension URLSessionWebSocketTask: RealtimeWebSocket {}
+private extension RealtimeWebSocket {
+    func send(_ message: URLSessionWebSocketTask.Message, completion: @escaping @Sendable (Error?) -> Void) {
+        Task {
+            do { try await send(message); completion(nil) }
+            catch { completion(error) }
+        }
+    }
+}
+
 /// Public OpenAI Realtime over WebSocket. Capture and playback belong to the host.
 /// A serial queue owns the protocol; capture callbacks only admit bounded PCM copies.
 final class RealtimeConversationSession: NSObject, RealtimeConversationClient, @unchecked Sendable {
@@ -22,7 +39,8 @@ final class RealtimeConversationSession: NSObject, RealtimeConversationClient, @
     private let queue = DispatchQueue(label: "ai.kortexa.aicamera.realtime")
     private let captureSlots = DispatchSemaphore(value: 2)
     private var urlSession: URLSession?
-    private var socket: URLSessionWebSocketTask?
+    private var socket: (any RealtimeWebSocket)?
+    private let socketFactory: (@Sendable (URLRequest) -> any RealtimeWebSocket)?
     private var receiveTask: Task<Void, Never>?
     private var connecting: CheckedContinuation<Void, Error>?
     private var timeoutWork: DispatchWorkItem?
@@ -40,7 +58,8 @@ final class RealtimeConversationSession: NSObject, RealtimeConversationClient, @
     private var localTranscript = RealtimeTranscriptBuffer()
     private var remoteTranscript = RealtimeTranscriptBuffer()
 
-    init(signalingURL: URL, credential: HeaderCredential) {
+    init(signalingURL: URL, credential: HeaderCredential, socketFactory: (@Sendable (URLRequest) -> any RealtimeWebSocket)? = nil) {
+        self.socketFactory = socketFactory
         endpointURL = signalingURL
         self.credential = credential
         let stream = AsyncStream<Event>.makeStream(bufferingPolicy: .bufferingNewest(256))
@@ -93,13 +112,19 @@ final class RealtimeConversationSession: NSObject, RealtimeConversationClient, @
         sessionRequest = session
         var request = URLRequest(url: socketURL, timeoutInterval: 30)
         request.setValue(credential.value, forHTTPHeaderField: credential.field)
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpCookieStorage = nil
-        configuration.urlCache = nil
-        let urlSession = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-        self.urlSession = urlSession
-        let socket = urlSession.webSocketTask(with: request)
-        socket.maximumMessageSize = 256 * 1_024
+        let socket: any RealtimeWebSocket
+        if let socketFactory {
+            socket = socketFactory(request)
+        } else {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.httpCookieStorage = nil
+            configuration.urlCache = nil
+            let urlSession = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+            self.urlSession = urlSession
+            let task = urlSession.webSocketTask(with: request)
+            task.maximumMessageSize = 256 * 1_024
+            socket = task
+        }
         self.socket = socket
         socket.resume()
         scheduleDeadlineLocked(at: ProcessInfo.processInfo.systemUptime + 30)
@@ -123,13 +148,22 @@ final class RealtimeConversationSession: NSObject, RealtimeConversationClient, @
         }
     }
 
-    func armOneShotAudio() async throws {
+    func armOneShotAudio() async throws { try await armAudio(continuous: false) }
+    func armConversationAudio() async throws { try await armAudio(continuous: true) }
+
+    private func armAudio(continuous: Bool) async throws {
         try await onQueueThrowing {
             guard self.ready, !self.closed else { throw Failure.closed }
             let now = ProcessInfo.processInfo.systemUptime
-            guard self.gate.arm(at: now) else { throw Failure.alreadyStarted }
+            guard self.gate.arm(at: now, continuous: continuous) else { throw Failure.alreadyStarted }
             self.armedAt = now
-            self.scheduleDeadlineLocked(at: self.gate.deadline!)
+            self.calls.removeAll()
+            self.localTranscript = RealtimeTranscriptBuffer()
+            self.remoteTranscript = RealtimeTranscriptBuffer()
+            self.discardQueuedAudioLocked()
+            self.sendLocked(["type": "input_audio_buffer.clear"])
+            self.timeoutWork?.cancel()
+            if let deadline = self.gate.deadline { self.scheduleDeadlineLocked(at: deadline) }
         }
     }
 
@@ -162,6 +196,8 @@ final class RealtimeConversationSession: NSObject, RealtimeConversationClient, @
     func requestContinuation(_ response: [String: Any] = [:]) async throws {
         try await onQueueThrowing {
             guard !self.closed else { throw Failure.closed }
+            guard self.gate.continueResponse(at: ProcessInfo.processInfo.systemUptime) else { throw Failure.alreadyStarted }
+            self.scheduleDeadlineLocked(at: self.gate.deadline!)
             self.sendLocked(["type": "response.create", "response": response])
         }
     }
@@ -214,7 +250,7 @@ final class RealtimeConversationSession: NSObject, RealtimeConversationClient, @
             emit(.connected)
         case "input_audio_buffer.speech_started":
             guard gate.isOpen else { return }
-            gate.speechStarted()
+            gate.speechStarted(at: ProcessInfo.processInfo.systemUptime)
             scheduleDeadlineLocked(at: gate.deadline!)
             emit(.speechStarted)
         case "input_audio_buffer.speech_stopped":
@@ -229,6 +265,7 @@ final class RealtimeConversationSession: NSObject, RealtimeConversationClient, @
         case "response.output_audio_transcript.delta", "response.audio_transcript.delta": transcript(object, key: "delta", source: .remote, final: false)
         case "response.output_audio_transcript.done", "response.audio_transcript.done": transcript(object, key: "transcript", source: .remote, final: true)
         case "response.output_audio.delta", "response.audio.delta":
+            guard gate.phase == .responding else { return }
             guard let encoded = object["delta"] as? String,
                   let pcm = Data(base64Encoded: encoded), !pcm.isEmpty, pcm.count % 2 == 0 else {
                 closeLocked(.invalidEvent); return
@@ -241,7 +278,9 @@ final class RealtimeConversationSession: NSObject, RealtimeConversationClient, @
             guard let response = object["response"] as? [String: Any], response["status"] as? String == "completed" else {
                 closeLocked(.serverError); return
             }
-            // WebSocket PCM and response.done share one ordered stream: all audio is now received.
+            // Receipt closes the network deadline. Only the host can rearm after playback drains.
+            guard gate.responseCompleted() else { return }
+            timeoutWork?.cancel()
             emit(.responseDone)
         case "error": closeLocked(.serverError)
         default: break
@@ -260,6 +299,7 @@ final class RealtimeConversationSession: NSObject, RealtimeConversationClient, @
     }
 
     private func tool(_ object: [String: Any]) {
+        guard gate.phase == .responding else { return }
         guard let id = object["call_id"] as? String, !id.isEmpty, id.utf8.count <= 512,
               !calls.contains(id) else { return }
         guard calls.count < 8 else { closeLocked(.toolLimit); return }

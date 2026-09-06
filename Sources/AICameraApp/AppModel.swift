@@ -11,7 +11,7 @@ private struct SendableImage: @unchecked Sendable {
 }
 
 enum RealtimeConversationState: String, Sendable {
-    case idle = "Ready to talk"
+    case idle = "Agent off"
     case connecting = "Connecting…"
     case listening = "Listening…"
     case responding = "Responding…"
@@ -89,6 +89,7 @@ final class AppModel: ObservableObject {
     private var audioController: AudioPipelineController?
     private var runGate: PipelineRunGate?
     private var cameraRunGate: PipelineRunGate?
+    private var cameraStartedAt: TimeInterval = 0
     private var microphoneRunGate: PipelineRunGate?
     private var stopTask: Task<Void, Never>?
     private var pipelineStopTask: Task<Void, Never>?
@@ -105,7 +106,8 @@ final class AppModel: ObservableObject {
     private var realtimeConnectTask: Task<Void, Never>?
     private var realtimeFinishTask: Task<Void, Never>?
     private var realtimeGeneration: UInt64 = 0
-    private var realtimeOwnsMicrophoneTest = false
+    private var realtimeMicrophoneRequested = false
+    private var microphonePublishesToClient = false
     private var realtimeSpeechID: UUID?
     private var realtimeAudioQueue: [Data] = []
     private var realtimeAudioQueueBytes = 0
@@ -175,10 +177,10 @@ final class AppModel: ObservableObject {
     }
 
     var canStartRealtimeConversation: Bool {
-        realtimeConversationEnabled
-            && !privacyMuted && !privacyTransitionPending
-            && !externalClientIsUsingMedia
-            && (microphoneTestActive || canStartMicrophoneTest)
+        realtimeConversationEnabled && !realtimeConversationActive
+            && !privacyMuted && !privacyTransitionPending && !deviceOperationInProgress
+            && configurationController.isConfigurationUsable
+            && microphoneAuthorization == .authorized && microphoneSourceAvailable
             && realtimeConnectTask == nil
     }
 
@@ -520,6 +522,15 @@ final class AppModel: ObservableObject {
 
     private func reconcileDemand() {
         guard !isTerminating else { return }
+        if MediaDemandDecision.agentRequiresRouteRestart(
+            previousPublication: audioController == nil ? nil : microphonePublishesToClient,
+            clientRequested: demandMonitor.microphoneRequested, agentRequested: realtimeMicrophoneRequested
+        ) {
+            // A change of call routing needs a fresh graph. Stop the agent explicitly while the
+            // demand-driven lanes rebuild; never reuse local-test audio in a new call.
+            beginStop()
+            return
+        }
         let hadActiveTest = cameraTestActive || microphoneTestActive
         let externalDemandArrived = demandMonitor.cameraRequested
             || demandMonitor.microphoneRequested
@@ -567,10 +578,12 @@ final class AppModel: ObservableObject {
             cameraRequested: demandMonitor.cameraRequested || cameraTestActive,
             cameraAvailable: cameraExtensionManager.status.isInstalled,
             cameraAuthorized: cameraAuthorization == .authorized,
-            microphoneRequested: !privacyMuted && !privacyTransitionPending
-                && (demandMonitor.microphoneRequested || microphoneTestActive),
-            microphoneAvailable: audioDriverManager.status.isInstalled,
-            microphoneAuthorized: microphoneAuthorization == .authorized
+            microphoneRequested: demandMonitor.microphoneRequested || microphoneTestActive,
+            microphoneAvailable: audioDriverManager.status.isInstalled
+                || (realtimeMicrophoneRequested && !demandMonitor.microphoneRequested),
+            microphoneAuthorized: microphoneAuthorization == .authorized,
+            agentMicrophoneRequested: realtimeMicrophoneRequested,
+            microphoneMuted: privacyMuted || privacyTransitionPending
         )
 
         // Start every desired lane before stopping any undesired lane. Shared coordinator
@@ -637,6 +650,7 @@ final class AppModel: ObservableObject {
         )
 
         do {
+            cameraStartedAt = ProcessInfo.processInfo.systemUptime
             try video.start(publishToVirtualCamera: demandMonitor.cameraRequested)
             videoController = video
             cameraIsActive = true
@@ -704,6 +718,7 @@ final class AppModel: ObservableObject {
                 publishToVirtualMicrophone: demandMonitor.microphoneRequested
             )
             audioController = controller
+            microphonePublishesToClient = demandMonitor.microphoneRequested
             microphoneIsActive = true
             microphoneLaneError = nil
         } catch {
@@ -728,10 +743,19 @@ final class AppModel: ObservableObject {
             configuration: configuration,
             secrets: AppSecretResolver(),
             privacyMute: privacyMute,
-            onGestureControl: { [weak self] action in
+            onGestureControlWithTimestamp: { [weak self] action, capturedAt in
                 Task { @MainActor [weak model = self] in
-                    guard gate.isActive, let model, model.cameraRunGate?.isActive == true else { return }
-                    if action == .mute { model.setPrivacyMuted(true) }
+                    guard gate.isActive, let model, model.cameraRunGate?.isActive == true,
+                          capturedAt >= model.cameraStartedAt,
+                          ProcessInfo.processInfo.systemUptime - capturedAt <= 0.5 else { return }
+                    switch action {
+                    case .mute: model.setPrivacyMuted(true)
+                    case .startAgent:
+                        guard !model.realtimeConversationActive else { return }
+                        if model.privacyMuted {
+                            model.lastError = "Unmute AI Camera before starting the agent."
+                        } else { model.startRealtimeConversation() }
+                    }
                 }
             },
             builtinDetectionClient: builtinVisionModelController.makeDetectionClient(
@@ -847,14 +871,14 @@ final class AppModel: ObservableObject {
             lastError = "Realtime privacy gate: \(error.localizedDescription)"
             return
         }
-        realtimeOwnsMicrophoneTest = !microphoneTestActive
-        if !microphoneTestActive {
-            microphoneTestActive = true
-            reconcileDemand()
-        }
+        realtimeMicrophoneRequested = true
+        realtimeConversationState = .connecting
+        reconcileDemand()
         guard microphoneRunGate?.isActive == true, let audioController else {
-            realtimeOwnsMicrophoneTest = false
-            lastError = "The microphone could not start for Talk."
+            realtimeMicrophoneRequested = false
+            realtimeConversationState = .failed
+            lastError = "The microphone could not start for the agent."
+            reconcileDemand()
             return
         }
         do { try audioController.enableLocalSpeechPlayback() }
@@ -922,7 +946,12 @@ final class AppModel: ObservableObject {
                     await session.close()
                     return
                 }
-                try await session.armOneShotAudio()
+                try await session.armConversationAudio()
+                guard !Task.isCancelled, generation == self.realtimeGeneration,
+                      session === self.realtimeSession, !self.privacyMuted else {
+                    await session.close()
+                    return
+                }
                 self.realtimeConversationState = .listening
                 self.realtimeConnectTask = nil
             } catch is CancellationError {
@@ -936,13 +965,14 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func stopRealtimeConversation() {
-        closeRealtimeTransport(state: .idle, stopSpeech: true)
+    func stopRealtimeConversation(reconcileMedia: Bool = true) {
+        closeRealtimeTransport(state: .idle, stopSpeech: true, reconcileMedia: reconcileMedia)
     }
 
     private func closeRealtimeTransport(
         state: RealtimeConversationState,
-        stopSpeech: Bool
+        stopSpeech: Bool,
+        reconcileMedia: Bool = true
     ) {
         realtimeGeneration &+= 1
         realtimeConnectTask?.cancel()
@@ -972,11 +1002,9 @@ final class AppModel: ObservableObject {
             await coordinator?.setRealtimeTranscriptionActive(false)
         }
         audioController?.disableLocalSpeechPlayback()
-        if realtimeOwnsMicrophoneTest {
-            realtimeOwnsMicrophoneTest = false
-            microphoneTestActive = false
-            reconcileDemand()
-        }
+        let hadAgentDemand = realtimeMicrophoneRequested
+        realtimeMicrophoneRequested = false
+        if hadAgentDemand && reconcileMedia { reconcileDemand() }
     }
 
     private func handleRealtimeEvent(
@@ -1021,21 +1049,45 @@ final class AppModel: ObservableObject {
         session: any RealtimeConversationClient,
         generation: UInt64
     ) {
+        guard generation == realtimeGeneration, session === realtimeSession else { return }
+        realtimeAcceptingAudio = false
+        if realtimeSpeechID == nil {
+            rearmRealtimeConversation()
+        } else {
+            realtimeFinishTask?.cancel()
+            realtimeFinishTask = Task { @MainActor [weak self, weak session] in
+                try? await Task.sleep(for: .seconds(125))
+                guard !Task.isCancelled, let self, let session, generation == self.realtimeGeneration,
+                      session === self.realtimeSession, self.realtimeSpeechID != nil else { return }
+                self.lastError = "Agent reply playback timed out."
+                self.closeRealtimeTransport(state: .failed, stopSpeech: true)
+            }
+            realtimeAudioFinishRequested = true
+            drainRealtimeAudioQueue()
+        }
+    }
+
+    /// The same server conversation keeps context; input opens only after both reply outputs drain.
+    private func rearmRealtimeConversation() {
+        guard realtimeMicrophoneRequested, !privacyMuted, let session = realtimeSession else { return }
+        let generation = realtimeGeneration
         realtimeFinishTask?.cancel()
         realtimeFinishTask = Task { @MainActor [weak self, weak session] in
-            guard let self, let session,
-                  generation == self.realtimeGeneration,
+            guard let self, let session, generation == self.realtimeGeneration,
                   session === self.realtimeSession else { return }
-            self.realtimeFinishTask = nil
-            self.realtimeAcceptingAudio = false
-            await session.close()
-            guard generation == self.realtimeGeneration else { return }
-            guard self.realtimeSpeechID != nil else {
-                self.closeRealtimeTransport(state: .idle, stopSpeech: false)
-                return
+            self.resetRealtimeAudio(stopPlayback: false)
+            do {
+                try await session.armConversationAudio()
+                guard !Task.isCancelled, generation == self.realtimeGeneration,
+                      self.realtimeMicrophoneRequested, !self.privacyMuted else { return }
+                self.realtimeAcceptingAudio = true
+                self.realtimeConversationState = .listening
+                self.realtimeFinishTask = nil
+            } catch {
+                guard generation == self.realtimeGeneration else { return }
+                self.lastError = "Realtime: \(error.localizedDescription)"
+                self.closeRealtimeTransport(state: .failed, stopSpeech: true)
             }
-            self.realtimeAudioFinishRequested = true
-            self.drainRealtimeAudioQueue()
         }
     }
 
@@ -1101,7 +1153,7 @@ final class AppModel: ObservableObject {
                             self.closeRealtimeTransport(state: .failed, stopSpeech: true)
                             return
                         }
-                        self.closeRealtimeTransport(state: .idle, stopSpeech: false)
+                        self.rearmRealtimeConversation()
                     }
                 }
             }
@@ -1142,10 +1194,9 @@ final class AppModel: ObservableObject {
         session: any RealtimeConversationClient,
         generation: UInt64
     ) async {
+        guard generation == realtimeGeneration, session === realtimeSession, !privacyMuted else { return }
         let result = applyRealtimeTool(call)
-        guard generation == realtimeGeneration,
-              session === realtimeSession,
-              let outputData = try? JSONSerialization.data(withJSONObject: result),
+        guard let outputData = try? JSONSerialization.data(withJSONObject: result),
               let output = String(data: outputData, encoding: .utf8) else { return }
         do {
             try await session.completeFunctionCall(
@@ -1313,7 +1364,7 @@ final class AppModel: ObservableObject {
     }
 
     private func stopMicrophoneIfNeeded() {
-        if realtimeConversationActive { stopRealtimeConversation() }
+        if realtimeConversationActive { stopRealtimeConversation(reconcileMedia: false) }
         microphoneRunGate?.cancel()
         microphoneRunGate = nil
         microphoneInputLevel = 0
@@ -1369,7 +1420,7 @@ final class AppModel: ObservableObject {
 
     private func beginStop(after completion: (@MainActor () -> Void)? = nil) {
         guard stopTask == nil else { return }
-        stopRealtimeConversation()
+        stopRealtimeConversation(reconcileMedia: false)
         cameraTestActive = false
         microphoneTestActive = false
         microphoneInputLevel = 0
