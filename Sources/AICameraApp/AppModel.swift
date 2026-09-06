@@ -39,6 +39,23 @@ private final class PipelineRunGate: @unchecked Sendable {
 final class AppModel: ObservableObject {
     private static let privacyMuteKey = "privacyMicrophoneMuted"
     private let runtimeFeatures = RuntimeFeatureState()
+    private let spokenTranslation = SpokenTranslationState()
+    @Published private(set) var voiceTranslationActive = false
+    @Published private(set) var voiceTranslationError: String?
+    private lazy var voiceTranslationController = SpokenTranslationController(
+        state: spokenTranslation, privacy: privacyMute, client: LocalTranslationVoice(),
+        output: { [weak self] event, segment in
+            await withCheckedContinuation { continuation in
+                Task { @MainActor [weak self] in
+                    guard let self, self.microphoneRunGate?.isActive == true,
+                          let audio = self.audioController else { continuation.resume(returning: false); return }
+                    audio.handleSpeech(event, translation: segment) { continuation.resume(returning: $0) }
+                }
+            }
+        },
+        onError: { [weak self] message, origin in
+            Task { @MainActor [weak self] in self?.failVoiceTranslation(message, origin: origin) }
+        })
     private var appliedConfiguration: AICameraConfiguration?
     private var currentSnapshotFeatures = RuntimeFeatureState().snapshot
     @Published private(set) var transcriptionRequested = UserDefaults.standard.object(forKey: "quickTranscription") as? Bool ?? true
@@ -83,6 +100,7 @@ final class AppModel: ObservableObject {
             if oldValue != realtimeConversationState {
                 realtimeLog.info("Agent state: \(self.realtimeConversationState.rawValue, privacy: .public)")
             }
+            synchronizeVoiceTranslation()
             publishAgentStatus()
         }
     }
@@ -217,6 +235,69 @@ final class AppModel: ObservableObject {
     }
     var gesturesActive: Bool { gesturesConfigured && gesturesRequested }
 
+    var voiceTranslationUnavailableReason: String? {
+        let configuration = configurationController.configuration
+        let conversation = configuration.pipeline.conversation
+        if privacyMuted { return "Unmute AI Camera to use spoken translation." }
+        if !conversation.transcriptionEnabled || conversation.transcriptionProvider != .whisper {
+            return "Enable Whisper transcription in Settings to use the local translation voice."
+        }
+        if !builtinWhisperModelController.isReady(conversation.transcriptionWhisperModel)
+            || !configuration.pipeline.translation.enabled || !builtinTranslationModelController.isReady {
+            return "Enable translation and download the Whisper and translation models in Settings."
+        }
+        if LocalTranslationVoice.voice(for: configuration.pipeline.translation.targetLanguage) == nil {
+            return "No installed Mac voice for this language. Choose another translation language in Settings."
+        }
+        if !demandMonitor.microphoneRequested || !microphoneIsActive || !microphonePublishesToClient {
+            return "Select AI Microphone in your call app to use spoken translation."
+        }
+        return nil
+    }
+
+    var voiceTranslationDescription: String {
+        if let voiceTranslationError { return voiceTranslationError }
+        if voiceTranslationActive {
+            return spokenTranslation.snapshot.agentBusy
+                ? "Voice paused while the agent answers. It resumes with fresh speech."
+                : "Speaking \(translationTargetName) to AI Microphone. Your original voice stays audible; local playback is off."
+        }
+        return voiceTranslationUnavailableReason ?? "Speak your microphone audio with a Mac voice in the selected translation language. Captions are controlled separately."
+    }
+
+    func toggleVoiceTranslation() {
+        if voiceTranslationActive {
+            voiceTranslationActive = false; voiceTranslationError = nil
+        } else if let reason = voiceTranslationUnavailableReason {
+            voiceTranslationError = reason
+        } else {
+            voiceTranslationError = nil; voiceTranslationActive = true
+        }
+        synchronizeVoiceTranslation()
+    }
+
+    private func failVoiceTranslation(_ message: String, origin: SpokenTranslationState.Snapshot) {
+        guard spokenTranslation.snapshot.generation == origin.generation, voiceTranslationActive else { return }
+        voiceTranslationError = message
+        voiceTranslationActive = false
+        synchronizeVoiceTranslation()
+    }
+
+    private func synchronizeVoiceTranslation() {
+        if voiceTranslationActive, let reason = voiceTranslationUnavailableReason {
+            voiceTranslationActive = false; voiceTranslationError = reason
+        }
+        let before = spokenTranslation.snapshot
+        let after = spokenTranslation.set(enabled: voiceTranslationActive,
+            targetLanguage: configurationController.configuration.pipeline.translation.targetLanguage,
+            agentBusy: realtimeConversationState == .responding || realtimeConversationState == .speaking,
+            sourceLanguage: configurationController.configuration.pipeline.translation.sourceLanguage)
+        guard before != after else { return }
+        audioController?.synchronizeSpokenTranslation()
+        let controller = voiceTranslationController
+        Task { await controller.invalidate() }
+    }
+
     var readiness: CameraReadiness {
         let configuration = configurationController.configuration
         let whisperMissing = transcriptionConfigured && configuration.pipeline.conversation.transcriptionProvider == .whisper
@@ -259,6 +340,7 @@ final class AppModel: ObservableObject {
     }
 
     private func synchronizeRuntimeFeatures() {
+        synchronizeVoiceTranslation()
         let previous = runtimeFeatures.snapshot
         let translation = configurationController.configuration.pipeline.translation
         let features = runtimeFeatures.set(transcription: transcriptionActive,
@@ -653,6 +735,8 @@ final class AppModel: ObservableObject {
         guard muted != privacyMuted else { return }
         let privacy = privacyMute.setMuted(muted)
         privacyMuted = muted
+        voiceTranslationActive = false
+        synchronizeVoiceTranslation()
         privacyTransitionPending = true
         UserDefaults.standard.set(muted, forKey: Self.privacyMuteKey)
         microphoneRunGate?.cancel()
@@ -751,6 +835,7 @@ final class AppModel: ObservableObject {
         if decision.microphoneShouldRun { startMicrophoneIfNeeded() }
         if !decision.cameraShouldRun { stopCameraIfNeeded() }
         if !decision.microphoneShouldRun { stopMicrophoneIfNeeded() }
+        synchronizeVoiceTranslation()
         stopPipelineIfUnused()
         updateStatus()
     }
@@ -855,6 +940,7 @@ final class AppModel: ObservableObject {
                 && (configuration.pipeline.conversation.transcriptionProvider == .whisper
                     || configuration.pipeline.conversation.transcriptionEndpointID != nil),
             runtimeFeatures: runtimeFeatures,
+            spokenTranslation: spokenTranslation,
             onUtterance: { utterance in
                 guard pipelineGate.isActive, laneGate.isActive else { return }
                 Task {
@@ -908,6 +994,19 @@ final class AppModel: ObservableObject {
             secrets: AppSecretResolver(),
             privacyMute: privacyMute,
             runtimeFeatures: runtimeFeatures,
+            spokenTranslation: spokenTranslation,
+            onSpokenTranslation: { [weak self] segment in
+                Task { @MainActor [weak self] in
+                    guard gate.isActive, let self else { return }
+                    await self.voiceTranslationController.submit(segment)
+                }
+            },
+            onSpokenTranslationError: { [weak self] message, origin in
+                Task { @MainActor [weak self] in
+                    guard gate.isActive else { return }
+                    self?.failVoiceTranslation(message, origin: origin)
+                }
+            },
             onSnapshotWithFeatures: { [weak self] snapshot, privacy, features in
                 guard gate.isActive else { return }
                 Task { @MainActor [weak model = self] in
@@ -1839,6 +1938,8 @@ final class AppModel: ObservableObject {
     }
 
     private func stopMicrophoneIfNeeded() {
+        voiceTranslationActive = false
+        synchronizeVoiceTranslation()
         if realtimeConversationActive { stopRealtimeConversation(reconcileMedia: false) }
         microphoneRunGate?.cancel()
         microphoneRunGate = nil
@@ -1894,6 +1995,8 @@ final class AppModel: ObservableObject {
     }
 
     private func beginStop(after completion: (@MainActor () -> Void)? = nil) {
+        voiceTranslationActive = false
+        synchronizeVoiceTranslation()
         guard stopTask == nil else { return }
         stopRealtimeConversation(reconcileMedia: false)
         cameraTestActive = false

@@ -1,8 +1,11 @@
 # Spoken translation during a call
 
-This is the implementation design for the remaining spoken-output part of
-[#57](https://github.com/kortexa-ai/aicamera/issues/57). Current translation tools produce captions.
-The design below does not enable speech translation or change existing audio routes.
+The local implementation for [#57](https://github.com/kortexa-ai/aicamera/issues/57) adds a session-only
+**Voice** toolbar control. It uses Whisper → HY-MT → an installed Mac voice and sends speech through
+AI Camera Microphone. Voice starts off, requires an active microphone client and ready local models,
+and does not change the saved settings format. Caption toggles remain independent. The agent's
+existing `set_translation` tool still controls captions; spoken-translation tools and the separate
+remote provider described below are follow-up work.
 
 ## The first useful experience
 
@@ -60,13 +63,14 @@ Caption languages and spoken languages are separate capabilities. Keep the capti
 A spoken-language request must pass the selected provider/voice check before any state change;
 unsupported requests leave the active mode and language unchanged.
 
-## Audio routing proposal
+## Local audio routing
 
-Use **translation over original** for the first prototype. Original speech remains available;
+The first local prototype uses **translation over original**. Original speech remains available;
 translated speech is added to the virtual microphone. While translated buffers actually play,
-reduce the original's gain, then restore it with a short ramp after playback drains. Start the
-listening evaluation with a 0.25 original-gain multiplier during translation. This is a prototype
-value, not an accepted final mix. A limiter must bound the combined signal.
+reduce the original's gain, then restore it with a short ramp after playback drains. The implementation uses
+a 0.25 original-gain multiplier with twenty-millisecond ramps during translation. This is a prototype
+value, not an accepted final mix. An Apple peak limiter bounds the combined output after configured microphone and speech gains.
+[Apple peak limiter](https://developer.apple.com/documentation/audiotoolbox/kaudiounitsubtype_peaklimiter)
 
 The control must say that original audio remains audible. Do not advertise translated-only output.
 A future explicit replacement mode needs its own behavior for missing translations and same-language
@@ -88,40 +92,37 @@ flowchart LR
     Owner -. optional translated monitor .-> Headphones[Local output]
 ```
 
-The local translation monitor starts off, to avoid a delayed copy of the user's own voice and
-speaker-to-microphone feedback. An explicit local preview can monitor translated speech without
-publishing to the virtual microphone. Preserve the agent's existing local-monitor behavior.
+The local prototype does not monitor translation, to avoid a delayed copy of the user's own voice and
+speaker-to-microphone feedback. An explicit local translation preview is a future addition. Preserve the agent's existing local-monitor behavior.
 Never take translator input from the mixed virtual output, agent playback, or translated playback.
 
-The existing speech player supports one active speech ID. Add explicit output ownership before
-connecting a second producer. Proposed priority: an agent answer interrupts translated playback;
+The speech player supports one active speech ID and carries the translation segment owner through
+ingress and completion. Priority: an agent answer interrupts translated playback;
 discard interrupted/stale translation and restore original gain. Resume translation from fresh
 source after the answer drains, without replaying a backlog or changing either input gate. Keep
 captions available during that interval. Do not mix two synthesized speakers or let a translator's
 completion callback finish the agent's response.
 
-## Required changes found in the current host
+## Host integration
 
-- `PipelineCoordinator.translationOutcome` now separates successful translation from original-text
-  fallback, with host-assigned microphone/agent origin and requested language metadata. Empty,
-  invalid, or excessive output keeps the original caption and reports an error. Only successful
-  finalized microphone results expose candidate translated speech text. This is data, not playback
-  permission: the voice integration still needs utterance identity, completion time, and current
-  privacy/feature/output-owner checks. Requested auto/system values are not detected language claims.
-- Realtime caption translation can include agent-response text. Its typed origin excludes it from
-  candidate microphone speech. Preserve caption behavior and never produce a second spoken copy.
-- `AudioPipelineController.processMicrophone` suppresses its independent ASR lane while a Realtime
-  input handler is attached. A translator needs independent admission from the same physical capture,
-  including during agent work. Retain the agent's stale-PCM and input-pause guarantees when splitting
-  these consumers.
-- `handleSpeech(.beginPCM)` resets the active speech player. Add an owner/generation contract and
-  separate completion ownership before accepting translator buffers. Output gain changes need
-  actual playback start/drain signals, not arrival of network or synthesis data.
-- Local speech buffers have their own sample format. The feasibility probe produced 22,050 Hz
-  float PCM. Convert from the actual format with a continuous converter; do not relabel it as the
-  24 kHz agent/network format or the 44.1/48 kHz output mix. The routine native conversion fixture now
-  verifies 22.05 kHz input at these destinations across regular/irregular buffers. Preserve that
-  duration/pitch coverage and drain the converter tail only for a normal completion.
+- `TranslationOutcome` separates a successful finalized microphone translation from original-text
+  fallback and agent-response captions. Only the former can create a `SpokenTranslationSegment`,
+  with a host-assigned utterance ID, capture time, target, and privacy/voice generations.
+- The physical capture feeds the existing ASR lane when Voice is enabled, including while Realtime
+  input is attached. It never transcribes the mixed virtual output. Local ASR does not enable hidden
+  captions or trigger a second agent conversation while Realtime owns the turn.
+- An agent answer preempts translated audio and retires pending translation. Agent input pause and
+  agent Stop do not turn Voice off. Privacy mute, source/route teardown, and explicit Voice Off do.
+- Synthesis uses actual-rate mono PCM. The native adapter bounds each segment to 800 characters,
+  3,200 UTF-8 bytes, twelve seconds of audio, 2,048 callbacks, and a fifteen-second synthesis timeout.
+  The shared queue allows one active and one pending segment, with a twenty-second capture-age
+  ceiling. Overflow disables Voice with an explanation; original microphone audio continues.
+- Speech enters the shared player in quarter-second chunks with existing backpressure and audible
+  completion. The continuous converter handles the observed 22,050 Hz system voices without
+  relabeling them as the agent's 24 kHz format. Cancelled, stale, partial, failed, and agent-origin
+  results cannot be spoken. Captions and model failures keep their existing original-text fallback.
+- The global privacy gate is checked at capture, completed translation, synthesis admission, every
+  playback event, and output cancellation. No voice input, output, or transcript is persisted.
 
 ## Bounded work and cancellation
 
@@ -158,7 +159,7 @@ silently install a voice/model or change the calling app's microphone.
 Extend `get_camera_state` with spoken-translation readiness/on-off/error and output route. Keep
 saved setup in Settings and quick on/off in the existing toolbar pattern. Provide a manual Off
 action even when the agent is busy. Distinguish listening, translating, and output paused for an
-agent answer. A stopped or failed translator must not leave a green active indicator.
+agent answer (shown by the local Voice control). A stopped or failed translator must not leave a green active indicator.
 
 ## Acceptance order
 

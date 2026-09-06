@@ -13,6 +13,12 @@ struct AudioUtterance: Sendable {
     let wavData: Data
     /// Monotonic time when this fixed ASR window finished capture.
     let endedAtUptime: TimeInterval
+    let id: UUID
+    let startedAtUptime: TimeInterval
+    init(wavData: Data, endedAtUptime: TimeInterval, id: UUID = UUID(), startedAtUptime: TimeInterval? = nil) {
+        self.wavData = wavData; self.endedAtUptime = endedAtUptime; self.id = id
+        self.startedAtUptime = startedAtUptime ?? endedAtUptime
+    }
 }
 
 final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
@@ -36,6 +42,12 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
     private let privacyMute: PrivacyMuteState
     private let utteranceSeconds: Double
     private let runtimeFeatures: RuntimeFeatureState
+    private let spokenTranslation: SpokenTranslationState
+    private var asrVoiceGeneration: UInt64 = 0
+    private var asrStartedAt: TimeInterval?
+    private var translationSpeech: SpokenTranslationSegment?
+    private var ducking = TranslationDucking()
+    private var outputLimiter: AVAudioUnitEffect?
     private var asrFeatureGeneration: UInt64 = 0
     private let transcriptionEnabled: Bool
     private let onUtterance: UtteranceHandler
@@ -114,6 +126,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         utteranceSeconds: Double,
         transcriptionEnabled: Bool,
         runtimeFeatures: RuntimeFeatureState = RuntimeFeatureState(),
+        spokenTranslation: SpokenTranslationState = SpokenTranslationState(),
         onUtterance: @escaping UtteranceHandler,
         onBargeIn: @escaping BargeInHandler,
         onError: @escaping ErrorHandler
@@ -123,6 +136,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         self.utteranceSeconds = min(30, max(0.5, utteranceSeconds.isFinite ? utteranceSeconds : 3))
         self.transcriptionEnabled = transcriptionEnabled
         self.runtimeFeatures = runtimeFeatures
+        self.spokenTranslation = spokenTranslation
         self.onUtterance = onUtterance
         self.onBargeIn = onBargeIn
         self.onError = onError
@@ -238,7 +252,8 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
             self.realtimeConverter = handler == nil ? nil : AVAudioConverter(from: self.mixFormat, to: self.realtimeFormat)
             // A partial batch must never carry Realtime audio into a later ASR request.
             self.asrPCM.removeAll(keepingCapacity: true)
-            self.asrConverter = handler == nil && self.transcriptionEnabled
+            self.asrStartedAt = nil
+            self.asrConverter = (handler == nil || self.spokenTranslation.snapshot.acceptsMicrophone) && self.transcriptionEnabled
                 ? AVAudioConverter(from: self.mixFormat, to: self.asrFormat) : nil
         }
     }
@@ -260,17 +275,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
     }
 
     private func configureSpeechOutput(deviceID: AudioDeviceID, includeMicrophone: Bool) throws {
-        if !graphConfigured {
-            outputEngine.attach(microphonePlayer)
-            outputEngine.attach(speechPlayer)
-            if includeMicrophone {
-                outputEngine.connect(microphonePlayer, to: outputEngine.mainMixerNode, format: mixFormat)
-            }
-            outputEngine.connect(speechPlayer, to: outputEngine.mainMixerNode, format: mixFormat)
-            graphConfigured = true
-        }
-        microphonePlayer.volume = includeMicrophone ? Float(configuration.microphoneGain) : 0
-        speechPlayer.volume = Float(configuration.speechGain)
+        configureOutputGraph(includeMicrophone: includeMicrophone)
         try setCurrentDevice(deviceID, on: outputEngine.outputNode)
         outputEngine.prepare()
         do { try outputEngine.start() }
@@ -279,6 +284,45 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         speechPlayer.play()
         processingQueue.sync { speechOutputEnabled = true }
     }
+
+    private func configureOutputGraph(includeMicrophone: Bool) {
+        if !graphConfigured {
+            outputEngine.attach(microphonePlayer)
+            outputEngine.attach(speechPlayer)
+            if includeMicrophone {
+                outputEngine.connect(microphonePlayer, to: outputEngine.mainMixerNode, format: mixFormat)
+            }
+            outputEngine.connect(speechPlayer, to: outputEngine.mainMixerNode, format: mixFormat)
+            outputLimiter = TranslationAudioMix.installLimiter(in: outputEngine, format: mixFormat)
+            graphConfigured = true
+        }
+        microphonePlayer.volume = includeMicrophone ? Float(configuration.microphoneGain) : 0
+        speechPlayer.volume = Float(configuration.speechGain)
+    }
+
+#if DEBUG
+    /// Native acceptance uses the production graph/ingress without opening any capture/output device.
+    func startOfflineForValidation() throws {
+        configureOutputGraph(includeMicrophone: true)
+        try outputEngine.enableManualRenderingMode(.offline, format: mixFormat, maximumFrameCount: 1_024)
+        try outputEngine.start()
+        microphonePlayer.play(); speechPlayer.play()
+        processingQueue.sync {
+            processingActive = true; speechOutputEnabled = true; publishToVirtualMicrophone = true
+            microphoneConverter = AVAudioConverter(from: mixFormat, to: mixFormat)
+            asrConverter = AVAudioConverter(from: mixFormat, to: asrFormat)
+        }
+    }
+
+    func renderOfflineForValidation(frames: AVAudioFrameCount) throws -> AVAudioPCMBuffer {
+        let buffer = AVAudioPCMBuffer(pcmFormat: mixFormat, frameCapacity: frames)!
+        let status = try outputEngine.renderOffline(frames, to: buffer)
+        guard status == .success else { throw AudioPipelineError(message: "Offline audio did not render: \(status.rawValue)") }
+        return buffer
+    }
+
+    var speechIDForValidation: UUID? { processingQueue.sync { activeSpeechID } }
+#endif
 
     /// Silence scheduled buffers before synchronous capture teardown can wait on AVFoundation.
     func silenceForPrivacy() {
@@ -353,6 +397,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
 
     func handleSpeech(
         _ event: SpeechPlaybackEvent,
+        translation: SpokenTranslationSegment? = nil,
         completion: @escaping @Sendable (Bool) -> Void
     ) {
         processingQueue.async { [weak self] in
@@ -360,12 +405,28 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
                 completion(false)
                 return
             }
+            if let translation {
+                if case .stop = event {
+                    guard self.translationSpeech?.id == translation.id else { completion(false); return }
+                } else {
+                    guard self.publishToVirtualMicrophone,
+                          self.spokenTranslation.permits(translation.voice, capturedAt: translation.capturedAt),
+                          self.privacyMute.permitsSpeech(translation.privacy),
+                          self.activeSpeechID == nil || self.translationSpeech?.id == translation.id else {
+                        completion(false); return
+                    }
+                }
+            } else if case .stop(nil) = event, self.translationSpeech != nil {
+                // Closing an agent turn must not close the independent translator.
+                completion(true); return
+            }
             let accepted: Bool
             switch event {
             case let .wav(speechID, data):
                 do {
                     self.resetSpeechPlayback(stopPlayer: true)
                     self.activeSpeechID = speechID
+                    self.translationSpeech = translation
                     let decoded = try WAVFile.decodePCM16(data)
                     try self.scheduleSpeech(decoded)
                     // Keep the producing conversation active through the audible tail. A reset or
@@ -386,6 +447,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
                 }
                 self.resetSpeechPlayback(stopPlayer: true)
                 self.activeSpeechID = speechID
+                self.translationSpeech = translation
                 self.speechPCMStreamSampleRate = sampleRate
                 accepted = true
 
@@ -503,6 +565,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
             speechPCMStreamSampleRate = nil
             speechPCMStreamFinishing = false
             activeSpeechID = nil
+            translationSpeech = nil
             let completion = speechPlaybackCompletion
             speechPlaybackCompletion = nil
             completion?(true)
@@ -556,7 +619,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         let generation = speechPlaybackGeneration
         let completionGroup = DispatchGroup()
         completionGroup.enter()
-        if let speechMonitor {
+        if translationSpeech == nil, let speechMonitor {
             completionGroup.enter()
             guard speechMonitor.schedule(mixed, completion: { completionGroup.leave() }) else {
                 completionGroup.leave()
@@ -564,7 +627,13 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
                 throw AudioPipelineError(message: "Local agent reply output stopped.")
             }
         }
-        speechPlayer.scheduleBuffer(mixed, completionCallbackType: .dataPlayedBack) { _ in
+        // Offline fixtures have no device playback clock. Production ownership always waits for
+        // dataPlayedBack; manual rendering can acknowledge only frames rendered into its buffer.
+        var completionType: AVAudioPlayerNodeCompletionCallbackType = .dataPlayedBack
+#if DEBUG
+        if outputEngine.isInManualRenderingMode { completionType = .dataRendered }
+#endif
+        speechPlayer.scheduleBuffer(mixed, completionCallbackType: completionType) { _ in
             completionGroup.leave()
         }
         completionGroup.notify(queue: processingQueue) { [weak self] in
@@ -575,6 +644,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
                 self.admitPendingSpeechIngressIfPossible()
             } else if self.pendingSpeechBuffers == 0 {
                 self.activeSpeechID = nil
+                self.translationSpeech = nil
                 let completion = self.speechPlaybackCompletion
                 self.speechPlaybackCompletion = nil
                 completion?(true)
@@ -592,6 +662,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         speechPCMStreamFinishing = false
         speechConverter = nil
         activeSpeechID = nil
+        translationSpeech = nil
         let ingressCompletion = pendingSpeechIngress?.completion
         pendingSpeechIngress = nil
         let playbackCompletion = speechPlaybackCompletion
@@ -647,14 +718,29 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         }
     }
 
+    func synchronizeSpokenTranslation() {
+        processingQueue.async { [weak self] in
+            guard let self else { return }
+            if let segment = self.translationSpeech,
+               !self.spokenTranslation.permits(segment.voice, capturedAt: segment.capturedAt) {
+                self.resetSpeechPlayback(stopPlayer: true)
+            }
+        }
+    }
+
     private func processMicrophone(_ input: AVAudioPCMBuffer, capturedAt: TimeInterval) {
         guard processingActive, !privacyMute.snapshot.isMuted,
               let microphoneConverter,
               let mixed = Self.convert(input, using: microphoneConverter, to: mixFormat) else { return }
-        if publishToVirtualMicrophone, pendingMicrophoneBuffers < 8 {
+        if let segment = translationSpeech,
+           !spokenTranslation.permits(segment.voice, capturedAt: segment.capturedAt) {
+            resetSpeechPlayback(stopPlayer: true)
+        }
+        if publishToVirtualMicrophone, pendingMicrophoneBuffers < 8,
+           let outgoing = ducking.outgoing(mixed, speaking: translationSpeech != nil && pendingSpeechBuffers > 0) {
             pendingMicrophoneBuffers += 1
             microphonePlayer.scheduleBuffer(
-                mixed,
+                outgoing,
                 completionCallbackType: .dataPlayedBack
             ) { [weak self] _ in
                 self?.processingQueue.async { [weak self] in
@@ -680,7 +766,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
             : max(normalizedLevel, smoothedInputLevel * 0.82)
         storeInputLevel(smoothedInputLevel)
 
-        if pendingSpeechBuffers > 0,
+        if translationSpeech == nil, pendingSpeechBuffers > 0,
            peak > 0.035,
            Date().timeIntervalSince(lastBargeIn) > 0.5 {
             lastBargeIn = Date()
@@ -690,14 +776,16 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         deliverRealtimePCM(mixed, capturedAt: capturedAt)
 
         let features = runtimeFeatures.snapshot
-        if asrFeatureGeneration != features.captionGeneration {
+        let voice = spokenTranslation.snapshot
+        let localASR = transcriptionEnabled && (voice.acceptsMicrophone || (realtimeAudioHandler == nil && features.needsTranscription))
+        if asrFeatureGeneration != features.captionGeneration || asrVoiceGeneration != voice.generation {
             asrFeatureGeneration = features.captionGeneration
-            asrPCM.removeAll(keepingCapacity: true)
-            asrConverter = realtimeAudioHandler == nil && transcriptionEnabled && features.needsTranscription
-                ? AVAudioConverter(from: mixFormat, to: asrFormat) : nil
+            asrVoiceGeneration = voice.generation
+            asrPCM.removeAll(keepingCapacity: true); asrStartedAt = nil
+            asrConverter = localASR ? AVAudioConverter(from: mixFormat, to: asrFormat) : nil
         }
-        guard features.needsTranscription, capturedAt >= features.captionsChangedAt,
-              realtimeAudioHandler == nil, transcriptionEnabled,
+        guard localASR,
+              (voice.acceptsMicrophone && capturedAt >= voice.changedAt) || (features.needsTranscription && capturedAt >= features.captionsChangedAt),
               let asrConverter,
               let asrBuffer = Self.convert(mixed, using: asrConverter, to: asrFormat),
               let samples = asrBuffer.floatChannelData?[0] else { return }
@@ -708,6 +796,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
             let value = max(-1, min(1, samples[index]))
             pcm[index] = Int16(value * Float(Int16.max))
         }
+        if asrStartedAt == nil { asrStartedAt = capturedAt }
         pcm.withUnsafeBytes { asrPCM.append(contentsOf: $0) }
 
         let segmentBytes = Int(16_000 * utteranceSeconds) * MemoryLayout<Int16>.size
@@ -722,10 +811,12 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
                 onUtterance(
                     AudioUtterance(
                         wavData: WAVFile.encodePCM16(samples: segment, sampleRate: 16_000, channels: 1),
-                        endedAtUptime: ProcessInfo.processInfo.systemUptime
+                        endedAtUptime: capturedAt,
+                        startedAtUptime: asrStartedAt ?? capturedAt
                     )
                 )
             }
+            asrStartedAt = asrPCM.isEmpty ? nil : capturedAt
         }
         // Never retain more than two windows if an unexpected converter burst occurs.
         if asrPCM.count > segmentBytes * 2 {

@@ -1,5 +1,22 @@
 # Validation record
 
+## Local spoken translation fixtures
+
+The native spoken-translation fixture exercises the production output graph in offline mode with
+synthetic microphone/translation data. It covers output ownership, stale Off/On and mute epochs,
+agent-answer priority, duplicate utterances, single active/pending bounds, cancellation-insensitive
+synthesis, independent caption visibility, and local ASR admission while Realtime input is active.
+
+At 44.1 and 48 kHz, the combined synthetic mix stays finite and below full scale even with both
+configured gains at their maximum. A complete 997 Hz tone synthesized at 22.05 kHz retains its
+half-second duration and pitch through the production PCM ingress, converter, limiter, and player
+at 48 kHz. Offline tests acknowledge rendered frames; real output still waits for dataPlayedBack,
+including device and downstream latency. Offline tests cannot establish physical audible timing.
+
+The optional installed-voice check uses two fixed English/Spanish sentences and keeps PCM in
+memory. It never opens a media capture device, plays speakers, or writes an audio file. Calling-client
+and bilingual acceptance remain necessary for actual latency and translation quality.
+
 ## Build 54: installed companion host
 
 Full local validation passes 240 Swift tests and all native fixtures. The release-settings fixture

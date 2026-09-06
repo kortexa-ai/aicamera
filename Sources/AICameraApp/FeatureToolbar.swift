@@ -20,6 +20,11 @@ struct FeatureToolbar: View {
                     help: model.translationConfigured ? "\(model.translationActive ? "Translating to" : "Translation off · selected language:") \(model.translationTargetName). Toggle translated captions." : "Enable translation and a transcription source in Settings first.") {
                 model.toggleTranslation()
             }
+            control("Voice", icon: "speaker.wave.2", active: model.voiceTranslationActive,
+                    available: model.voiceTranslationActive || model.voiceTranslationUnavailableReason == nil,
+                    help: model.voiceTranslationDescription) {
+                model.toggleVoiceTranslation()
+            }
             control("Agent", icon: "waveform.and.mic", active: model.realtimeConversationActive,
                     available: model.realtimeConversationActive || model.canStartRealtimeConversation,
                     help: "\(model.realtimeConversationState.rawValue) · ⌃⌥A. Hold victory to start; fist to mute.") {
@@ -34,6 +39,10 @@ struct FeatureToolbar: View {
         if model.privacyMuted {
             Label("Microphone muted · captions hidden", systemImage: "mic.slash.fill")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+        if model.voiceTranslationActive || model.voiceTranslationError != nil {
+            Text(model.voiceTranslationDescription).font(.caption).foregroundStyle(model.voiceTranslationError == nil ? Color.secondary : Color.orange)
+                .fixedSize(horizontal: false, vertical: true)
         }
         if let error = model.shortcutError {
             Text(error).font(.caption).foregroundStyle(.orange)

@@ -28,6 +28,9 @@ actor PipelineCoordinator {
 
     private let configuration: AICameraConfiguration
     private let scene = SceneState()
+    private let spokenTranslation: SpokenTranslationState
+    private let onSpokenTranslation: @Sendable (SpokenTranslationSegment) -> Void
+    private let onSpokenTranslationError: @Sendable (String, SpokenTranslationState.Snapshot) -> Void
     private let runtimeFeatures: RuntimeFeatureState
     private var synchronizedCaptionGeneration: UInt64
     private var synchronizedGestureGeneration: UInt64
@@ -71,6 +74,9 @@ actor PipelineCoordinator {
         secrets: any SecretResolver,
         privacyMute: PrivacyMuteState = PrivacyMuteState(),
         runtimeFeatures: RuntimeFeatureState = RuntimeFeatureState(),
+        spokenTranslation: SpokenTranslationState = SpokenTranslationState(),
+        onSpokenTranslation: @escaping @Sendable (SpokenTranslationSegment) -> Void = { _ in },
+        onSpokenTranslationError: @escaping @Sendable (String, SpokenTranslationState.Snapshot) -> Void = { _, _ in },
         onSnapshotWithFeatures: (@Sendable (SceneSnapshot, PrivacyMuteState.Snapshot, RuntimeFeatureState.Snapshot) -> Void)? = nil,
         onGestureControl: @escaping @Sendable (GestureControlAction) -> Void = { _ in },
         onGestureControlWithTimestamp: (@Sendable (GestureControlAction, TimeInterval) -> Void)? = nil,
@@ -86,6 +92,9 @@ actor PipelineCoordinator {
         self.configuration = configuration
         self.privacyMute = privacyMute
         self.runtimeFeatures = runtimeFeatures
+        self.spokenTranslation = spokenTranslation
+        self.onSpokenTranslation = onSpokenTranslation
+        self.onSpokenTranslationError = onSpokenTranslationError
         self.synchronizedCaptionGeneration = runtimeFeatures.snapshot.captionGeneration
         self.synchronizedGestureGeneration = runtimeFeatures.snapshot.gestureGeneration
         self.onSnapshotWithFeatures = onSnapshotWithFeatures
@@ -250,9 +259,15 @@ actor PipelineCoordinator {
     func submit(utterance: AudioUtterance) {
         let privacy = privacyMute.snapshot
         let conversation = configuration.pipeline.conversation
-        guard isRunning, runtimeFeatures.snapshot.needsTranscription,
-              utterance.endedAtUptime >= runtimeFeatures.snapshot.captionsChangedAt,
-              privacyMute.permitsSpeech(privacy), conversation.transcriptionEnabled, !realtimeTranscriptionActive else { return }
+        let voice = spokenTranslation.snapshot
+        let voiceAllowed = spokenTranslation.permits(voice, capturedAt: utterance.startedAtUptime)
+        let captionsAllowed = !realtimeTranscriptionActive && runtimeFeatures.snapshot.needsTranscription
+            && utterance.endedAtUptime >= runtimeFeatures.snapshot.captionsChangedAt
+        guard isRunning, voiceAllowed || captionsAllowed,
+              privacyMute.permitsSpeech(privacy), conversation.transcriptionEnabled else { return }
+        if voiceAllowed, transcriptionTask != nil, pendingUtterance != nil {
+            onSpokenTranslationError("Voice transcription could not keep up. Voice is off; your original microphone continues.", voice)
+        }
         if transcriptionTask != nil {
             if conversation.activationMode == .alwaysListening || pendingUtterance == nil {
                 // Always-listening favors the latest ambient window. Wake mode preserves the first
@@ -275,6 +290,7 @@ actor PipelineCoordinator {
         conversationTask = nil
         pendingConversationInput = nil
         wakePhraseGate.reset()
+        guard !spokenTranslation.snapshot.enabled else { return }
         transcriptionGeneration &+= 1
         transcriptionTask?.cancel()
         transcriptionTask = nil
@@ -474,8 +490,10 @@ actor PipelineCoordinator {
         guard privacyMute.permitsSpeech(privacy) else { return }
         let conversation = configuration.pipeline.conversation
         let features = runtimeFeatures.snapshot
-        guard !Task.isCancelled, features.needsTranscription,
-              utterance.endedAtUptime >= features.captionsChangedAt else { return }
+        let voice = spokenTranslation.snapshot
+        let voiceAllowed = spokenTranslation.permits(voice, capturedAt: utterance.startedAtUptime)
+        guard !Task.isCancelled, voiceAllowed || (features.needsTranscription
+            && utterance.endedAtUptime >= features.captionsChangedAt) else { return }
         do {
             let (client, configuredLanguage) = try transcriptionSetup()
             let language = configuredLanguage == "auto" ? nil : configuredLanguage
@@ -485,12 +503,28 @@ actor PipelineCoordinator {
             ))
             try Task.checkCancellation()
             guard !transcript.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            let outcome = await translationOutcome(transcript, source: .microphone, features: features)
+            let outcome = await translationOutcome(transcript, source: .microphone, features: features,
+                                                   voice: voiceAllowed ? voice : nil)
             try Task.checkCancellation()
-            guard isRunning, !realtimeTranscriptionActive, privacyMute.permitsSpeech(privacy),
-                  runtimeFeatures.permitsCaptions(from: features) else { return }
-            await scene.applyTranscript(outcome.caption, privacyGeneration: privacy.generation, featureGeneration: features.captionGeneration)
-            await publish()
+            guard isRunning, privacyMute.permitsSpeech(privacy) else { return }
+            if voiceAllowed, spokenTranslation.isCurrent(voice),
+               !spokenTranslation.permits(voice, capturedAt: utterance.startedAtUptime) {
+                onSpokenTranslationError("Voice fell behind. Voice is off; your original microphone continues.", voice)
+            }
+            if voiceAllowed, spokenTranslation.permits(voice, capturedAt: utterance.startedAtUptime) {
+                if let segment = SpokenTranslationSegment(id: utterance.id, outcome: outcome,
+                    capturedAt: utterance.startedAtUptime, voice: voice, privacy: privacy) {
+                    onSpokenTranslation(segment)
+                } else {
+                    onSpokenTranslationError("This segment could not be translated for speech. Voice is off; your original microphone continues.", voice)
+                }
+            }
+            guard !realtimeTranscriptionActive, runtimeFeatures.permitsCaptions(from: features) else { return }
+            if features.needsTranscription {
+                await scene.applyTranscript(features.translation ? outcome.caption : transcript,
+                    privacyGeneration: privacy.generation, featureGeneration: features.captionGeneration)
+                await publish()
+            }
             if !Task.isCancelled, privacyMute.permitsSpeech(privacy),
                conversation.enabled, !conversation.realtimeEnabled, let command = agentCommand(
                 for: transcript,
@@ -503,6 +537,9 @@ actor PipelineCoordinator {
             return
         } catch {
             guard !Task.isCancelled, runtimeFeatures.permitsCaptions(from: features) else { return }
+            if voiceAllowed, spokenTranslation.permits(voice, capturedAt: utterance.startedAtUptime) {
+                onSpokenTranslationError("Voice transcription failed. Voice is off; your original microphone continues.", voice)
+            }
             onError("transcription: \(error.localizedDescription)")
         }
     }
@@ -527,17 +564,22 @@ actor PipelineCoordinator {
     }
 
     private func translationOutcome(_ transcript: TranscriptEvent, source: TranslationSource,
-                                    features: RuntimeFeatureState.Snapshot) async -> TranslationOutcome {
+                                    features: RuntimeFeatureState.Snapshot,
+                                    voice: SpokenTranslationState.Snapshot? = nil) async -> TranslationOutcome {
         let translation = configuration.pipeline.translation
-        let sourceLanguage = features.translationSourceLanguage ?? translation.sourceLanguage
-        let targetLanguage = features.translationTargetLanguage ?? translation.targetLanguage
+        let sourceLanguage = voice?.sourceLanguage ?? features.translationSourceLanguage ?? translation.sourceLanguage
+        let targetLanguage = voice?.targetLanguage ?? features.translationTargetLanguage ?? translation.targetLanguage
         func fallback(_ reason: TranslationOutcome.FallbackReason) -> TranslationOutcome {
             .fallback(transcript, source: source, sourceLanguage: sourceLanguage,
                       targetLanguage: targetLanguage, reason: reason)
         }
         guard !Task.isCancelled else { return fallback(.cancelled) }
-        guard translation.enabled, features.translation else { return fallback(.disabled) }
-        guard runtimeFeatures.permitsCaptions(from: features) else { return fallback(.superseded) }
+        func current() -> Bool {
+            if let voice { return spokenTranslation.snapshot.generation == voice.generation && spokenTranslation.snapshot.acceptsMicrophone }
+            return runtimeFeatures.permitsCaptions(from: features)
+        }
+        guard translation.enabled, features.translation || voice != nil else { return fallback(.disabled) }
+        guard current() else { return fallback(.superseded) }
         guard transcript.mode == .final else { return fallback(.partial) }
         guard let builtinTranslationClient else { return fallback(.modelUnavailable) }
         do {
@@ -546,7 +588,7 @@ actor PipelineCoordinator {
                 sourceLanguage: sourceLanguage, targetLanguage: targetLanguage
             ))
             guard !Task.isCancelled else { return fallback(.cancelled) }
-            guard runtimeFeatures.permitsCaptions(from: features) else { return fallback(.superseded) }
+            guard current() else { return fallback(.superseded) }
             guard let result = TranslationOutcome.success(transcript, text: text, source: source,
                 sourceLanguage: sourceLanguage, targetLanguage: targetLanguage) else {
                 onError("translation: The model returned empty, invalid, or excessive text.")
@@ -557,7 +599,7 @@ actor PipelineCoordinator {
             return fallback(.cancelled)
         } catch {
             guard !Task.isCancelled else { return fallback(.cancelled) }
-            guard runtimeFeatures.permitsCaptions(from: features) else { return fallback(.superseded) }
+            guard current() else { return fallback(.superseded) }
             onError("translation: \(error.localizedDescription)")
             return fallback(.failed)
         }
@@ -746,10 +788,10 @@ actor PipelineCoordinator {
         if synchronizedCaptionGeneration != features.captionGeneration {
             synchronizedCaptionGeneration = features.captionGeneration
             cancelRealtimeCaptions()
-            transcriptionTask?.cancel()
+            if !spokenTranslation.snapshot.enabled { transcriptionTask?.cancel() }
             // Keep ownership until completion, even for a cancellation-insensitive provider.
             // Fresh capture can replace one pending utterance without overlapping ASR calls.
-            pendingUtterance = nil
+            if !spokenTranslation.snapshot.enabled { pendingUtterance = nil }
             await scene.clearSpeech()
         }
         await publish()

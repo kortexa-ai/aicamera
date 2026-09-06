@@ -132,11 +132,25 @@ xcrun swiftc -parse-as-library -O \
     -F "$FRAMEWORKS" -framework AICameraCore -framework llama -Xlinker -rpath -Xlinker "$FRAMEWORKS" \
     Sources/AICameraApp/PipelineCoordinator.swift \
     Sources/AICameraApp/AudioPipelineController.swift Sources/AICameraApp/PCMBufferConverter.swift \
+    Sources/AICameraApp/TranslationAudioMix.swift \
     Sources/AICameraApp/SpeechOutputMonitor.swift Sources/AICameraApp/DeviceDiscovery.swift \
     Sources/AICameraApp/AudioDriverManager.swift Sources/AICameraShared/VirtualCameraConstants.swift \
     Sources/AICameraShared/MediaDemandState.swift Sources/AICameraApp/BuiltinTranslationClient.swift \
     Sources/AICameraApp/BuiltinTranslationModelController.swift scripts/validate-realtime-captions.swift \
     -o "$VALIDATION_TMP/realtime-captions"
 "$VALIDATION_TMP/realtime-captions" --controlled-only
+
+xcrun swiftc -D DEBUG -parse-as-library -O \
+    -F "$FRAMEWORKS" -framework AICameraCore -framework llama -Xlinker -rpath -Xlinker "$FRAMEWORKS" \
+    Sources/AICameraApp/PipelineCoordinator.swift \
+    Sources/AICameraApp/AudioPipelineController.swift Sources/AICameraApp/PCMBufferConverter.swift \
+    Sources/AICameraApp/TranslationAudioMix.swift \
+    Sources/AICameraApp/SpeechOutputMonitor.swift Sources/AICameraApp/DeviceDiscovery.swift \
+    Sources/AICameraApp/AudioDriverManager.swift Sources/AICameraShared/VirtualCameraConstants.swift \
+    Sources/AICameraShared/MediaDemandState.swift Sources/AICameraApp/BuiltinTranslationClient.swift \
+    Sources/AICameraApp/BuiltinTranslationModelController.swift Sources/AICameraApp/LocalTranslationVoice.swift Sources/AICameraApp/SpokenTranslationController.swift \
+    scripts/validate-spoken-translation.swift \
+    -o "$VALIDATION_TMP/spoken-translation"
+"$VALIDATION_TMP/spoken-translation"
 
 echo "Validation passed. No driver or system extension was installed."

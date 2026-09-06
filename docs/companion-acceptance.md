@@ -109,3 +109,32 @@ the older host, or inspect the saved configuration privately before making a tar
 Report a failed acceptance with the host version, source commit, exact control/request, expected
 and observed behavior, and whether the independent client selected AI Camera Microphone. Keep raw
 camera/microphone media, notebook contents, device identifiers, and credentials out of public reports.
+
+
+## Local spoken translation
+
+The **Voice** toolbar toggle starts off on launch and after a microphone/route shutdown. Select
+**AI Camera Microphone** in the independent calling client first. Enable Whisper and translation
+in Settings, download their models, and choose a language with an installed Mac voice. The Voice
+control's help explains any missing requirement. This does not download or use a personal voice.
+
+With headphones and the client recording only explicitly synthetic speech:
+
+1. Turn Voice on and say a short fixed sentence. The client should receive your original microphone
+   plus delayed translated speech. The original becomes quieter while the translation plays, then
+   returns to its normal level. The app does not play translation through your local speakers.
+2. Turn both caption toggles off: speech translation should continue without captions appearing.
+   Pause the agent's listening or stop the agent: independently enabled Voice should continue.
+3. Ask the agent a question. Its answer should interrupt translation, with no overlapping synthetic
+   speakers. Voice resumes using newly captured speech after the answer drains, not old sentences.
+4. Turn Voice off mid-sentence, change the translation language, and test mute/unmute. Old-language
+   or pre-mute audio must not return. Full AI Camera mute stops original, translated, and agent audio.
+5. Change the call's microphone or close the client. Voice should turn off and require explicit
+   activation after a new route starts. A slow/failed translator should explain why Voice stopped
+   while the original microphone continues. Calling-app mute detection remains tracked separately.
+
+The native fixture uses an offline AVAudioEngine and fake transcription/translation completions,
+so it needs no media permissions or installed models. Its optional `--system-voice` run synthesizes
+two fixed English/Spanish sentences into memory, with no speaker playback or audio files. These
+checks establish routing, format, bounded work, and cancellation; human bilingual review still
+needs to assess latency, names, numbers, negation, and translation quality during a real call.
