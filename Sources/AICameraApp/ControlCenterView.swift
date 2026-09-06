@@ -49,7 +49,7 @@ struct ControlCenterView: View {
                     }
                     .controlSize(.small)
                     .disabled(model.realtimeConversationState == .connecting)
-                    .help("Control–Option–Space. Pauses only agent input; your call microphone stays live. An unfinished question is discarded. A current answer keeps playing.")
+                    .help("Control–Option–L. Pauses only agent input; your call microphone stays live. An unfinished question is discarded. A current answer keeps playing.")
                     .accessibilityIdentifier("toggle-agent-listening")
                 }
             }

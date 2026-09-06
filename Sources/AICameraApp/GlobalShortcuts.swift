@@ -6,8 +6,8 @@ import Foundation
 final class GlobalShortcuts {
     enum Action: UInt32, CaseIterable {
         case agent = 1, mute = 2, agentInput = 3
-        var key: Int { switch self { case .agent: return kVK_ANSI_A; case .mute: return kVK_ANSI_M; case .agentInput: return kVK_Space } }
-        var label: String { switch self { case .agent: return "⌃⌥A"; case .mute: return "⌃⌥M"; case .agentInput: return "⌃⌥Space" } }
+        var key: Int { switch self { case .agent: return kVK_ANSI_A; case .mute: return kVK_ANSI_M; case .agentInput: return kVK_ANSI_L } }
+        var label: String { switch self { case .agent: return "⌃⌥A"; case .mute: return "⌃⌥M"; case .agentInput: return "⌃⌥L" } }
     }
     private static let signature: OSType = 0x41494341 // AICA
     private var handler: EventHandlerRef?

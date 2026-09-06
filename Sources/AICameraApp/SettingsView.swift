@@ -264,7 +264,7 @@ struct SettingsView: View {
                     )) {
                         ForEach(AgentListeningMode.allCases, id: \.self) { mode in Text(mode.title).tag(mode) }
                     }
-                    Text("One question at a time pauses agent input after your question. Use Ask again or Control–Option–Space to listen again; your call microphone stays live. Conversation mode resumes listening after each reply. You can pause agent input in either mode while it finishes an answer.")
+                    Text("One question at a time pauses agent input after your question. Use Ask again or Control–Option–L to listen again; your call microphone stays live. Conversation mode resumes listening after each reply. You can pause agent input in either mode while it finishes an answer.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text("Hold a victory sign with Gestures enabled, or use Start agent in the menu. Hold a fist to mute AI Camera audio and captions; unmute explicitly in the menu before starting again. Realtime sends microphone audio while listening. Raw camera frames are never sent by this configuration.")

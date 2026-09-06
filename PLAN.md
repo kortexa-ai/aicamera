@@ -33,7 +33,7 @@ are historical roadmap context.
 Implementation and acceptance priorities:
 
 - [x] Separate agent input pause from call microphone mute and retain continuous conversation
-  as the default. Add one-question mode and Control–Option–Space to ask again explicitly.
+  as the default. Add one-question mode and Control–Option–L to ask again explicitly.
 - [x] Add a bounded sequence of agent tools, requested local notes with their own window,
   readable native information cards, silent waiting, and agent sleep. Keep note storage separate
   from camera presentation and preserve the published 0.2.0 package while these develop on main.

@@ -539,7 +539,7 @@ and tool continuation, and resuming without admitting samples captured before th
 
 For manual listening acceptance, start an agent question while another app uses AI Camera
 Microphone. Pause agent input during the answer: the answer and call microphone must continue.
-After it finishes, speak to the other person; the agent must remain paused. Press Control–Option–Space
+After it finishes, speak to the other person; the agent must remain paused. Press Control–Option–L
 or Ask again and ask a second question. Repeat in One question at a time mode, including a pause
 mid-question (the incomplete input is discarded), quick pause/resume changes, and the existing full
 privacy Mute. The source-release test does not substitute for this live acceptance.
@@ -755,9 +755,9 @@ xcrun swiftc -parse-as-library -O Sources/AICameraApp/GlobalShortcuts.swift \
 ```
 
 The explicit conflict mode is for testing alongside an older installed release that already owns
-Control–Option–A/M. Those exclusive registrations are left alone; Control–Option–Space must still
+Control–Option–A/M. Those exclusive registrations are left alone; Control–Option–L must still
 register successfully. Without the flag, all three shortcuts must register. If another process
-owns Space too, the fixture must fail; do not quit the user's app merely to get a green result.
+owns Control–Option–L too, the fixture must fail; do not quit the user's app merely to get a green result.
 This establishes native registration/event routing, not a live spoken Pause listening/Ask again
 cycle. Keep the latter in the installed-candidate acceptance matrix.
 

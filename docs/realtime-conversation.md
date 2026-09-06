@@ -60,7 +60,7 @@ victory cannot silently unmute. Receiving apps' own mute buttons are not current
 
 ### Keep talking to the other people on the call
 
-**Pause listening** in the popup, or **Control–Option–Space**, closes only the agent's input.
+**Pause listening** in the popup, or **Control–Option–L**, closes only the agent's input.
 An answer or tool operation already in progress continues, and the call's microphone stays live.
 Pausing before a question has finished discards that incomplete input. **Ask again** resumes
 listening once the current answer has drained. Audio captured before resuming is rejected.
@@ -72,6 +72,8 @@ The agent session retains its context. Configured independent transcription resu
 agent is paused after its reply; it may still use OpenAI if that is your selected transcription
 provider. Agent input pause is separate from AI Camera's audio/caption privacy mute.
 
+Control–Option–L uses L for listening and leaves the macOS
+[input-language shortcut](https://support.apple.com/en-au/guide/mac-help/mchlp1406/mac) available.
 The listening shortcut is available without monitoring general keyboard input. If another app
 owns it, the popup reports the conflict and its listening button remains available. These host
 changes have synthetic transport coverage; installed UI/voice acceptance is a separate check.

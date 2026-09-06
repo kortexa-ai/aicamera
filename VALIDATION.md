@@ -845,6 +845,13 @@ keyboard input was observed. The running installed bundle still passes strict si
 Production shortcut definitions and capture/system components were unchanged. Live spoken control
 acceptance remains separate.
 
+The later input-language conflict fix moves the unreleased listening shortcut from
+Control–Option–Space to Control–Option–L. The native fixture now asserts the A/M/L bindings,
+requires L registration alongside the installed release, and passes the same repeat, release,
+unknown-event, unregister, and re-registration checks. All 232 Swift tests and full local
+validation pass. No physical keyboard events, system shortcut settings, or installed bundles
+were changed.
+
 ## Requested local face effects
 
 Full validation passes 232 Swift tests and now includes the native WebKit overlay and blank-frame

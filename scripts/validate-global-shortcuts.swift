@@ -22,10 +22,18 @@ struct ShortcutValidation {
             throw Failure("Usage: validate-global-shortcuts [--allow-agent-mute-conflicts]")
         }
         let allowExistingApp = !arguments.isEmpty
+        // Control–Option–Space belongs to macOS input-source switching. Keep the new
+        // listening action on L while preserving the established agent and mute keys.
+        guard GlobalShortcuts.Action.agent.key == kVK_ANSI_A,
+              GlobalShortcuts.Action.mute.key == kVK_ANSI_M,
+              GlobalShortcuts.Action.agentInput.key == kVK_ANSI_L,
+              GlobalShortcuts.Action.agentInput.label == "⌃⌥L" else {
+            throw Failure("Unexpected shortcut bindings")
+        }
         func register() throws {
             if let message = shortcuts.register() {
                 // Older installed releases own A/M but have no agent-input shortcut. Their
-                // exclusive registrations remain untouched; Space must succeed in this mode.
+                // exclusive registrations remain untouched; L must succeed in this mode.
                 guard allowExistingApp, message.contains("could not be registered"),
                       message.contains(GlobalShortcuts.Action.agent.label) || message.contains(GlobalShortcuts.Action.mute.label),
                       !message.contains(GlobalShortcuts.Action.agentInput.label) else {
@@ -69,7 +77,7 @@ struct ShortcutValidation {
         try send(3)
         try send(3, released: true)
         guard actions == [.agent, .agent, .mute, .agentInput, .agentInput, .agentInput] else { throw Failure("Re-registration did not deliver") }
-        print("Global shortcuts passed: agent/mute/input action routing, held-key suppression, unknown IDs, unregister/re-register; no keyboard input observed or physical keystrokes sent. \(allowExistingApp ? "A/M conflicts allowed; Space registration required." : "All three shortcut registrations required.")")
+        print("Global shortcuts passed: agent/mute/input action routing, held-key suppression, unknown IDs, unregister/re-register; no keyboard input observed or physical keystrokes sent. \(allowExistingApp ? "A/M conflicts allowed; L registration required." : "All three shortcut registrations required.")")
     }
     struct Failure: Error { let message: String; init(_ message: String) { self.message = message } }
 }
