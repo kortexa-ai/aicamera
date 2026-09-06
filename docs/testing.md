@@ -481,3 +481,38 @@ network, or component installation is used. Core tests also cover callback-gener
 late scene writes, restored mute, confidence/dwell, direct victory-to-fist transition, conflicts,
 neutral rearming, and stale/out-of-order frames. A live call audio/gesture check remains manual;
 these synthetic checks do not claim acceptance inside every receiving app.
+
+
+## Native model shutdown
+
+Quit must stop media admission and cancel model work before cached Whisper/HY-MT2 contexts are
+released. The app defers AppKit termination until that release completes; late requests to retained
+clients must fail with cancellation. A new process creates fresh clients normally. Saved privacy
+mute preferences do not change just because the app quits.
+
+The native harness uses the production termination delegate and model controllers, retaining their
+owners through normal process exit. It loads the pinned public JFK fixture above and synthetic
+translation text. It never starts camera/microphone capture, accesses credentials, or installs
+components. Build the Whisper bridge with the command in the local Whisper section, then:
+
+```sh
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug \
+  -framework AICameraCore -framework llama -framework whisper \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  -import-objc-header Sources/AICameraApp/WhisperBridge.h \
+  Sources/AICameraApp/AppLifecycleCoordinator.swift \
+  Sources/AICameraApp/BuiltinWhisperClient.swift Sources/AICameraApp/BuiltinWhisperModelController.swift \
+  Sources/AICameraApp/BuiltinTranslationClient.swift Sources/AICameraApp/BuiltinTranslationModelController.swift \
+  scripts/validate-model-shutdown.swift /tmp/aicamera-whisper-bridge.o \
+  -o /tmp/aicamera-model-shutdown-validation
+/tmp/aicamera-model-shutdown-validation /tmp/aicamera-whisper-jfk.wav
+/tmp/aicamera-model-shutdown-validation /tmp/aicamera-whisper-jfk.wav --during-load
+```
+
+Both processes must print `SHUTDOWN PASSED` and exit normally with code 0. The second quits while
+initial loading/inference is in progress; the first warms both engines before cancelling new work.
+Neither accepts a forced kill as success. An installed-host Quit/relaunch check separately verifies
+SwiftUI's delegate wiring. UI Quit is posted as an AppKit event so the calling Swift task can return
+before the [termination modal loop](https://developer.apple.com/documentation/appkit/nsapplication/terminatereply/terminatelater)
+waits for asynchronous cleanup.

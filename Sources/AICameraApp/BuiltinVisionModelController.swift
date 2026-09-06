@@ -167,6 +167,11 @@ final class BuiltinVisionModelController: ObservableObject {
         downloadTask?.cancel()
     }
 
+    func shutdown() {
+        if let downloadingModel { cancelDownload(downloadingModel) }
+        clients.removeAll()
+    }
+
     func remove(_ model: BuiltinVisionModel) {
         if downloadingModel == model {
             cancelDownload(model)

@@ -1,5 +1,12 @@
 # Validation record
 
+## Build 40: orderly native-model shutdown
+
+- Full `scripts/validate.sh` passes 161 Swift tests, the unsigned four-target build, metadata/script checks, and the HAL harness.
+- The native shutdown harness uses the actual AppKit termination delegate and cached Whisper Base/HY-MT2 clients, with owners retained through process exit. Public JFK audio and synthetic translation pass. Both the warmed-engine and cancel-during-load processes print `SHUTDOWN PASSED` and exit normally with code 0. Repeated shutdown is safe; retained clients and controller caches reject later inference.
+- UI Quit posts an AppKit event before entering the termination modal loop, which keeps Swift cleanup able to run. The installed signed host quits from its menu without hanging and relaunches at idle. No operator speech or camera presence was required.
+- Protected signed Release installation completed; source and installed strict nested signatures pass, and both bundle versions plus the protected installation marker report 40. No driver or camera extension changed.
+
 ## Build 39: persistent privacy mute
 
 - Full `scripts/validate.sh` passes 161 Swift tests, the unsigned four-target build, metadata/script checks, and the HAL harness.

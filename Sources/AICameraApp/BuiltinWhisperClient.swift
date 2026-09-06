@@ -4,10 +4,12 @@ import Foundation
 actor BuiltinWhisperClient: TranscriptionClient {
     private let modelURL: URL
     private var engine: Engine?
+    private var isShutdown = false
 
     init(modelURL: URL) { self.modelURL = modelURL }
 
     func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptEvent {
+        guard !isShutdown else { throw CancellationError() }
         let cancellation = CancellationFlag()
         return try await withTaskCancellationHandler {
             try cancellation.check()
@@ -25,6 +27,13 @@ actor BuiltinWhisperClient: TranscriptionClient {
         } onCancel: {
             cancellation.cancel()
         }
+    }
+
+    /// Actor isolation waits for any synchronous native inference before freeing its context.
+    /// Retained callers cannot recreate an engine once application shutdown has begun.
+    func shutdown() {
+        isShutdown = true
+        engine = nil
     }
 
     private final class CancellationFlag: @unchecked Sendable {

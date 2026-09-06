@@ -57,7 +57,10 @@ Implementation and acceptance priorities:
   its microphone output, stops the agent, and clears visible/pending speech. Manual unmute starts
   fresh capture. Receiving apps must use AI Camera Microphone; detecting their own internal mute
   switches remains future integration.
-- Next: clean native-model shutdown, then deliberate Realtime activation/mute using held victory
+- Native-model shutdown now closes admission, cancels pipeline work, waits for cached and still-live
+  replaced Whisper/HY-MT2 clients to release native contexts, then permits AppKit termination.
+  Public-fixture checks cover loaded models and cancellation during loading with retained owners.
+- Next: deliberate Realtime activation/mute using held victory
   and fist gestures with a manual fallback, followed by live overlay tools and multilingual captions.
   Activation must work during external camera/microphone demand and remain separate from enabling
   Realtime configuration. Synthetic event/media validation is the default acceptance path.

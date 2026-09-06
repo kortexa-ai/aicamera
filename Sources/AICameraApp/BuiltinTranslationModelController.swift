@@ -26,6 +26,9 @@ final class BuiltinTranslationModelController: ObservableObject {
     private var downloadTask: Task<Void, Never>?
     private var downloadGeneration: UInt64 = 0
     private var cachedClient: BuiltinTranslationClient?
+    private struct LiveClient { weak var value: BuiltinTranslationClient? }
+    private var liveClients: [LiveClient] = []
+    private var isShutdown = false
 
     init(modelDirectory: URL? = nil, downloadModel: (@Sendable () async throws -> URL)? = nil) {
         let support = modelDirectory ?? FileManager.default.urls(
@@ -40,7 +43,7 @@ final class BuiltinTranslationModelController: ObservableObject {
     var isReady: Bool { state == .ready }
 
     func download() {
-        guard downloadTask == nil, !isReady else { return }
+        guard !isShutdown, downloadTask == nil, !isReady else { return }
         downloadGeneration &+= 1
         let generation = downloadGeneration
         state = .downloading
@@ -103,11 +106,22 @@ final class BuiltinTranslationModelController: ObservableObject {
     }
 
     func makeTranslationClient() -> (any TranslationClient)? {
-        guard isReady else { return nil }
+        guard !isShutdown, isReady else { return nil }
         if let cachedClient { return cachedClient }
         let client = BuiltinTranslationClient(modelURL: modelFileURL)
         cachedClient = client
+        liveClients.removeAll { $0.value == nil }
+        liveClients.append(LiveClient(value: client))
         return client
+    }
+
+    func shutdown() async {
+        isShutdown = true
+        invalidateDownload()
+        let clients = liveClients.compactMap(\.value)
+        cachedClient = nil
+        liveClients.removeAll()
+        for client in clients { await client.shutdown() }
     }
 
     private func invalidateDownload() {

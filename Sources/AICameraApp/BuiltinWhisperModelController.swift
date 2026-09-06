@@ -13,7 +13,11 @@ final class BuiltinWhisperModelController: ObservableObject {
     private var task: Task<Void, Never>?
     private var downloadingModel: BuiltinWhisperModel?
     private var generation: UInt64 = 0
+    private var isShutdown = false
     private var clients: [BuiltinWhisperModel: BuiltinWhisperClient] = [:]
+    private struct LiveClient { weak var value: BuiltinWhisperClient? }
+    // A replaced cache entry can still be owned by an inference task during shutdown.
+    private var liveClients: [LiveClient] = []
 
     init(processorBrand: String? = nil) {
         availableModels = BuiltinWhisperModel.availableModels(processorBrand: processorBrand ?? Self.processorBrand)
@@ -32,6 +36,7 @@ final class BuiltinWhisperModelController: ObservableObject {
     func fileURL(for model: BuiltinWhisperModel) -> URL { directory.appendingPathComponent(model.fileName) }
 
     func download(_ model: BuiltinWhisperModel) {
+        guard !isShutdown else { return }
         guard availableModels.contains(model), task == nil, !isReady(model) else { return }
         generation &+= 1
         let generation = generation
@@ -85,11 +90,25 @@ final class BuiltinWhisperModelController: ObservableObject {
     }
 
     func makeTranscriptionClient(model: BuiltinWhisperModel) -> (any TranscriptionClient)? {
-        guard isReady(model) else { return nil }
+        guard !isShutdown, isReady(model) else { return nil }
         if let client = clients[model] { return client }
         let client = BuiltinWhisperClient(modelURL: fileURL(for: model))
         clients[model] = client
+        liveClients.removeAll { $0.value == nil }
+        liveClients.append(LiveClient(value: client))
         return client
+    }
+
+    func shutdown() async {
+        isShutdown = true
+        generation &+= 1
+        task?.cancel()
+        task = nil
+        downloadingModel = nil
+        let retainedClients = liveClients.compactMap(\.value)
+        clients.removeAll()
+        liveClients.removeAll()
+        for client in retainedClients { await client.shutdown() }
     }
 
     private static var processorBrand: String {

@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct AICameraApp: App {
+    @NSApplicationDelegateAdaptor(AICameraApplicationDelegate.self) private var applicationDelegate
     @StateObject private var model = AppModel()
 
     var body: some Scene {

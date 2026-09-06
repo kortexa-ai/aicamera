@@ -1,8 +1,25 @@
 import AppKit
 import SwiftUI
 
+@MainActor
+final class AICameraApplicationDelegate: NSObject, NSApplicationDelegate {
+    private var terminationTask: Task<Void, Never>?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard terminationTask == nil else { return .terminateLater }
+        // willTerminate is too late for async inference cancellation and native engine release.
+        terminationTask = Task {
+            await AppLifecycleCoordinator.shared.prepareForTermination?()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+}
+
 final class AppLifecycleCoordinator {
     static let shared = AppLifecycleCoordinator()
+
+    var prepareForTermination: (@MainActor () async -> Void)?
 
     private weak var settingsWindow: NSWindow?
     private var reminderDismissal: DispatchWorkItem?
@@ -22,7 +39,10 @@ final class AppLifecycleCoordinator {
     func quit() {
         reminderDismissal?.cancel()
         reminderPanel.orderOut(nil)
-        NSApp.terminate(nil)
+        // Enter AppKit termination from a run-loop event, after any Swift main-executor job
+        // returns. Its modal termination loop must remain able to run async cleanup.
+        NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0,
+                      inModes: [.default])
     }
 
     func handleSettingsQuitCommand() {

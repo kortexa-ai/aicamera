@@ -38,6 +38,7 @@ final class AppModel: ObservableObject {
     private let privacyMute: PrivacyMuteState
     @Published private(set) var privacyMuted: Bool
     private var privacyTransitionPending = false
+    private var isTerminating = false
     @Published private(set) var isRunning = false
     @Published private(set) var isStopping = false
     @Published private(set) var cameraIsActive = false
@@ -129,7 +130,7 @@ final class AppModel: ObservableObject {
     }
 
     var deviceOperationInProgress: Bool {
-        isStopping || pipelineStopTask != nil
+        isTerminating || isStopping || pipelineStopTask != nil
             || cameraPermissionTask != nil || microphonePermissionTask != nil
             || cameraExtensionManager.hasPendingRequest || audioDriverManager.status.isBusy
     }
@@ -244,9 +245,9 @@ final class AppModel: ObservableObject {
             }
             .store(in: &lifecycleCancellables)
 
-        NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
-            .sink { [weak self] _ in self?.stopForTermination() }
-            .store(in: &lifecycleCancellables)
+        AppLifecycleCoordinator.shared.prepareForTermination = { [weak self] in
+            await self?.prepareForTermination()
+        }
 
         refreshDevicesAndDrivers()
         reconcileDemand()
@@ -518,6 +519,7 @@ final class AppModel: ObservableObject {
     }
 
     private func reconcileDemand() {
+        guard !isTerminating else { return }
         let hadActiveTest = cameraTestActive || microphoneTestActive
         let externalDemandArrived = demandMonitor.cameraRequested
             || demandMonitor.microphoneRequested
@@ -1431,7 +1433,14 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func stopForTermination() {
+    func prepareForTermination() async {
+        guard !isTerminating else { return }
+        isTerminating = true
+        // Close admission immediately without changing the saved user mute preference.
+        privacyMute.setMuted(true)
+        lifecycleCancellables.removeAll()
+        managerCancellables.removeAll()
+        audioController?.silenceForPrivacy()
         stopRealtimeConversation()
         codexAuthController.stop()
         cameraPermissionGeneration &+= 1
@@ -1458,10 +1467,15 @@ final class AppModel: ObservableObject {
         microphoneTestActive = false
         microphoneInputLevel = 0
         stopScriptRenderer()
-        if let pipeline {
-            Task { await pipeline.stop() }
-        }
+        let coordinator = pipeline
         pipeline = nil
+        await coordinator?.stop()
+        // A configuration/client transition can already own the retiring pipeline.
+        await stopTask?.value
+        await pipelineStopTask?.value
+        await builtinWhisperModelController.shutdown()
+        await builtinTranslationModelController.shutdown()
+        builtinVisionModelController.shutdown()
     }
 
     private func updateStatus() {
