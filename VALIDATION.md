@@ -1,5 +1,23 @@
 # Validation record
 
+## Build 54: installed companion host
+
+Full local validation passes 240 Swift tests and all native fixtures. The release-settings fixture
+passes default upgrade/downgrade, ignored one-question settings, weather-grant rejection without
+file mutation, and compatibility after explicitly disabling weather.
+
+The direct development installer hit macOS App Management denial while changing the installed
+app's flag. Its protected transaction restored build 53 and generation 53. The Developer ID
+archive/export and signed local Installer package then passed source/package inspection and
+installed successfully through the same protected transaction. The installed host and marker both
+report 54, and strict deep signature verification and relaunch pass. Camera extension 45 and HAL
+driver 12 retain exactly their prior code-signing hashes; the system-extension roster is unchanged.
+No system component was activated, replaced, or removed. A private settings backup was preserved.
+
+The local build-54 package is signed for development acceptance; it was not notarized or published
+as a new release. The public 0.2.0 tag and release artifacts remain unchanged. Synthetic tool/audio
+results do not replace the subsequent spoken and independent-call acceptance checks.
+
 ## 0.2.0 release preparation
 
 - Full local validation passes with 182 Swift tests, rendered installer version checks, unsigned

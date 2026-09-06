@@ -145,3 +145,16 @@ The development and production installers use the same protected transaction. It
 identity before and after private staging, safely replaces only the fixed app, protects the installed
 root and generation marker, and rolls back catchable failures. See [the release process](release.md)
 for Developer ID archive/export, notarization, and production packaging.
+
+After installing a packaged release, macOS App Management can deny a terminal's attempt to modify
+that app even when its command runs under sudo. A `chflags: ... Operation not permitted` failure
+can come from this protection; check the TCC diagnostic and the transaction's restored app/marker
+before retrying. Apple documents [App Management](https://support.apple.com/en-mide/guide/mac-help/mchl211c911f/mac)
+as the permission for updating or deleting other apps.
+
+Use the normal signed Installer package path for that update, keeping the existing postinstall and
+protected transaction. Verify the package and exported app, preserve the Developer ID identity,
+then install the verified package with Installer or `sudo /usr/sbin/installer -pkg <package> -target /`.
+Do not substitute an ordinary recursive copy, disable privacy protections, or remove the camera
+extension. A locally signed development package is not a notarized public release; public packages
+still follow the complete release verification/notarization procedure.
