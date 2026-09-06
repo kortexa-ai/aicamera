@@ -108,6 +108,8 @@ public struct SceneSnapshot: Codable, Equatable, Sendable {
     public var transcript: TranscriptEvent?
     public var agentResponse: String?
     public var status: String?
+    public var agentStatus: AgentOverlayStatus?
+    public var gestureControl: GestureControlFeedback?
 
     public init(
         frameID: FrameID? = nil,

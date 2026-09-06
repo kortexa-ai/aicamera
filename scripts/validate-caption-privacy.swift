@@ -16,6 +16,9 @@ private final class Results: @unchecked Sendable {
     private let lock = NSLock()
     private var scenes: [(SceneSnapshot, PrivacyMuteState.Snapshot)] = []
     private var errors: [String] = []
+    private var controls: [GestureControlAction] = []
+    func control(_ action: GestureControlAction) { lock.lock(); controls.append(action); lock.unlock() }
+    var actions: [GestureControlAction] { lock.lock(); defer { lock.unlock() }; return controls }
     func record(_ scene: SceneSnapshot, _ privacy: PrivacyMuteState.Snapshot) {
         lock.lock(); defer { lock.unlock() }
         scenes.append((scene, privacy))
@@ -51,6 +54,7 @@ private struct CaptionPrivacyValidation {
         try await translationChecks()
         try await transcriptionChecks()
         try await gestureChecks()
+        try await realtimeGestureChecks()
         print("Passed caption privacy: immediate clear, muted admission, delayed completions across both edges, fresh recovery, gesture routing")
     }
     private static func coordinator(_ gate: PrivacyMuteState, _ results: Results, _ models: Models,
@@ -118,6 +122,27 @@ private struct CaptionPrivacyValidation {
         try require(gate.snapshot.isMuted, "Held fist did not reach privacy callback")
         try require(results.latest.transcript == nil && !results.latest.gestures.isEmpty,
                     "Gesture mute did not hide speech while preserving camera observations")
+        await pipeline.stop()
+    }
+    private static func realtimeGestureChecks() async throws {
+        let gate = PrivacyMuteState(), results = Results()
+        var config = AICameraConfiguration.default
+        config.pipeline.conversation.enabled = true
+        config.pipeline.conversation.realtimeEnabled = true
+        let pipeline = PipelineCoordinator(configuration: config, secrets: NoSecrets(), privacyMute: gate,
+            onGestureControlWithTimestamp: { action, _ in
+                results.control(action)
+                if action == .mute { gate.setMuted(true) }
+            }, onSnapshotWithPrivacy: { results.record($0, $1) }, onError: { results.error($0) })
+        await pipeline.started()
+        let confidence = HandGestureClassifier.observationConfidence(Array(repeating: 0.95, count: 12) + [0.4, 0.45])
+        for index in 0...22 {
+            await pipeline.submit(gestures: [.init(kind: index < 12 ? .victory : .closedFist, confidence: confidence)],
+                frameID: .init(rawValue: UInt64(index + 1)), capturedAt: ProcessInfo.processInfo.systemUptime)
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        try require(results.actions == [.startAgent, .mute], "Realtime camera controls did not deliver exactly one start and mute")
+        try require(gate.snapshot.isMuted, "Realtime gesture mute was not delivered")
         await pipeline.stop()
     }
     private static func wait(_ condition: () async -> Bool) async throws {

@@ -43,10 +43,10 @@ final class GestureDetector {
             .littleTip: normalized(little), .littlePIP: normalized(littlePIP), .littleMCP: normalized(littleMCP),
         ]
         guard let kind = HandGestureClassifier.classify(landmarks) else { return nil }
-        let confidence = Double([
+        let confidence = HandGestureClassifier.observationConfidence([
             wrist, thumb, index, indexPIP, indexMCP, middle, middlePIP, middleMCP,
             ring, ringPIP, ringMCP, little, littlePIP, littleMCP,
-        ].map(\.confidence).min() ?? 0)
+        ].map { Double($0.confidence) })
         var x = Double(index.location.x)
         if mirrored { x = 1 - x }
         let location = NormalizedPoint(x: x, y: 1 - Double(index.location.y))

@@ -13,6 +13,14 @@ public enum HandJoint: Hashable, Sendable {
 /// The classifier scales its thresholds to the observed palm instead of assuming that
 /// an upright, similarly sized hand is always presented to the camera.
 public enum HandGestureClassifier {
+    /// Every required joint must be usable. A partly occluded folded fingertip must not
+    /// turn the confidence of an otherwise clear hand into that one joint's confidence.
+    public static func observationConfidence(_ jointConfidences: [Double]) -> Double {
+        guard jointConfidences.count == 14,
+              jointConfidences.allSatisfy({ $0.isFinite && (0.25...1).contains($0) }) else { return 0 }
+        return jointConfidences.reduce(0, +) / Double(jointConfidences.count)
+    }
+
     public static func classify(_ points: [HandJoint: NormalizedPoint]) -> GestureKind? {
         guard let wrist = points[.wrist],
               let thumb = points[.thumbTip],

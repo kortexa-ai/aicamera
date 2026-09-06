@@ -2,6 +2,20 @@ import XCTest
 @testable import AICameraCore
 
 final class GestureControlGateTests: XCTestCase {
+    func testFeedbackShowsUncertainPoseAndProgressThenClearsOnRelease() {
+        var gate = GestureControlGate()
+        XCTAssertNil(gate.observe(pose(.victory, confidence: 0.6), capturedAt: 1, now: 1))
+        XCTAssertEqual(gate.feedback?.needsClearerPose, true)
+        for index in 0...4 {
+            let time = 2 + Double(index) * 0.1
+            XCTAssertNil(gate.observe(pose(.victory), capturedAt: time, now: time))
+        }
+        XCTAssertEqual(gate.feedback?.progress ?? 0, 0.5, accuracy: 0.001)
+        XCTAssertEqual(gate.feedback?.needsClearerPose, false)
+        XCTAssertNil(gate.observe([], capturedAt: 2.5, now: 2.5))
+        XCTAssertNil(gate.feedback)
+    }
+
     private func pose(_ kind: GestureKind, confidence: Double = 0.95) -> [GestureObservation] {
         [.init(kind: kind, confidence: confidence)]
     }

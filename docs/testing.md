@@ -557,3 +557,29 @@ capture input, record media, alter device defaults, or require a listener.
 
 The wire lifecycle follows [OpenAI's WebSocket audio guidance](https://developers.openai.com/api/docs/guides/realtime-conversations#handling-audio-with-websockets).
 These checks do not replace live provider/call acceptance of a gesture-started conversation.
+
+
+## Agent status in the outgoing camera
+
+After the full validation, run the synthetic compositor harness:
+
+```sh
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug -framework AICameraCore \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  Sources/AICameraApp/OverlayRenderer.swift Sources/AICameraApp/AgentStatusRenderer.swift \
+  scripts/validate-agent-overlay.swift -o /tmp/aicamera-agent-overlay-validation
+/tmp/aicamera-agent-overlay-validation
+```
+
+It checks all seven states in actual composited pixel buffers, the clear top margin, the status
+toggle, and deterministic animated geometry. Its PNGs contain only generated solid backgrounds.
+The caption-privacy harness also routes synthetic victory → fist through the real coordinator with
+Realtime enabled, checking exactly one start and mute without a popup, capture, or credentials.
+
+For manual acceptance, use QuickTime New Movie Recording with AI Camera selected. Keep the floating
+title bar visible; confirm both top overlays remain readable. Hold victory until the progress ring
+fills, then expect Connecting → Listening. Ask a question and check Thinking → Speaking → Listening.
+Use the menu error when the orb says Agent unavailable. Hold a fist and verify Muted, cleared
+captions, and silenced AI Camera Microphone. Explicitly Unmute in the menu before the next start.
+Do not press QuickTime Record or save captured media for this check.

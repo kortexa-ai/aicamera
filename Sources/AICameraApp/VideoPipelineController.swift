@@ -26,6 +26,8 @@ final class VideoPipelineController: NSObject {
     private let videoOutput = AVCaptureVideoDataOutput()
     private let captureQueue = DispatchQueue(label: "ai.kortexa.aicamera.video-capture", qos: .userInteractive)
     private let analysisQueue = DispatchQueue(label: "ai.kortexa.aicamera.video-analysis", qos: .userInitiated)
+    // Deliberate controls must not queue behind JPEG preparation for object/scene inference.
+    private let gestureQueue = DispatchQueue(label: "ai.kortexa.aicamera.gestures", qos: .userInitiated)
     private let renderer = OverlayRenderer()
     /// Confined to analysisQueue so network inputs never contain rendered private overlays.
     private let analysisRenderer = OverlayRenderer()
@@ -302,7 +304,7 @@ final class VideoPipelineController: NSObject {
         gestureInFlight = true
         lastGestureUptime = uptime
         let mirrored = configuration.capture.mirrorVideo
-        analysisQueue.async { [weak self] in
+        gestureQueue.async { [weak self] in
             guard let self, self.isActive(generation: generation) else { return }
             let observations = self.gestureDetector.detect(in: pixelBuffer, mirrored: mirrored)
             guard self.isActive(generation: generation) else { return }

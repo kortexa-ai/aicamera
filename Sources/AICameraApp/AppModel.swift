@@ -4,6 +4,7 @@ import AudioToolbox
 import AVFoundation
 import Combine
 import Foundation
+import OSLog
 
 // The producer relinquishes the preview after invoking its callback; only the main actor uses it.
 private struct SendableImage: @unchecked Sendable {
@@ -15,6 +16,7 @@ enum RealtimeConversationState: String, Sendable {
     case connecting = "Connecting…"
     case listening = "Listening…"
     case responding = "Responding…"
+    case speaking = "Speaking…"
     case failed = "Realtime failed"
 }
 
@@ -67,7 +69,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var settingsNavigationGeneration: UInt64 = 0
     @Published private(set) var cameraAuthorization = AVCaptureDevice.authorizationStatus(for: .video)
     @Published private(set) var microphoneAuthorization = AVCaptureDevice.authorizationStatus(for: .audio)
-    @Published private(set) var realtimeConversationState: RealtimeConversationState = .idle
+    @Published private(set) var realtimeConversationState: RealtimeConversationState = .idle {
+        didSet {
+            if oldValue != realtimeConversationState {
+                realtimeLog.info("Agent state: \(self.realtimeConversationState.rawValue, privacy: .public)")
+            }
+            publishAgentStatus()
+        }
+    }
+    private let realtimeLog = Logger(subsystem: "ai.kortexa.aicamera", category: "AgentActivation")
 
     let configurationController = ConfigurationController()
     let cameraExtensionManager = CameraExtensionManager()
@@ -182,6 +192,24 @@ final class AppModel: ObservableObject {
             && configurationController.isConfigurationUsable
             && microphoneAuthorization == .authorized && microphoneSourceAvailable
             && realtimeConnectTask == nil
+    }
+
+    private var agentOverlayStatus: AgentOverlayStatus? {
+        if privacyMuted { return .muted }
+        guard realtimeConversationEnabled else { return nil }
+        switch realtimeConversationState {
+        case .idle: return .off
+        case .connecting: return .connecting
+        case .listening: return .listening
+        case .responding: return .thinking
+        case .speaking: return .speaking
+        case .failed: return .failed
+        }
+    }
+
+    private func publishAgentStatus() {
+        currentSnapshot.agentStatus = agentOverlayStatus
+        videoController?.update(snapshot: currentSnapshot, privacy: privacyMute.snapshot)
     }
 
     var isPurePassthrough: Bool {
@@ -751,6 +779,7 @@ final class AppModel: ObservableObject {
                     switch action {
                     case .mute: model.setPrivacyMuted(true)
                     case .startAgent:
+                        model.realtimeLog.info("Held victory admitted from camera stream")
                         guard !model.realtimeConversationActive else { return }
                         if model.privacyMuted {
                             model.lastError = "Unmute AI Camera before starting the agent."
@@ -772,8 +801,9 @@ final class AppModel: ObservableObject {
                 Task { @MainActor [weak model = self] in
                     guard gate.isActive, let model, model.privacyMute.isCurrent(privacy) else { return }
                     model.currentSnapshot = snapshot
+                    model.currentSnapshot.agentStatus = model.agentOverlayStatus
                     if model.cameraRunGate?.isActive == true {
-                        model.videoController?.update(snapshot: snapshot, privacy: privacy)
+                        model.videoController?.update(snapshot: model.currentSnapshot, privacy: privacy)
                         model.pushSceneData(to: snapshot)
                     }
                 }
@@ -853,6 +883,7 @@ final class AppModel: ObservableObject {
     func startRealtimeConversation() {
         guard canStartRealtimeConversation else {
             lastError = "Realtime conversation is not configured or the microphone is unavailable."
+            if !realtimeConversationActive { realtimeConversationState = .failed }
             return
         }
         let profile = configurationController.configuration
@@ -861,6 +892,7 @@ final class AppModel: ObservableObject {
               let endpoint = profile.endpoints.first(where: { $0.id == endpointID }),
               endpoint.adapter == .openAIRealtime else {
             lastError = "The Realtime endpoint is missing."
+            realtimeConversationState = .failed
             return
         }
         do {
@@ -869,6 +901,7 @@ final class AppModel: ObservableObject {
             try PrivacyGate(configuration: profile.privacy).authorize(endpoint: endpoint, data: dataClasses)
         } catch {
             lastError = "Realtime privacy gate: \(error.localizedDescription)"
+            realtimeConversationState = .failed
             return
         }
         realtimeMicrophoneRequested = true
@@ -1131,6 +1164,7 @@ final class AppModel: ObservableObject {
         }
         realtimeAudioQueue.append(contentsOf: buffers)
         realtimeAudioQueueBytes += chunk.data.count
+        realtimeConversationState = .speaking
         drainRealtimeAudioQueue()
     }
 
@@ -1530,6 +1564,7 @@ final class AppModel: ObservableObject {
     }
 
     private func updateStatus() {
+        publishAgentStatus()
         isRunning = cameraIsActive || microphoneIsActive
         if isStopping || pipelineStopTask != nil {
             statusText = "Applying changes…"

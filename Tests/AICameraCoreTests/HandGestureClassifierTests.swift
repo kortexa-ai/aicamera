@@ -2,6 +2,27 @@ import XCTest
 @testable import AICameraCore
 
 final class HandGestureClassifierTests: XCTestCase {
+    func testPartlyOccludedFoldedJointDoesNotBlockAnOtherwiseClearHeldVictory() {
+        let confidences = Array(repeating: 0.95, count: 12) + [0.4, 0.45]
+        let confidence = HandGestureClassifier.observationConfidence(confidences)
+        XCTAssertGreaterThan(confidence, 0.8)
+        let kind = HandGestureClassifier.classify(hand(extended: [true, true, false, false]))!
+        var gate = GestureControlGate()
+        let actions = (0...10).compactMap { index in
+            let time = 10 + Double(index) * 0.125
+            return gate.observe([.init(kind: kind, confidence: confidence)], capturedAt: time, now: time)
+        }
+        XCTAssertEqual(actions, [.startAgent])
+    }
+
+    func testUncertainMissingAndInvalidJointsStillDenyActivationConfidence() {
+        XCTAssertLessThan(HandGestureClassifier.observationConfidence(Array(repeating: 0.6, count: 14)), 0.8)
+        XCTAssertEqual(HandGestureClassifier.observationConfidence(Array(repeating: 0.95, count: 13)), 0)
+        for value in [0.24, Double.nan, .infinity, 1.01] {
+            XCTAssertEqual(HandGestureClassifier.observationConfidence(Array(repeating: 0.95, count: 13) + [value]), 0)
+        }
+    }
+
     func testClassifiesExtendedFingerPatterns() {
         XCTAssertEqual(HandGestureClassifier.classify(hand(extended: [true, true, true, true])), .openPalm)
         XCTAssertEqual(HandGestureClassifier.classify(hand(extended: [true, true, false, false])), .victory)

@@ -1,5 +1,14 @@
 # Validation record
 
+## Build 43: outgoing agent status and usable held gestures
+
+- Full `scripts/validate.sh` passes 171 Swift tests, the unsigned four-target build, metadata/script checks, and the HAL harness. Native caption privacy also verifies exactly one victory start and fist mute through the real coordinator with Realtime enabled.
+- A regression reproduces the prior activation mismatch: one partly hidden folded fingertip could allow a visible victory label while its minimum confidence vetoed activation. Aggregate confidence of all 14 required usable landmarks admits that clear synthetic held pose; uncertain, missing, invalid, stale, brief, conflicting, and repeatedly held input remains bounded or rejected.
+- The native compositor harness checks all seven outgoing status states, clear title-bar space, Show Status suppression, and deterministic animated orb geometry. Its saved images contain generated solid backgrounds only. Hand inference has a separate bounded queue from JPEG preparation.
+- Signed installed-app acceptance with QuickTime New Movie Recording selected both AI Camera and AI Camera Microphone. The menu's Start agent reached Listening while both virtual-device clients were active. Stop preserved the call media lanes. Mute retained the camera, removed microphone demand from physical capture, hid captions, and disabled the agent; explicit Unmute restored availability. The temporary preview was closed without starting a recording, leaving the agent off and the original unmuted preference restored.
+- Strict nested signatures pass for the Release source and installed bundle; both versions and the protected installation marker are 43. No camera extension or audio driver was installed or activated.
+- Physical held-victory acceptance and a user-heard response after this confidence change remain separate; the unattended test proves installed connection during actual external demand, not recognition of a person's hand. No camera or microphone buffers were saved.
+
 ## Build 42: deliberate Realtime activation and consecutive turns
 
 - Full `scripts/validate.sh` passes 168 Swift tests, the unsigned four-target build, metadata/script checks, and the HAL harness. The demand tests cover agent activation during camera-only demand, release of only agent-owned capture, preservation of call microphone demand, privacy mute with video retained, permission/configuration denial, and explicit restart on call routing changes.

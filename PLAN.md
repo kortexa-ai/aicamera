@@ -1,6 +1,6 @@
 # AI Camera product plan
 
-AI Camera is a demand-driven macOS virtual camera and microphone. The host acquires each physical input only while the matching virtual device has a client, or while the user runs an explicit local test. Fresh profiles are pure passthrough. Optional bounded local and remote stages can render overlays, transcribe speech, run an agent, and mix speech output.
+AI Camera is a demand-driven macOS virtual camera and microphone. The host acquires each physical input only while the matching virtual device has a client, or while the user runs an explicit local test or explicitly activates the agent microphone. Fresh profiles are pure passthrough. Optional bounded local and remote stages can render overlays, transcribe speech, run an agent, and mix speech output.
 
 Detailed test evidence belongs in [`VALIDATION.md`](VALIDATION.md). Manual acceptance procedures belong in [`docs/testing.md`](docs/testing.md). This file is the canonical roadmap and backlog.
 
@@ -19,6 +19,10 @@ Implementation and acceptance priorities:
   active. Keep one server conversation across turns, close input during replies, and send replies
   to local speakers/headphones plus the virtual microphone when selected by a call. Fist engages
   privacy mute; manual Unmute remains separate. Keep inference/network work off media callbacks.
+- [x] Publish a native animated agent status orb and gesture hold feedback into the outgoing
+  camera image. Inset both top corners for floating client chrome. Aggregate usable hand-joint
+  confidence and isolate bounded hand inference from image preparation; keep live gesture/provider
+  acceptance separate from deterministic synthetic regressions.
 - [ ] Complete API-key Realtime acceptance: silent connection/response probe, one utterance,
   transcript/translation, overlay tools, cancellation, error recovery, and a second turn.
   Installed-app connection, retry to Listening, no-speech capture release, and preservation of
@@ -264,7 +268,7 @@ Design: `docs/overlay-script-renderer.md`. The model gets a bounded `render_over
 
 ## Non-negotiable constraints
 
-- Camera and microphone lanes remain independent and start only for matching external demand or an explicit local test.
+- Camera and microphone lanes remain independent and start only for matching external demand, an explicit local test, or an explicitly activated agent microphone.
 - Network inference never runs on capture, CoreMediaIO, HAL, or other real-time callbacks.
 - All media and network queues remain bounded; stale work is replaced, dropped, expired, or cancelled.
 - Raw camera and microphone media is memory-only unless the user explicitly enables recording.

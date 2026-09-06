@@ -14,6 +14,7 @@ final class OverlayRenderer {
     private let ciContext = CIContext(options: [.cacheIntermediates: false])
     private var pool: CVPixelBufferPool?
     private var poolSize = CGSize.zero
+    private let agentRenderer = AgentStatusRenderer()
 
     func render(
         input: CVPixelBuffer,
@@ -154,11 +155,19 @@ final class OverlayRenderer {
             let location = gesture.location.map { CGPoint(x: $0.x * width, y: $0.y * height) } ?? CGPoint(x: 16, y: 54)
             drawLabel("Gesture: \(gesture.kind.rawValue)", at: location, accent: accent, context: context)
         }
-        if configuration.showStatus, let status = snapshot.status, !status.isEmpty {
-            drawLabel(status, at: CGPoint(x: 14, y: 14), accent: accent, context: context)
+        // Leave room for floating client chrome (including QuickTime's Movie Recording title bar).
+        let topInset = max(56, height * 0.1)
+        if configuration.showStatus {
+            if let status = snapshot.status, !status.isEmpty {
+                drawLabel(status, at: CGPoint(x: 14, y: topInset), accent: accent, context: context)
+            }
+            if let agentStatus = snapshot.agentStatus {
+                agentRenderer.draw(status: agentStatus, feedback: snapshot.gestureControl,
+                                   width: width, top: topInset, context: context)
+            }
         }
         if configuration.showAgentResponse, let response = snapshot.agentResponse, !response.isEmpty {
-            drawLabel("AI: \(response)", at: CGPoint(x: 14, y: 52), accent: accent, context: context, maximumWidth: width - 28)
+            drawLabel("AI: \(response)", at: CGPoint(x: 14, y: topInset + 80), accent: accent, context: context, maximumWidth: width - 28)
         }
         if configuration.showTranscript, let transcript = snapshot.transcript?.text, !transcript.isEmpty {
             drawLabel(transcript, at: CGPoint(x: width / 2, y: height - 18), accent: accent,

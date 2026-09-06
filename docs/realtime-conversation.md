@@ -26,22 +26,35 @@ the turn. Network sends never wait inside capture callbacks.
 See the [OpenAI WebSocket guide](https://developers.openai.com/api/docs/guides/realtime-websocket)
 and [Realtime conversation guide](https://developers.openai.com/api/docs/guides/realtime-conversations).
 
-## One-shot Talk
+## Deliberate conversation activation
 
-Talk starts or joins an explicit local microphone test and arms one utterance after connection.
-The same user-selected hardware microphone supplies both the local test and Realtime. A virtual
-or ineligible default input is never used as a fallback.
+Hold a victory sign for about one second with Gestures enabled, or choose **Start agent** in
+AI Camera's menu. Both use the same host conversation path while QuickTime or another app consumes
+the virtual camera. The popup's local Test camera and Test microphone controls are independent.
+Activation starts the selected physical microphone when needed; receiving-app microphone demand
+continues independently. A call selecting **AI Camera Microphone** receives the mixed microphone
+and agent reply, and the agent reply also plays locally without microphone monitoring.
 
-The gate closes on server VAD stop, Stop, lane teardown, settings changes, external-client
-takeover, app termination, or failure. Monotonic deadlines reject no speech after 10 seconds,
-limit an armed utterance to 30 seconds, and stop a stalled response after 120 seconds. Late VAD
-messages cannot rearm a closed turn. States distinguish connecting, listening, responding, and
-failure. Each Talk currently creates a new session; context retention between turns is pending.
+The outgoing image shows an animated status orb below the top-right client-title-bar margin:
+Agent off, Connecting, Listening, Thinking, Speaking, Muted, or Agent unavailable. A victory/fist
+hold shows progress; uncertain poses ask for a clearer hand. The orb and title follow Overlays →
+Show Status. Connection failures also leave their details in the AI Camera menu. The native status
+layer is independent of model-generated overlays and is never included in clean inference frames.
 
-Local Talk replies play through the macOS speakers/headphones output without monitoring the
-physical microphone. A local microphone test alone starts no playback engine. External virtual
-microphone clients retain the bounded microphone/speech mixer. Finishing or stopping Talk releases
-the microphone test if Talk started it, while preserving a test the user had already started.
+Hand confidence averages the required usable landmarks, so a single partly hidden folded joint
+does not veto an otherwise clear pose. Activation still requires 80% aggregate confidence, a
+continuous 0.8-second hold, fresh observations, and release before repeating the same control.
+Hand inference uses its own bounded queue so image preparation cannot delay it.
+
+One server conversation retains context across utterances. Input closes during response generation
+and playback, then rearms only after both reply outputs drain. There is no idle listening timeout;
+an utterance is bounded to 30 seconds, a response to 120 seconds, and final playback to 125 seconds.
+Stop agent, fist mute, teardown, failure, and configuration/routing changes cancel the session and
+reject late work. Stop releases only agent-owned microphone demand. Changing a call's microphone
+routing rebuilds the media graph and requires explicitly starting the agent again.
+
+Hold a fist to mute audio, stop the agent, and clear captions. Unmute explicitly in AI Camera;
+victory cannot silently unmute. Receiving apps' own mute buttons are not currently synchronized.
 
 Independent transcription and legacy response generation pause during Realtime. Partial ASR
 windows and resampler state are discarded at each transition, so audio from a Realtime turn cannot

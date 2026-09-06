@@ -684,7 +684,8 @@ actor PipelineCoordinator {
         let privacy = privacyMute.snapshot
         let snapshot = await scene.current(privacyGeneration: privacy.generation)
         guard isRunning, privacyMute.isCurrent(privacy) else { return }
-        let visible = privacyMute.filtered(snapshot, from: privacy)
+        var visible = privacyMute.filtered(snapshot, from: privacy)
+        visible.gestureControl = gestureControls.feedback
         if let onSnapshotWithPrivacy { onSnapshotWithPrivacy(visible, privacy) }
         else { onSnapshot(visible) }
     }
