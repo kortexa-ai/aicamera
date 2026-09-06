@@ -48,6 +48,9 @@ Implementation and acceptance priorities:
   need provider decisions; see [#59](https://github.com/kortexa-ai/aicamera/issues/59).
 - [x] Add bounded local decimal calculation so the agent can check arithmetic before showing a
   comparison. Report rounding and retain units/assumptions; calculation does not verify live facts.
+- [x] Add requested quiet countdowns in the native card slot, with bounded elapsed-time updates,
+  a short finished state, and existing Clear/Reset/privacy cleanup. No background alarm or model
+  callback is scheduled; agent input can remain paused while the countdown runs.
 - [x] Add requested local face-effect anchors with crop/mirror alignment, a small three.js bridge,
   and native stale/lost-track suppression. Dense 3D tracking, occlusion, diverse real-person motion,
   and independent call-client acceptance remain parts of #45.

@@ -6,6 +6,30 @@ final class AgentToolsTests: XCTestCase {
         AgentToolCommand.parse(name: name, arguments: arguments, script: AICameraConfiguration.default.overlays.script)
     }
 
+    func testQuietTimerSchemaRequiresWholeBoundedSecondsAndVisualCapability() throws {
+        XCTAssertEqual(parse("start_timer", #"{"durationSeconds":120}"#),
+                       .startTimer(try XCTUnwrap(AgentTimerRequest(durationSeconds: 120))))
+        XCTAssertEqual(parse("start_timer", #"{"durationSeconds":3600,"label":"Discussion"}"#),
+                       .startTimer(try XCTUnwrap(AgentTimerRequest(durationSeconds: 3600, label: "Discussion"))))
+        for arguments in ["{}", #"{"durationSeconds":true}"#, #"{"durationSeconds":"120"}"#,
+                          #"{"durationSeconds":0}"#, #"{"durationSeconds":3601}"#,
+                          #"{"durationSeconds":1.5}"#, #"{"durationSeconds":1e300}"#,
+                          #"{"durationSeconds":120,"label":null}"#,
+                          #"{"durationSeconds":120,"label":""}"#,
+                          #"{"durationSeconds":120,"sound":true}"#] {
+            XCTAssertNil(parse("start_timer", arguments), arguments)
+        }
+        let script = AICameraConfiguration.default.overlays.script
+        let absent = AgentToolCatalog.definitions(capabilities: .init(notes: true), script: script)
+        XCTAssertFalse(absent.contains { $0["name"] as? String == "start_timer" })
+        let tools = AgentToolCatalog.definitions(capabilities: .init(visuals: true), script: script)
+        let timer = try XCTUnwrap(tools.first { $0["name"] as? String == "start_timer" })
+        let schema = try XCTUnwrap(timer["parameters"] as? [String: Any])
+        XCTAssertEqual(schema["required"] as? [String], ["durationSeconds"])
+        XCTAssertTrue(AgentToolCatalog.instructions(capabilities: .init(visuals: true)).contains("start_timer"))
+        XCTAssertFalse(AgentToolCatalog.instructions(capabilities: .init()).contains("start_timer"))
+    }
+
     func testToolArgumentsRejectUnknownFieldsInvalidIdentifiersAndCoercion() {
         XCTAssertEqual(parse("save_note", #"{"text":"Follow up tomorrow"}"#), .saveNote(text: "Follow up tomorrow", id: nil))
         XCTAssertEqual(parse("list_notes", "{}"), .listNotes(query: ""))
@@ -42,7 +66,7 @@ final class AgentToolsTests: XCTestCase {
         let notes = AgentToolCatalog.definitions(capabilities: .init(notes: true), script: script)
         XCTAssertEqual(notes.compactMap { $0["name"] as? String }, ["save_note", "list_notes", "delete_note"])
         let all = AgentToolCatalog.definitions(capabilities: .init(visuals: true, notes: true, conversationControls: true), script: script)
-        XCTAssertEqual(all.count, 10)
+        XCTAssertEqual(all.count, 11)
         XCTAssertTrue(JSONSerialization.isValidJSONObject(all))
         for tool in all {
             let schema = try XCTUnwrap(tool["parameters"] as? [String: Any])

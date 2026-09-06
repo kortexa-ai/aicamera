@@ -144,6 +144,19 @@ A successful call waits for one clear face; tracking loss hides the graphic. Cle
 overlay replacement, privacy mute, and camera shutdown stop or hide the effect. Landmarks stay
 local and are not added to the Realtime conversation. See [face effects](face-effects.md).
 
+## Quiet on-camera countdowns
+
+With Tools and an active camera, ask for a countdown such as “Give us two minutes to discuss
+this.” `start_timer` accepts 1–3600 whole seconds and an optional short label. A native card shows
+minutes and seconds, then “Time’s up” for five seconds before disappearing. The host owns the
+elapsed-time clock; no model request, sound, or notification fires at completion.
+
+The countdown shares the information-card slot. A new card or timer replaces it; `clear_cards`
+or **Reset view** cancels it. Privacy mute, disabling Tools, or camera shutdown clears it too.
+Pausing agent input leaves it running while you keep talking. This is a transient visual during
+an active camera session, not a saved reminder or an alarm that runs after sleep, quit, or restart.
+An optional label is visible to everyone who can see the camera output.
+
 ## Local arithmetic
 
 With Tools enabled, `calculate` checks a decimal expression before the agent states or displays a

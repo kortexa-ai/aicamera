@@ -877,3 +877,17 @@ are in the ignored build/face-fixtures directory; automatic validation uses no p
 camera/microphone was opened, captured media recorded, credentials accessed, or installed app/system
 component changed. Real movement, diverse lighting/glasses, and independent call-client acceptance
 remain separate checks under issue 45.
+
+## Quiet native countdowns
+
+Full local validation passes 236 Swift tests and native fixtures. Countdown tests cover integer
+duration and UTF-8 label bounds, exact second/finish/expiry boundaries, stable identity and content
+revisions, replacement of cards and timers, invalid requests preserving current content, Clear,
+Reset, and tool/session capability contracts. The existing listening policy and audio fixtures
+continue to pass; the timer adds no audio path, background task, or model completion callback.
+
+The production native compositor displays 2:00, 1:59, and Time’s up at 1280×720 and 640×480.
+Pixel comparisons verify stable caching within a second, changed text across revisions, clear
+and expiry restoring the baseline, and reserved status/caption space. Synthetic start/finished
+images were visually reviewed. No capture device, credential, installed app, or system component
+was used or changed. Live spoken selection and independent-client control checks remain separate.

@@ -1,9 +1,10 @@
 import AICameraCore
 import AppKit
 
-/// Confined to the video render queue. Rasterize each bounded card once, then reuse its pixels.
+/// Confined to the video render queue. Reuse pixels until a card's content revision changes.
 final class AgentCardRenderer {
     private var cachedID: UUID?
+    private var cachedRevision: Int?
     private var cachedSize = CGSize.zero
     private var cachedImage: CGImage?
 
@@ -14,9 +15,9 @@ final class AgentCardRenderer {
         let maximumSize = CGSize(width: min(width * 0.36, 440 * scale).rounded(),
                                  height: min(height * 0.29, 208 * scale, height - top - bottomMargin).rounded())
         guard maximumSize.width >= 100, maximumSize.height >= 80 else { return }
-        if cachedID != card.id || cachedSize != maximumSize {
+        if cachedID != card.id || cachedRevision != card.revision || cachedSize != maximumSize {
             cachedImage = rasterize(card.content, maximumSize: maximumSize, scale: scale)
-            cachedID = card.id; cachedSize = maximumSize
+            cachedID = card.id; cachedRevision = card.revision; cachedSize = maximumSize
         }
         guard let image = cachedImage else { return }
         let size = CGSize(width: image.width, height: image.height)

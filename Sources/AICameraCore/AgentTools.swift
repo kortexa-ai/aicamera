@@ -23,6 +23,7 @@ public struct AgentToolCapabilities: Equatable, Sendable {
 public enum AgentToolCommand: Equatable, Sendable {
     case overlay(RealtimeOverlayCommand)
     case showCard(AgentCardRequest)
+    case startTimer(AgentTimerRequest)
     case clearCards
     case saveNote(text: String, id: UUID?)
     case listNotes(query: String)
@@ -49,6 +50,15 @@ public enum AgentToolCommand: Equatable, Sendable {
               let value = try? JSONDecoder().decode(JSONValue.self, from: data),
               case let .object(object) = value else { return nil }
         switch name {
+        case "start_timer":
+            guard Set(object.keys).isSubset(of: ["durationSeconds", "label"]),
+                  let duration = object["durationSeconds"]?.numberValue,
+                  duration.isFinite, (1...3_600).contains(duration), duration.rounded() == duration else { return nil }
+            let label: String
+            if let raw = object["label"] { guard let text = raw.stringValue else { return nil }; label = text }
+            else { label = "Timer" }
+            guard let request = AgentTimerRequest(durationSeconds: Int(duration), label: label) else { return nil }
+            return .startTimer(request)
         case "calculate":
             guard Set(object.keys) == ["expression"], let expression = object["expression"]?.stringValue,
                   !expression.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -225,6 +235,10 @@ public enum AgentToolCatalog {
         }
         if capabilities.visuals {
             result += [
+                tool("start_timer", "Start a quiet on-camera countdown when requested. Replaces the current card or timer. Duration is 1–3600 whole seconds; the finished message lasts five seconds. No sound, notification, model callback, or saved alarm. clear_cards cancels it. Pausing agent listening leaves it running; Reset view, privacy mute, Tools disable, or camera shutdown clears it.", properties: [
+                    "durationSeconds": ["type": "integer", "minimum": 1, "maximum": 3_600],
+                    "label": string("Optional short public title, at most 80 UTF-8 bytes; default Timer.")
+                ], required: ["durationSeconds"]),
                 tool("render_overlay", "Replace the live transparent camera overlay with bounded three.js JavaScript on a 640x360 canvas. Use for illustrations, shapes, and animation; show_card handles readable text.", properties: [
                     "script": string("Immediate JavaScript using THREE, AICamera.scene/camera/onFrame. No renderer, canvas, DOM load handler, network, or requestAnimationFrame."),
                     "ttlSeconds": ["type": "number", "minimum": 1, "maximum": script.maximumTTLSeconds]
@@ -244,7 +258,7 @@ public enum AgentToolCatalog {
                     "position": ["type": "string", "enum": AgentCardPosition.allCases.map(\.rawValue)],
                     "ttlSeconds": ["type": "number", "minimum": 1, "maximum": 300]
                 ], required: ["title", "body"]),
-                tool("clear_cards", "Remove the information card from the camera. Saved notes are retained.")
+                tool("clear_cards", "Remove the information card or cancel the countdown. Saved notes are retained.")
             ]
         }
         if capabilities.visuals && capabilities.faceEffects {
@@ -294,6 +308,7 @@ public enum AgentToolCatalog {
             text += """
 
             Use show_card for a short readable answer, reminder, definition, number, or comparison. Prefer one concise card, with a source/time footer for verified current facts.
+            Use start_timer for a requested quiet countdown of up to one hour. It shares the card slot: showing a new card replaces the timer. Do not use show_card for a ticking clock, announce its completion, or promise a background alarm. The native timer works while agent input is paused. clear_cards cancels it.
             Use render_overlay for charming three.js illustrations and animation when useful or requested. Keep faces, captions, and the top status area clear. render_overlay is fixed-position and does not enable face tracking.
             A card and a three.js illustration can coexist. Cards expire; clear_cards removes the card and clear_overlay removes the illustration. Neither deletes saved notes.
             For a presentation with the person in a corner, render the full-frame illustration first, then use set_camera_layout with mode inset. The default camera inset is one fifth of frame width in the lower-right corner. Its height preserves aspect ratio. Keep key information out of the selected corner and caption/status areas. Use mode camera alone to reset the view and clear generated graphics. This does not load external image URLs or track a face.

@@ -56,6 +56,33 @@ struct AgentToolsValidation {
                         snapshot: .init(), cards: presentation.cards(at: 105))!) == baseline, "Expired card retained pixels")
                 }
             }
+            // Native timer updates must invalidate cached text while retaining one presentation slot.
+            presentation.startTimer(AgentTimerRequest(durationSeconds: 120, label: "Discussion")!, at: 100)
+            var previousTimerPixels: Data?
+            for (now, expected, name) in [(100.0, "2:00", "start"), (101.0, "1:59", "tick"), (220.0, "Time’s up", "finished")] {
+                let cards = presentation.cards(at: now)
+                precondition(cards.count == 1 && cards[0].content.body == expected)
+                let output = renderer.render(input: frame, capture: capture, overlay: overlays,
+                                             snapshot: .init(), cards: cards)!
+                let pixels = bytes(output)
+                precondition(pixels != baseline && pixels != previousTimerPixels, "Timer text did not reach native pixels")
+                previousTimerPixels = pixels
+                precondition(pixels == bytes(renderer.render(input: frame, capture: capture, overlay: overlays,
+                    snapshot: .init(), cards: presentation.cards(at: now + 0.2))!), "Timer pixels changed within a second")
+                let rowBytes = CVPixelBufferGetBytesPerRow(output)
+                precondition(pixels.prefix(rowBytes * 115) == baseline.prefix(rowBytes * 115), "Timer covers status")
+                precondition(pixels.suffix(rowBytes * 90) == baseline.suffix(rowBytes * 90), "Timer covers captions")
+                let representation = NSBitmapImageRep(data: renderer.previewImage(from: output)!.tiffRepresentation!)!
+                try representation.representation(using: .png, properties: [:])!
+                    .write(to: directory.appendingPathComponent("\(width)-timer-\(name).png"))
+            }
+            precondition(bytes(renderer.render(input: frame, capture: capture, overlay: overlays,
+                snapshot: .init(), cards: presentation.cards(at: 225))!) == baseline, "Finished timer retained pixels")
+            presentation.startTimer(AgentTimerRequest(durationSeconds: 120)!, at: 230)
+            presentation.clear()
+            precondition(bytes(renderer.render(input: frame, capture: capture, overlay: overlays,
+                snapshot: .init(), cards: presentation.cards(at: 231))!) == baseline, "Cleared timer retained pixels")
+
             // Long captions retain priority over a visual response in both supported fixture sizes.
             overlays.enabled = true; overlays.showStatus = true; overlays.showAgentResponse = true
             overlays.showTranscript = true; overlays.showDetectionBoxes = false; overlays.showGestureLabels = false
@@ -150,7 +177,7 @@ struct AgentToolsValidation {
         precondition(notes.notes.isEmpty)
         let reopened = try await AgentNoteStore(fileURL: notesURL).all()
         precondition(reopened.isEmpty)
-        print("Passed local note UI state, native cards, inset/mirrored camera pixels, missing/expired scene fallback, caption space, and clean baseline at two resolutions. Synthetic images: \(directory.path)")
+        print("Passed local note UI state, native cards/countdown revisions, inset/mirrored camera pixels, missing/expired scene fallback, caption space, and clean baseline at two resolutions. Synthetic images: \(directory.path)")
     }
 
     static func bytes(_ buffer: CVPixelBuffer) -> Data {

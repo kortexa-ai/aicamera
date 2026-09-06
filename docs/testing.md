@@ -761,6 +761,20 @@ owns Control–Option–L too, the fixture must fail; do not quit the user's app
 This establishes native registration/event routing, not a live spoken Pause listening/Ask again
 cycle. Keep the latter in the installed-candidate acceptance matrix.
 
+## Quiet timer regression
+
+Core presentation/tool tests cover whole-second duration and label bounds, exact tick/finish/expiry
+boundaries, stable identity/revisions, invalid requests preserving current content, and card/timer
+replacement, Clear, and Reset. The native agent-tools fixture renders 2:00, 1:59, and Time’s up at
+1280×720 and 640×480, compares cached pixels within a second and changed pixels between revisions,
+and verifies clear/expiry returns to the clean baseline without covering status/caption space.
+All clocks and input frames in this check are synthetic.
+
+For installed acceptance, ask for a short timer, pause agent listening, and keep talking in an
+independent camera client. Verify the countdown continues without spoken completion. Replace it
+with an information card, cancel with Reset view, and test privacy mute and camera shutdown.
+These live controls require their own acceptance; synthetic rendering does not establish them.
+
 ## Face-effect anchors
 
 `FaceAnchorTests` validates coordinate transforms, mirror/roll, partial/invalid geometry, effect

@@ -1635,6 +1635,16 @@ final class AppModel: ObservableObject {
             guard configuration.enabled else { return ["ok": false, "error": "Notes tools are disabled in Settings."] }
             do { try await agentNotes.delete(id: id); return ["ok": true] }
             catch { return ["ok": false, "error": error.localizedDescription] }
+        case let .startTimer(request):
+            guard configuration.enabled, cameraRunGate?.isActive == true else {
+                return ["ok": false, "error": "Visual tools require enabled Tools and an active camera."]
+            }
+            guard let card = agentPresentation.startTimer(request) else {
+                return ["ok": false, "error": "The countdown could not start."]
+            }
+            return ["ok": true, "id": card.id.uuidString, "durationSeconds": request.durationSeconds,
+                    "visibility": "outgoing camera", "replaces": "current card or timer", "sound": false,
+                    "finishedDisplaySeconds": 5]
         case let .showCard(request):
             guard configuration.enabled, cameraRunGate?.isActive == true else {
                 return ["ok": false, "error": "Visual tools require enabled Tools and an active camera."]

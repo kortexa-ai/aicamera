@@ -25,12 +25,28 @@ public struct AgentCard: Identifiable, Equatable, Sendable {
     public let id: UUID
     public let content: AgentCardRequest
     public let expiresAt: TimeInterval
+    public let revision: Int
+
+    init(id: UUID, content: AgentCardRequest, expiresAt: TimeInterval, revision: Int = 0) {
+        self.id = id; self.content = content; self.expiresAt = expiresAt; self.revision = revision
+    }
 
     /// The compositor may move a card away from the camera inset without replacing its content.
     public func positioned(_ position: AgentCardPosition) -> AgentCard {
         var content = content
         content.position = position
-        return AgentCard(id: id, content: content, expiresAt: expiresAt)
+        return AgentCard(id: id, content: content, expiresAt: expiresAt, revision: revision)
+    }
+}
+
+public struct AgentTimerRequest: Equatable, Sendable {
+    public let durationSeconds: Int
+    public let label: String
+
+    public init?(durationSeconds: Int, label: String = "Timer") {
+        guard (1...3_600).contains(durationSeconds), label.utf8.count <= 80,
+              AgentPresentationState.valid(.init(title: label, body: "0:00")) else { return nil }
+        self.durationSeconds = durationSeconds; self.label = label
     }
 }
 
@@ -39,6 +55,25 @@ public final class AgentPresentationState: @unchecked Sendable {
     private let lock = NSLock()
     private var current: [AgentCard] = []
     private var inset: AgentCameraInset?
+    private var timer: Countdown?
+
+    private struct Countdown {
+        let id = UUID()
+        let request: AgentTimerRequest
+        let startedAt: TimeInterval
+        var endsAt: TimeInterval { startedAt + Double(request.durationSeconds) }
+        var expiresAt: TimeInterval { endsAt + 5 }
+
+        func card(at now: TimeInterval) -> AgentCard? {
+            guard now >= startedAt, now < expiresAt else { return nil }
+            let remaining = Int(ceil(max(0, endsAt - now)))
+            let body = remaining == 0 ? "Time’s up" : String(format: "%d:%02d", remaining / 60, remaining % 60)
+            // Timer duration has its own one-hour limit; ordinary cards retain their five-minute TTL.
+            let content = AgentCardRequest(title: request.label, body: body, style: .metric,
+                                           ttlSeconds: Double(request.durationSeconds) + 5)
+            return AgentCard(id: id, content: content, expiresAt: expiresAt, revision: remaining)
+        }
+    }
     public init() {}
 
     @discardableResult
@@ -48,16 +83,31 @@ public final class AgentPresentationState: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         // One readable card at a time. Saving notes is independent of this transient slot.
         current = [card]
+        timer = nil
+        return card
+    }
+
+    @discardableResult
+    public func startTimer(_ request: AgentTimerRequest,
+                           at now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> AgentCard? {
+        guard now.isFinite, now >= 0 else { return nil }
+        let value = Countdown(request: request, startedAt: now)
+        guard value.endsAt.isFinite, value.endsAt > now, value.expiresAt.isFinite,
+              value.expiresAt > value.endsAt, let card = value.card(at: now) else { return nil }
+        lock.lock(); defer { lock.unlock() }
+        current.removeAll()
+        timer = value
         return card
     }
 
     public func cards(at now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> [AgentCard] {
         guard now.isFinite else { return [] }
         lock.lock(); defer { lock.unlock() }
+        if let timer { return timer.card(at: now).map { [$0] } ?? [] }
         return current.filter { $0.expiresAt > now }
     }
 
-    public func clear() { lock.lock(); current.removeAll(); lock.unlock() }
+    public func clear() { lock.lock(); current.removeAll(); timer = nil; lock.unlock() }
 
     @discardableResult
     public func showCameraInset(_ request: AgentCameraInsetRequest,
@@ -83,7 +133,7 @@ public final class AgentPresentationState: @unchecked Sendable {
     }
 
     public func clearCameraInset() { lock.lock(); inset = nil; lock.unlock() }
-    public func reset() { lock.lock(); current.removeAll(); inset = nil; lock.unlock() }
+    public func reset() { lock.lock(); current.removeAll(); timer = nil; inset = nil; lock.unlock() }
 
     public static func valid(_ value: AgentCardRequest) -> Bool {
         validText(value.title, maximumBytes: 160) && validText(value.body, maximumBytes: 1_200)
