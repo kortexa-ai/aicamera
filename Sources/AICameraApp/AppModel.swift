@@ -39,6 +39,7 @@ private final class PipelineRunGate: @unchecked Sendable {
 final class AppModel: ObservableObject {
     private static let privacyMuteKey = "privacyMicrophoneMuted"
     private let runtimeFeatures = RuntimeFeatureState()
+    private var appliedConfiguration: AICameraConfiguration?
     private var currentSnapshotFeatures = RuntimeFeatureState().snapshot
     @Published private(set) var transcriptionRequested = UserDefaults.standard.object(forKey: "quickTranscription") as? Bool ?? true
     @Published private(set) var translationRequested = UserDefaults.standard.object(forKey: "quickTranslation") as? Bool ?? true
@@ -203,6 +204,9 @@ final class AppModel: ObservableObject {
     }
     var transcriptionActive: Bool { transcriptionConfigured && transcriptionRequested }
     var translationActive: Bool { translationConfigured && translationRequested }
+    var translationTargetName: String {
+        TranslationLanguageCatalog.name(for: configurationController.configuration.pipeline.translation.targetLanguage)
+    }
     var gesturesActive: Bool { gesturesConfigured && gesturesRequested }
 
     var readiness: CameraReadiness {
@@ -248,8 +252,11 @@ final class AppModel: ObservableObject {
 
     private func synchronizeRuntimeFeatures() {
         let previous = runtimeFeatures.snapshot
+        let translation = configurationController.configuration.pipeline.translation
         let features = runtimeFeatures.set(transcription: transcriptionActive,
-                                           translation: translationActive, gestures: gesturesActive)
+                                           translation: translationActive, gestures: gesturesActive,
+                                           translationSourceLanguage: translation.sourceLanguage,
+                                           translationTargetLanguage: translation.targetLanguage)
         guard features != previous else { return }
         currentSnapshot = runtimeFeatures.filtered(currentSnapshot, from: currentSnapshotFeatures)
         previewImage = nil
@@ -313,6 +320,7 @@ final class AppModel: ObservableObject {
         let muted = UserDefaults.standard.bool(forKey: Self.privacyMuteKey)
         privacyMuted = muted
         privacyMute = PrivacyMuteState(isMuted: muted)
+        appliedConfiguration = configurationController.configuration
         cameraExtensionManager.objectWillChange
             .merge(with: audioDriverManager.objectWillChange)
             .sink { [weak self] _ in
@@ -347,12 +355,17 @@ final class AppModel: ObservableObject {
         configurationController.$configuration
             .dropFirst()
             .debounce(for: .milliseconds(200), scheduler: RunLoop.main)
-            .sink { [weak self] _ in
-                self?.cameraLaneError = nil
-                self?.microphoneLaneError = nil
-                self?.refreshResolvedSources()
-                self?.synchronizeRuntimeFeatures()
-                self?.beginStop()
+            .sink { [weak self] next in
+                guard let self else { return }
+                let change = self.appliedConfiguration.map { ConfigurationChangePolicy.classify(from: $0, to: next) } ?? .restartMedia
+                self.appliedConfiguration = next
+                guard change != .unchanged else { return }
+                self.synchronizeRuntimeFeatures()
+                guard change == .restartMedia else { return }
+                self.cameraLaneError = nil
+                self.microphoneLaneError = nil
+                self.refreshResolvedSources()
+                self.beginStop()
             }
             .store(in: &lifecycleCancellables)
 
@@ -1146,7 +1159,9 @@ final class AppModel: ObservableObject {
                     toolsAvailable: profile.overlays.script.enabled && self.cameraRunGate?.isActive == true,
                     agentTools: AgentToolCapabilities(
                         visuals: profile.overlays.script.enabled && self.cameraRunGate?.isActive == true,
-                        notes: profile.overlays.script.enabled, conversationControls: true
+                        notes: profile.overlays.script.enabled, conversationControls: true,
+                        cameraState: profile.overlays.script.enabled,
+                        translation: profile.overlays.script.enabled && self.translationConfigured
                     )
                 )
                 try await session.connect(session: request)
@@ -1474,6 +1489,28 @@ final class AppModel: ObservableObject {
             return ["ok": false, "error": "Unknown tool or invalid arguments."]
         }
         switch command {
+        case .cameraState:
+            guard configuration.enabled else { return ["ok": false, "error": "Tools are disabled in Settings."] }
+            return cameraToolState()
+        case let .setTranslation(request):
+            guard configuration.enabled, translationConfigured else {
+                return ["ok": false, "error": "Enable caption translation and Tools in Settings first."]
+            }
+            guard request.enabled != true || builtinTranslationModelController.isReady else {
+                return ["ok": false, "error": "The translation model is not ready. Download it in Settings first."]
+            }
+            if let target = request.targetLanguage {
+                configurationController.update { $0.pipeline.translation.targetLanguage = target }
+                guard configurationController.configuration.pipeline.translation.targetLanguage == target else {
+                    return ["ok": false, "error": configurationController.validationMessage ?? "The language could not be saved."]
+                }
+            }
+            if let enabled = request.enabled {
+                translationRequested = enabled
+                UserDefaults.standard.set(enabled, forKey: "quickTranslation")
+            }
+            synchronizeRuntimeFeatures()
+            return cameraToolState()
         case .waitForUser, .sleep:
             realtimeQuietTurn = true
             resetRealtimeAudio(stopPlayback: true)
@@ -1509,6 +1546,16 @@ final class AppModel: ObservableObject {
         case let .overlay(command):
             return applyRealtimeOverlay(command)
         }
+    }
+
+    private func cameraToolState() -> [String: Any] {
+        let translation = configurationController.configuration.pipeline.translation
+        return ["ok": true, "translation": [
+            "configured": translationConfigured, "enabled": translationActive,
+            "modelReady": builtinTranslationModelController.isReady,
+            "sourceLanguage": translation.sourceLanguage, "targetLanguage": translation.targetLanguage,
+            "output": "captions"
+        ], "privacyMuted": privacyMuted, "agentListeningRequested": agentListening.requested]
     }
 
     private func applyRealtimeOverlay(_ command: RealtimeOverlayCommand) -> [String: Any] {

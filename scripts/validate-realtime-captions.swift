@@ -38,13 +38,16 @@ private final class Captions: @unchecked Sendable {
 }
 private actor ControlledTranslation: TranslationClient {
     private var inputs: [String] = []
+    private var requests: [TranslationRequest] = []
     private var pending: [String: CheckedContinuation<String, Error>] = [:]
     func translate(_ request: TranslationRequest) async throws -> String {
         inputs.append(request.text)
+        requests.append(request)
         // Deliberately ignore cancellation: the coordinator must reject late completions itself.
         return try await withCheckedThrowingContinuation { pending[request.text] = $0 }
     }
     var started: [String] { inputs }
+    var languages: [String] { requests.map { $0.sourceLanguage + "→" + $0.targetLanguage } }
     func finish(_ text: String) { pending.removeValue(forKey: text)?.resume(returning: "translated-" + text) }
 }
 
@@ -53,6 +56,7 @@ private actor ControlledTranslation: TranslationClient {
         try await controlledChecks()
         try await talkCompletionChecks()
         try await speakerChecks()
+        try await languageChangeChecks()
         if CommandLine.arguments.contains("--controlled-only") { return }
         let controller = BuiltinTranslationModelController()
         guard let client = controller.makeTranslationClient() else {
@@ -84,7 +88,8 @@ private actor ControlledTranslation: TranslationClient {
     }
 
     private static func makeCoordinator(client: any TranslationClient, captions: Captions,
-                                        showTranscript: Bool = true, showAgentResponse: Bool = true) -> PipelineCoordinator {
+                                        showTranscript: Bool = true, showAgentResponse: Bool = true,
+                                        features: RuntimeFeatureState = RuntimeFeatureState()) -> PipelineCoordinator {
         var profile = AICameraConfiguration.default
         profile.overlays.enabled = true
         profile.overlays.showTranscript = showTranscript
@@ -92,8 +97,39 @@ private actor ControlledTranslation: TranslationClient {
         profile.pipeline.translation.enabled = true
         profile.pipeline.translation.sourceLanguage = "en"
         profile.pipeline.translation.targetLanguage = "zh"
-        return PipelineCoordinator(configuration: profile, secrets: NoSecrets(), builtinTranslationClient: client,
+        return PipelineCoordinator(configuration: profile, secrets: NoSecrets(), runtimeFeatures: features, builtinTranslationClient: client,
             onSnapshot: { captions.record($0) }, onSpeech: { _ in true }, onError: { captions.recordError($0) })
+    }
+
+    private static func languageChangeChecks() async throws {
+        let client = ControlledTranslation(), captions = Captions(), features = RuntimeFeatureState()
+        features.set(transcription: true, translation: true, gestures: true,
+                     translationSourceLanguage: "en", translationTargetLanguage: "zh")
+        let coordinator = makeCoordinator(client: client, captions: captions, features: features)
+        await coordinator.setRealtimeTranscriptionActive(true)
+        await coordinator.submitRealtimeTranscript(source: .local, text: "old-language", isFinal: true)
+        try await waitUntil { await client.started == ["old-language"] }
+        features.set(transcription: true, translation: true, gestures: true,
+                     translationSourceLanguage: "en", translationTargetLanguage: "es")
+        await coordinator.synchronizeRuntimeFeatures()
+        await coordinator.submitRealtimeTranscript(source: .local, text: "new-language", isFinal: true)
+        try require(await client.started == ["old-language"], "Language change overlapped translation workers")
+        await client.finish("old-language")
+        try await waitUntil { await client.started == ["old-language", "new-language"] }
+        try require(await client.languages == ["en→zh", "en→es"], "New caption used stale target language")
+        try require(!captions.texts.contains("translated-old-language"), "Old language completion republished a caption")
+        await client.finish("new-language")
+        try await waitUntil { captions.texts.last == "translated-new-language" }
+
+        features.set(transcription: true, translation: false, gestures: true,
+                     translationSourceLanguage: "en", translationTargetLanguage: "es")
+        await coordinator.synchronizeRuntimeFeatures()
+        await coordinator.submitRealtimeTranscript(source: .local, text: "translation-off", isFinal: true)
+        try require(captions.texts.last == "translation-off", "Translation Off lost original captions")
+        try require(await client.started == ["old-language", "new-language"], "Disabled translation performed inference")
+        try require(!captions.hasErrors, "Language changes caused a coordinator error")
+        await coordinator.stop()
+        print("Passed live language controls: new target, stale-result rejection, one translation worker, Off preserves original captions")
     }
 
     private static func controlledChecks() async throws {

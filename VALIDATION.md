@@ -776,3 +776,17 @@ The optional assistant provider probe compiles. Both Codex and API-key attempts 
 connecting because the standalone helper could not read a credential without interaction
 (OSStatus -25293). No authentication prompt was requested, ACL changed, or credential refreshed.
 Consequently the expanded public-provider tool contract is prepared but not accepted by this run.
+
+## Live caption translation controls
+
+Full local validation passes 204 Swift tests and the native controlled-caption harness. New checks
+cover strict translation arguments and the shared Settings/tool language catalog, the narrow
+source/target-only configuration update policy, and caption-generation changes independent of
+gestures. Simultaneous provider, privacy, device, model, or feature changes still require restart.
+
+The production coordinator fixture switches from Chinese to Spanish while a cancellation-insensitive
+translation is pending. The retired result cannot publish, the next request uses Spanish, and only
+one translation worker runs. Turning translation off retains original captions and performs no
+translation inference. Existing partial/final, source separation, normal completion, cancellation,
+listening, card, installer, and HAL checks also pass. No captured input, credentials, or model
+inference were needed. Actual voice invocation and installed-host acceptance remain separate.

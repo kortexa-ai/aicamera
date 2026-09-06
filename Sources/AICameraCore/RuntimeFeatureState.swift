@@ -7,6 +7,8 @@ public final class RuntimeFeatureState: @unchecked Sendable {
         public fileprivate(set) var transcription: Bool
         public fileprivate(set) var translation: Bool
         public fileprivate(set) var gestures: Bool
+        public fileprivate(set) var translationSourceLanguage: String?
+        public fileprivate(set) var translationTargetLanguage: String?
         public fileprivate(set) var captionGeneration: UInt64 = 0
         public fileprivate(set) var gestureGeneration: UInt64 = 0
         public fileprivate(set) var captionsChangedAt: TimeInterval = -.infinity
@@ -28,9 +30,12 @@ public final class RuntimeFeatureState: @unchecked Sendable {
 
     @discardableResult
     public func set(transcription: Bool, translation: Bool, gestures: Bool,
+                    translationSourceLanguage: String? = nil, translationTargetLanguage: String? = nil,
                     now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Snapshot {
         lock.lock(); defer { lock.unlock() }
-        if value.transcription != transcription || value.translation != translation {
+        if value.transcription != transcription || value.translation != translation
+            || value.translationSourceLanguage != translationSourceLanguage
+            || value.translationTargetLanguage != translationTargetLanguage {
             value.captionGeneration &+= 1
             value.captionsChangedAt = now
         }
@@ -41,6 +46,8 @@ public final class RuntimeFeatureState: @unchecked Sendable {
         value.transcription = transcription
         value.translation = translation
         value.gestures = gestures
+        value.translationSourceLanguage = translationSourceLanguage
+        value.translationTargetLanguage = translationTargetLanguage
         return value
     }
 

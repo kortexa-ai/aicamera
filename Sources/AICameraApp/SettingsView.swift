@@ -1331,33 +1331,10 @@ struct SettingsView: View {
     private static let targetLanguages = [LanguageChoice(code: "system", name: "System Language")] + modelLanguages
     private static let transcriptionLanguages = [LanguageChoice(code: "auto", name: "Auto-detect")]
         + modelLanguages.filter { $0.code.count == 2 }
-    private static let modelLanguages = [
-        LanguageChoice(code: "en", name: "English"), LanguageChoice(code: "zh", name: "Chinese"),
-        LanguageChoice(code: "zh-Hant", name: "Traditional Chinese"), LanguageChoice(code: "es", name: "Spanish"),
-        LanguageChoice(code: "fr", name: "French"), LanguageChoice(code: "de", name: "German"),
-        LanguageChoice(code: "it", name: "Italian"), LanguageChoice(code: "pt", name: "Portuguese"),
-        LanguageChoice(code: "ja", name: "Japanese"), LanguageChoice(code: "ko", name: "Korean"),
-        LanguageChoice(code: "ar", name: "Arabic"), LanguageChoice(code: "ru", name: "Russian"),
-        LanguageChoice(code: "uk", name: "Ukrainian"), LanguageChoice(code: "tr", name: "Turkish"),
-        LanguageChoice(code: "hi", name: "Hindi"), LanguageChoice(code: "vi", name: "Vietnamese"),
-        LanguageChoice(code: "th", name: "Thai"), LanguageChoice(code: "id", name: "Indonesian"),
-        LanguageChoice(code: "ms", name: "Malay"), LanguageChoice(code: "tl", name: "Filipino"),
-        LanguageChoice(code: "pl", name: "Polish"), LanguageChoice(code: "cs", name: "Czech"),
-        LanguageChoice(code: "nl", name: "Dutch"), LanguageChoice(code: "he", name: "Hebrew"),
-        LanguageChoice(code: "fa", name: "Persian"), LanguageChoice(code: "ur", name: "Urdu"),
-        LanguageChoice(code: "bn", name: "Bengali"), LanguageChoice(code: "ta", name: "Tamil"),
-        LanguageChoice(code: "te", name: "Telugu"), LanguageChoice(code: "mr", name: "Marathi"),
-        LanguageChoice(code: "gu", name: "Gujarati"), LanguageChoice(code: "km", name: "Khmer"),
-        LanguageChoice(code: "my", name: "Burmese"), LanguageChoice(code: "bo", name: "Tibetan"),
-        LanguageChoice(code: "kk", name: "Kazakh"), LanguageChoice(code: "mn", name: "Mongolian"),
-        LanguageChoice(code: "ug", name: "Uyghur"), LanguageChoice(code: "yue", name: "Cantonese"),
-    ]
+    private static let modelLanguages = TranslationLanguageCatalog.languages
 }
 
-private struct LanguageChoice {
-    let code: String
-    let name: String
-}
+private typealias LanguageChoice = TranslationLanguageChoice
 
 private struct PrivacyRoute {
     let feature: String

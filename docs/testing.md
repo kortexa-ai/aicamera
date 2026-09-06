@@ -415,7 +415,10 @@ xcrun swiftc -parse-as-library -O \
 
 Use `--controlled-only` to skip real HY-MT2 inference. Controlled completions intentionally ignore
 cancellation to verify late-result rejection, one active/latest pending translation, partial/final
-handling, new-turn isolation, and Stop. Talk-only cancellation is checked with the coordinator still
+handling, new-turn isolation, and Stop. It also switches the live target from Chinese to Spanish
+while an older request is pending, verifies the next request's target and stale-result rejection,
+then turns translation off while retaining original captions. These controlled checks run in
+the full validation script. Talk-only cancellation is checked with the coordinator still
 active: neither the active translation nor its pending replacement may publish. Normal completion
 must still publish its final translation, a later turn must work, and canceled event consumers must
 not create caption work. All four combinations of Show transcript and Show agent

@@ -132,6 +132,26 @@ Try “Remember to send Maya the draft,” “Show three short points about this
 Current weather and prices require a real lookup provider, which is not yet included. Instructions
 require the agent to say when it cannot verify current facts and to report tool success honestly.
 
+## Live caption translation controls
+
+With Tools enabled, `get_camera_state` reports current translation configuration/on-off state,
+model readiness, source/target language, privacy mute, and requested agent listening. It exposes
+no endpoint, credential, notebook, or captured media. `set_translation` is available when caption
+translation is configured. Its optional `enabled` boolean operates the same quick control as the
+toolbar, and its optional `targetLanguage` changes the saved target in Settings. At least one
+change is required. Supported targets come from the same language catalog as the Settings picker.
+
+“Translate into Spanish” can set both `enabled: true` and `targetLanguage: "es"`; “Turn translation
+off” changes only the quick control. Changing a selected language alone leaves the on/off state
+alone. Enabling requires a ready model. These tools neither download/enable an unconfigured
+feature nor unmute AI Camera. Their output is captions, not spoken translation.
+
+Source/target language changes from Settings or the agent reuse the live media graph and keep
+the Realtime session connected. The runtime caption generation changes immediately, retires
+older translated results, and keeps one active/latest-pending translation worker. Every other
+configuration change keeps the existing media-restart path. New captions use the new language;
+the previous displayed caption is cleared rather than retranslated from stored speech.
+
 ## Local overlay tools
 
 The session advertises `render_overlay` and `clear_overlay` only when Tools is enabled and an

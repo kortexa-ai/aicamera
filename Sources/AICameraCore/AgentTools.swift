@@ -4,8 +4,12 @@ public struct AgentToolCapabilities: Equatable, Sendable {
     public var visuals: Bool
     public var notes: Bool
     public var conversationControls: Bool
-    public init(visuals: Bool = false, notes: Bool = false, conversationControls: Bool = false) {
+    public var cameraState: Bool
+    public var translation: Bool
+    public init(visuals: Bool = false, notes: Bool = false, conversationControls: Bool = false,
+                cameraState: Bool = false, translation: Bool = false) {
         self.visuals = visuals; self.notes = notes; self.conversationControls = conversationControls
+        self.cameraState = cameraState; self.translation = translation
     }
 }
 
@@ -18,6 +22,8 @@ public enum AgentToolCommand: Equatable, Sendable {
     case deleteNote(id: UUID)
     case waitForUser
     case sleep
+    case cameraState
+    case setTranslation(AgentTranslationRequest)
 
     public static func parse(name: String, arguments: String, script: ScriptOverlayConfiguration) -> Self? {
         if let overlay = RealtimeOverlayCommand.parse(name: name, arguments: arguments, configuration: script) {
@@ -30,6 +36,17 @@ public enum AgentToolCommand: Equatable, Sendable {
         case "wait_for_user": return object.isEmpty ? .waitForUser : nil
         case "sleep_agent": return object.isEmpty ? .sleep : nil
         case "clear_cards": return object.isEmpty ? .clearCards : nil
+        case "get_camera_state": return object.isEmpty ? .cameraState : nil
+        case "set_translation":
+            guard Set(object.keys).isSubset(of: ["enabled", "targetLanguage"]) else { return nil }
+            let enabled: Bool?
+            if let raw = object["enabled"] { guard case let .bool(value) = raw else { return nil }; enabled = value }
+            else { enabled = nil }
+            let target: String?
+            if let raw = object["targetLanguage"] { guard let value = raw.stringValue else { return nil }; target = value }
+            else { target = nil }
+            guard let request = AgentTranslationRequest(enabled: enabled, targetLanguage: target) else { return nil }
+            return .setTranslation(request)
         case "save_note":
             guard Set(object.keys).isSubset(of: ["text", "id"]),
                   let text = object["text"]?.stringValue,
@@ -135,6 +152,16 @@ public enum AgentToolCatalog {
                      properties: ["id": string("Exact note UUID.")], required: ["id"])
             ]
         }
+        if capabilities.cameraState {
+            result.append(tool("get_camera_state", "Read AI Camera's current translation, agent-listening, and privacy-mute state. Does not read saved notes, credentials, endpoints, or media."))
+        }
+        if capabilities.translation {
+            result.append(tool("set_translation", "Change caption translation when requested. Optional enabled controls the same on/off state as the toolbar. Optional targetLanguage changes the saved target language live; specifying a language alone does not enable translation. This does not translate spoken audio or unmute anything.", properties: [
+                "enabled": ["type": "boolean", "description": "True enables caption translation; false disables it."],
+                "targetLanguage": ["type": "string", "enum": TranslationLanguageCatalog.targetCodes,
+                                   "description": "Supported language code, shared with Settings. system uses the Mac's language."]
+            ]))
+        }
         if capabilities.visuals {
             result += [
                 tool("render_overlay", "Replace the live transparent camera overlay with bounded three.js JavaScript on a 640x360 canvas. Use for illustrations, shapes, and animation; show_card handles readable text.", properties: [
@@ -177,6 +204,12 @@ public enum AgentToolCatalog {
             Use save_note only when the user asks you to remember something. Summarize the requested note faithfully. A brief 'Saved' is enough; do not unnecessarily repeat private contents aloud.
             Saved notes remain local until a requested note lookup returns them to this conversation. Saving or looking up a note does not publish it. Only display or read note contents to the call when the user asks.
             """
+        }
+        if capabilities.cameraState {
+            text += "\nUse get_camera_state when the current feature state matters. Never infer that a configured feature is currently on."
+        }
+        if capabilities.translation {
+            text += "\nUse set_translation for requested caption translation changes. Use a supported language code. When asked to translate into a language, set enabled true and that targetLanguage; when asked only to change the selected language, leave enabled unchanged. The tool cannot translate spoken audio. Respect unavailable setup and never claim to unmute the user."
         }
         if capabilities.visuals {
             text += """

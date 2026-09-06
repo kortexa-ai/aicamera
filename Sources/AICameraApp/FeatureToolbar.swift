@@ -17,7 +17,7 @@ struct FeatureToolbar: View {
             }
             control("Translate", icon: "translate", active: model.translationActive,
                     available: model.translationConfigured,
-                    help: model.translationConfigured ? "Toggle translated captions. Uses transcription while on." : "Enable translation and a transcription source in Settings first.") {
+                    help: model.translationConfigured ? "\(model.translationActive ? "Translating to" : "Translation off · selected language:") \(model.translationTargetName). Toggle translated captions." : "Enable translation and a transcription source in Settings first.") {
                 model.toggleTranslation()
             }
             control("Agent", icon: "waveform.and.mic", active: model.realtimeConversationActive,
@@ -60,7 +60,7 @@ struct FeatureToolbar: View {
         .buttonStyle(.plain).disabled(!available)
         .help(help)
         .accessibilityLabel(title == "Mute" ? (active ? "Unmute microphone" : "Mute microphone") : title)
-        .accessibilityValue(active ? "On" : "Off")
+        .accessibilityValue(active ? (title == "Translate" ? "On · \(model.translationTargetName)" : "On") : "Off")
         .accessibilityIdentifier("quick-\(title.lowercased())")
     }
 }

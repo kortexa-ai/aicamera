@@ -533,8 +533,8 @@ actor PipelineCoordinator {
         do {
             let text = try await builtinTranslationClient.translate(.init(
                 text: transcript.text,
-                sourceLanguage: translation.sourceLanguage,
-                targetLanguage: translation.targetLanguage
+                sourceLanguage: features.translationSourceLanguage ?? translation.sourceLanguage,
+                targetLanguage: features.translationTargetLanguage ?? translation.targetLanguage
             ))
             return TranscriptEvent(
                 text: text,

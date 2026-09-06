@@ -37,7 +37,10 @@ Implementation and acceptance priorities:
 - [x] Add a bounded sequence of agent tools, requested local notes with their own window,
   readable native information cards, silent waiting, and agent sleep. Keep note storage separate
   from camera presentation and preserve the published 0.2.0 package while these develop on main.
-- [ ] Add sourced current-information providers, voice-controlled translation/layout, and
+- [x] Add typed state/translation tools and live language updates shared with Settings. Keep
+  caption on/off aligned with the quick toolbar and reject prior-language completions without
+  restarting the active conversation. Spoken translation and presentation layout remain #57.
+- [ ] Add sourced current-information providers, spoken translation/presentation layout, and
   face-tracked graphics in the staged companion roadmap. Validate new listening/tool interactions
   with live speech after synthetic transport and native UI acceptance.
 

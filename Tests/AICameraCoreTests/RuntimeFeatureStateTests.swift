@@ -2,6 +2,20 @@ import XCTest
 @testable import AICameraCore
 
 final class RuntimeFeatureStateTests: XCTestCase {
+    func testLanguageChangesRetireOldCaptionsWithoutResettingGestures() {
+        let controls = RuntimeFeatureState()
+        let old = controls.set(transcription: true, translation: true, gestures: true,
+                               translationSourceLanguage: "en", translationTargetLanguage: "zh", now: 1)
+        let next = controls.set(transcription: true, translation: true, gestures: true,
+                                translationSourceLanguage: "en", translationTargetLanguage: "es", now: 2)
+        XCTAssertFalse(controls.permitsCaptions(from: old))
+        XCTAssertEqual(next.captionGeneration, old.captionGeneration + 1)
+        XCTAssertEqual(next.gestureGeneration, old.gestureGeneration)
+        XCTAssertEqual(next.translationTargetLanguage, "es")
+        XCTAssertEqual(controls.set(transcription: true, translation: true, gestures: true,
+                                     translationSourceLanguage: "en", translationTargetLanguage: "es", now: 3), next)
+    }
+
     func testTranslationKeepsItsTranscriptionDependencyRunning() {
         let controls = RuntimeFeatureState(transcription: false, translation: true, gestures: false)
         XCTAssertTrue(controls.snapshot.needsTranscription)
