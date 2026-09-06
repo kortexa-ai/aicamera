@@ -580,11 +580,12 @@ xcrun swiftc -parse-as-library -O \
   -F build/DerivedData-Validation/Build/Products/Debug -framework AICameraCore \
   -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
   Sources/AICameraApp/OverlayRenderer.swift Sources/AICameraApp/AgentStatusRenderer.swift \
+  Sources/AICameraApp/AgentCardRenderer.swift \
   scripts/validate-agent-overlay.swift -o /tmp/aicamera-agent-overlay-validation
 /tmp/aicamera-agent-overlay-validation
 ```
 
-It checks all seven states in actual composited pixel buffers, the clear top margin, the status
+It checks all agent states in actual composited pixel buffers, the clear top margin, the status
 toggle, and deterministic animated geometry. Its PNGs contain only generated solid backgrounds.
 The caption-privacy harness also routes synthetic victory → fist through the real coordinator with
 Realtime enabled, checking exactly one start and mute without a popup, capture, or credentials.
@@ -640,3 +641,33 @@ Use the signed installed host; leave the camera extension and HAL driver unchang
 synthetic ASR/translation clients; `scripts/validate-global-shortcuts.swift` exercises native hotkey
 registration and synthetic Carbon events without capturing keyboard input. Unit tests cover runtime
 caption/gesture generations, dependency policy, and stale scene writes across actor hops.
+
+## Notes and information cards
+
+The full validation runs `validate-agent-tools.swift` with a temporary notebook and generated
+solid-color frames. It checks note-controller state, every card style/position at 1280×720 and
+640×480, cached pixels, expiry, clearing, and space reserved for answer/translation captions.
+It does not start AppModel, a camera, microphone, network session, or credential read. To retain
+synthetic PNGs for visual review after building the validation framework:
+
+```sh
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug -framework AICameraCore \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  Sources/AICameraApp/AgentNotesController.swift Sources/AICameraApp/OverlayRenderer.swift \
+  Sources/AICameraApp/AgentCardRenderer.swift Sources/AICameraApp/AgentStatusRenderer.swift \
+  scripts/validate-agent-tools.swift -o /tmp/aicamera-agent-tools-validation
+/tmp/aicamera-agent-tools-validation /tmp/aicamera-synthetic-cards
+```
+
+Core tests cover persistent note identity, corrupt-file preservation, capacity and Unicode limits,
+strict tool schemas/arguments, asynchronous function results arriving after response completion,
+duplicate calls, per-question round/call limits, silent-wait completion, and card lifetime.
+
+For manual acceptance, use an explicitly disposable note. Save it by voice, find it in Notes,
+edit it, and ask the agent to find it again. Saving must not publish a card. Ask separately to show
+its contents, then clear the card; the saved note must remain. Verify expiry, Tools off, and privacy
+mute in the actual virtual camera. In one-question mode, ask for a note or card, keep talking to
+another person, and confirm the agent waits for Ask again. Ask it to go to sleep and confirm the
+call's microphone continues. Run synthetic checks first; live speech/model judgment still needs
+its own acceptance and must not be inferred from these fixtures.

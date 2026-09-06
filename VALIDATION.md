@@ -750,3 +750,24 @@ build, and HAL checks. The production WebSocket fixture exercises pause/resume, 
 continued response audio, and tool continuation without a camera, microphone, network, or credential.
 No working host or system component was replaced for these checks. Native UI and live voice
 acceptance for this new input control remain separate from the released 0.2.0 acceptance.
+
+## Local notes and information cards
+
+The host-side assistant foundation passes 199 Swift tests and full local validation, including
+installer transaction checks, an unsigned app/framework/extension build, and the HAL harness.
+The validation script now also runs the production Realtime transport fixture and native card/
+note-controller fixture without capture, credentials, or network.
+
+Synthetic card checks cover all four positions and three styles at 1280×720 and 640×480,
+replacement, cached pixels, expiration, clearing, caption margins, and an unchanged clean baseline.
+Visual review confirmed upright English and Chinese text, compact card height, and separate
+agent-answer/translation areas. The isolated Notes preview used a temporary notebook and the
+production view/controller: save/edit, search, deletion preserving another note, and empty-state
+layout passed native accessibility and visual inspection.
+
+Core tests cover note persistence and exact identity, owner-only file permissions, unreadable
+notebook preservation, text/capacity bounds, strict tool arguments and schemas, delayed tool
+completion, duplicate-call denial, eight-call/three-round limits, and quiet completion. No camera
+or microphone buffers were recorded. The published package and installed host were not changed.
+Actual model choice of tools, spoken note recall, and one-question listening during a live call
+remain human/provider acceptance work.

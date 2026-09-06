@@ -287,7 +287,7 @@ struct SettingsView: View {
                 disabledText: "Realtime tools are disabled."
             ) {
                 if toolsEnabled {
-                    Text("Ask Realtime to draw or clear an animated overlay while the camera is active. Each overlay expires automatically.")
+                    Text("Ask the agent to remember a local note, show an information card, or draw a three.js animation in the camera. Notes stay in your notebook until you ask to share them; camera visuals expire automatically.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -631,6 +631,9 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Data processing").font(.headline)
             Text("AI Camera keeps camera and microphone data in memory while it is in use. It passes media from your selected hardware devices to the AI Camera virtual devices and does not save recordings.")
+            Text("Notes you ask to save stay on this Mac. A requested note lookup sends matching text to the active agent. Saving a note does not display it in the camera feed.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             if activeLocalProcessingDescriptions.isEmpty && configuredDataRoutes.isEmpty {
                 Text("No AI features are currently processing camera or microphone data.")
             } else {

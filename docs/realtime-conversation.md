@@ -1,8 +1,8 @@
 # Realtime conversation and local camera tools
 
 The current product target is OpenAI Realtime with an API key or a dedicated Codex login, plus
-embedded local transcription, translation, and video processing. Compatible services, api.server,
-and Hermes are outside this phase. Virtual-camera component activation/acceptance is deferred.
+embedded local transcription, translation, and video processing. Custom service integrations are
+outside this phase. The host publishes its composed output through the small camera extension.
 
 ## Public OpenAI transport
 
@@ -36,7 +36,7 @@ continues independently. A call selecting **AI Camera Microphone** receives the 
 and agent reply, and the agent reply also plays locally without microphone monitoring.
 
 The outgoing image shows an animated status orb below the top-right client-title-bar margin:
-Agent off, Connecting, Listening, Thinking, Speaking, Muted, or Agent unavailable. A victory/fist
+Agent off, Connecting, Listening, Not listening, Thinking, Speaking, Muted, or Agent unavailable. A victory/fist
 hold shows progress; uncertain poses ask for a clearer hand. The orb and title follow Overlays →
 Show Status. Connection failures also leave their details in the AI Camera menu. The native status
 layer is independent of model-generated overlays and is never included in clean inference frames.
@@ -95,7 +95,42 @@ Only the host player emits audio; it cannot attach duplicate renderers to one re
 
 Tool outputs use the same serialized send queue. The host returns all function results before
 requesting continuation on `response.done`; it must not start a second response while the first
-is active. Continuation disables further tools for that response.
+is active. A user question permits at most eight unique calls and three tool-bearing responses.
+The final continuation disables tools. Local tool tasks execute in order outside the media-event
+consumer, so a note write cannot hold up arriving audio or Stop. Failure, Stop, and a new session
+invalidate pending effects and continuations. An already completed requested note remains saved.
+
+## Notes, cards, and quiet responses
+
+With **Tools** enabled, `save_note`, `list_notes`, and `delete_note` operate on a local notebook.
+Optional `id` on save edits an existing note; deletion requires an exact UUID. Lookups return at
+most five matching notes, newest first. The **Notes** footer button opens a window for writing,
+editing, searching, and deleting without starting the agent or camera.
+
+Only requested note text is saved, at `~/Library/Application Support/AI Camera/Notes/notes.json`.
+There are at most 100 notes of 2,000 UTF-8 bytes each. Writes are atomic and the file is owner-only.
+An unreadable notebook is preserved instead of silently replaced. It is ordinary local storage,
+not an encrypted vault. A requested note lookup returns matching text to the active Realtime
+conversation; the notebook is not automatically included when connecting. Saving a note and
+showing it to other people are separate actions. Existing spoken/transcribed content still follows
+the user's caption settings.
+
+`show_card` displays one short plain-text card in the outgoing camera; `clear_cards` removes it.
+Styles are information, sticky, or metric, with four corner positions and a 1–300 second lifetime
+(30 seconds by default). A new card replaces the old one. The host reserves status/caption space,
+limits text, and caches its rasterized pixels. Cards and three.js illustrations can coexist.
+Visual tools require an active camera and enabled Tools. Privacy mute and disabling Tools clear
+the card; clean inference images never include it. An extremely small frame with no available
+caption-free space can omit a card rather than cover captions.
+
+The session always offers `wait_for_user` and `sleep_agent`. Wait suppresses remaining response
+audio and continuation for unrelated conversation; it does not override the user's listening
+mode. Sleep stops the agent session while independent call media and enabled features continue.
+The explicit input gate remains the authority; a prompt is not a reliable mute mechanism.
+
+Try “Remember to send Maya the draft,” “Show three short points about this idea,” or “Go to sleep.”
+Current weather and prices require a real lookup provider, which is not yet included. Instructions
+require the agent to say when it cannot verify current facts and to report tool success honestly.
 
 ## Local overlay tools
 

@@ -96,6 +96,8 @@ final class AppModel: ObservableObject {
     let builtinTranslationModelController = BuiltinTranslationModelController()
     let builtinWhisperModelController = BuiltinWhisperModelController()
     let codexAuthController = CodexAuthController()
+    let agentNotes = AgentNotesController()
+    private let agentPresentation = AgentPresentationState()
 
     private var pipeline: PipelineCoordinator?
     private var videoController: VideoPipelineController?
@@ -137,7 +139,9 @@ final class AppModel: ObservableObject {
     private var realtimeAudioFinishRequested = false
     private var realtimeAcceptingAudio = false
     private var realtimeAudioSampleRate: Int?
-    private var realtimeToolContinuationPending = false
+    private var realtimeToolTurn = AgentToolTurn()
+    private var realtimeToolTask: Task<Void, Never>?
+    private var realtimeQuietTurn = false
 
     var currentError: String? {
         lastError ?? cameraLaneError ?? microphoneLaneError
@@ -642,6 +646,7 @@ final class AppModel: ObservableObject {
         previewImage = nil
         videoController?.update(snapshot: currentSnapshot, privacy: privacy, features: currentSnapshotFeatures)
         clearOverlayScript()
+        agentPresentation.clear()
         pushSceneData(to: currentSnapshot)
         reconcileDemand()
         let coordinator = pipeline
@@ -781,7 +786,8 @@ final class AppModel: ObservableObject {
                     model?.cameraLaneError = message
                 }
             },
-            scriptRenderer: scriptRenderer
+            scriptRenderer: scriptRenderer,
+            agentPresentation: agentPresentation
         )
 
         do {
@@ -1093,7 +1099,8 @@ final class AppModel: ObservableObject {
         realtimeConversationState = .connecting
         realtimeFinishTask?.cancel()
         realtimeFinishTask = nil
-        realtimeToolContinuationPending = false
+        realtimeToolTurn = AgentToolTurn()
+        realtimeQuietTurn = false
         resetRealtimeAudio(stopPlayback: true)
         realtimeAcceptingAudio = true
         lastError = nil
@@ -1136,7 +1143,11 @@ final class AppModel: ObservableObject {
                     endpoint: endpoint,
                     conversation: conversation,
                     profile: profile,
-                    toolsAvailable: profile.overlays.script.enabled && self.cameraRunGate?.isActive == true
+                    toolsAvailable: profile.overlays.script.enabled && self.cameraRunGate?.isActive == true,
+                    agentTools: AgentToolCapabilities(
+                        visuals: profile.overlays.script.enabled && self.cameraRunGate?.isActive == true,
+                        notes: profile.overlays.script.enabled, conversationControls: true
+                    )
                 )
                 try await session.connect(session: request)
                 guard !Task.isCancelled, generation == self.realtimeGeneration else {
@@ -1188,7 +1199,10 @@ final class AppModel: ObservableObject {
         audioController?.setRealtimeAudioHandler(nil)
         realtimeSession = nil
         realtimeConversationState = state
-        realtimeToolContinuationPending = false
+        realtimeToolTask?.cancel()
+        realtimeToolTask = nil
+        realtimeToolTurn = AgentToolTurn()
+        realtimeQuietTurn = false
         if stopSpeech {
             resetRealtimeAudio(stopPlayback: true)
         }
@@ -1226,27 +1240,44 @@ final class AppModel: ObservableObject {
             agentListening.utteranceEnded()
             realtimeConversationState = .responding
         case let .transcript(source, text, isFinal):
+            if realtimeQuietTurn, case .remote = source { return }
             await pipeline?.submitRealtimeTranscript(source: source, text: text, isFinal: isFinal)
         case let .functionCall(call):
-            realtimeToolContinuationPending = true
-            await executeRealtimeTool(call, session: session, generation: generation)
-        case .responseDone:
-            if realtimeToolContinuationPending {
-                realtimeToolContinuationPending = false
-                do { try await session.requestContinuation(["tool_choice": "none"]) }
-                catch {
-                    guard generation == realtimeGeneration else { return }
-                    lastError = error.localizedDescription
-                    closeRealtimeTransport(state: .failed, stopSpeech: true)
-                }
-            } else {
-                finishRealtimeResponse(session: session, generation: generation)
+            guard realtimeToolTurn.admit(callID: call.callID) else {
+                lastError = "The agent reached its tool limit. Start it again to continue."
+                closeRealtimeTransport(state: .failed, stopSpeech: true)
+                return
             }
+            let previous = realtimeToolTask
+            realtimeToolTask = Task { @MainActor [weak self, weak session] in
+                await previous?.value
+                guard let self, let session, !Task.isCancelled, generation == self.realtimeGeneration else { return }
+                await self.executeRealtimeTool(call, session: session, generation: generation)
+            }
+        case .responseDone:
+            realtimeToolTurn.endedResponse()
+            await advanceRealtimeToolTurn(session: session, generation: generation)
         case let .error(failure):
             lastError = failure.localizedDescription
             closeRealtimeTransport(state: .failed, stopSpeech: true)
         case let .audio(chunk):
+            guard !realtimeQuietTurn else { return }
             enqueueRealtimeAudio(chunk)
+        }
+    }
+
+    private func advanceRealtimeToolTurn(session: any RealtimeConversationClient, generation: UInt64) async {
+        guard generation == realtimeGeneration, session === realtimeSession else { return }
+        switch realtimeToolTurn.takeNext() {
+        case .waiting: break
+        case .finish: finishRealtimeResponse(session: session, generation: generation)
+        case let .continueResponse(allowTools):
+            do { try await session.requestContinuation(["tool_choice": allowTools ? "auto" : "none"]) }
+            catch {
+                guard generation == realtimeGeneration else { return }
+                lastError = error.localizedDescription
+                closeRealtimeTransport(state: .failed, stopSpeech: true)
+            }
         }
     }
 
@@ -1280,6 +1311,8 @@ final class AppModel: ObservableObject {
         let revision = realtimeListeningRevision
         // Keep user controls accurate while the asynchronous input transition is pending.
         realtimeConversationState = .paused
+        realtimeToolTurn = AgentToolTurn()
+        realtimeQuietTurn = false
         realtimeFinishTask?.cancel()
         realtimeFinishTask = Task { @MainActor [weak self, weak session] in
             guard let self, let session, generation == self.realtimeGeneration,
@@ -1412,7 +1445,8 @@ final class AppModel: ObservableObject {
         generation: UInt64
     ) async {
         guard generation == realtimeGeneration, session === realtimeSession, !privacyMuted else { return }
-        let result = applyRealtimeTool(call)
+        let result = await applyRealtimeTool(call)
+        guard !Task.isCancelled, generation == realtimeGeneration, session === realtimeSession else { return }
         guard let outputData = try? JSONSerialization.data(withJSONObject: result),
               let output = String(data: outputData, encoding: .utf8) else { return }
         do {
@@ -1420,6 +1454,13 @@ final class AppModel: ObservableObject {
                 callID: call.callID,
                 output: output
             )
+            guard generation == realtimeGeneration, session === realtimeSession else { return }
+            if call.name == "sleep_agent", result["ok"] as? Bool == true {
+                stopRealtimeConversation()
+                return
+            }
+            realtimeToolTurn.completed(callID: call.callID, quiet: realtimeQuietTurn)
+            await advanceRealtimeToolTurn(session: session, generation: generation)
         } catch {
             guard generation == realtimeGeneration, session === realtimeSession else { return }
             lastError = "Realtime tool result: \(error.localizedDescription)"
@@ -1427,13 +1468,53 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func applyRealtimeTool(_ call: RealtimeFunctionCall) -> [String: Any] {
+    private func applyRealtimeTool(_ call: RealtimeFunctionCall) async -> [String: Any] {
         let configuration = configurationController.configuration.overlays.script
-        guard configuration.enabled, let renderer = scriptRenderer, cameraRunGate?.isActive == true else {
-            return ["ok": false, "error": "Overlay tools require enabled Tools and an active camera lane."]
-        }
-        guard let command = RealtimeOverlayCommand.parse(name: call.name, arguments: call.arguments, configuration: configuration) else {
+        guard let command = AgentToolCommand.parse(name: call.name, arguments: call.arguments, script: configuration) else {
             return ["ok": false, "error": "Unknown tool or invalid arguments."]
+        }
+        switch command {
+        case .waitForUser, .sleep:
+            realtimeQuietTurn = true
+            resetRealtimeAudio(stopPlayback: true)
+            return ["ok": true]
+        case let .saveNote(text, id):
+            guard configuration.enabled else { return ["ok": false, "error": "Notes tools are disabled in Settings."] }
+            do {
+                let note = try await agentNotes.save(text: text, id: id)
+                return ["ok": true, "id": note.id.uuidString, "visibility": "local notebook"]
+            } catch { return ["ok": false, "error": error.localizedDescription] }
+        case let .listNotes(query):
+            guard configuration.enabled else { return ["ok": false, "error": "Notes tools are disabled in Settings."] }
+            do {
+                let notes = try await agentNotes.store.all().filter { query.isEmpty || $0.text.localizedCaseInsensitiveContains(query) }
+                let formatter = ISO8601DateFormatter()
+                let values = notes.prefix(5).map { ["id": $0.id.uuidString, "text": $0.text, "updatedAt": formatter.string(from: $0.updatedAt)] }
+                return ["ok": true, "notes": values, "hasMore": notes.count > 5]
+            } catch { return ["ok": false, "error": error.localizedDescription] }
+        case let .deleteNote(id):
+            guard configuration.enabled else { return ["ok": false, "error": "Notes tools are disabled in Settings."] }
+            do { try await agentNotes.delete(id: id); return ["ok": true] }
+            catch { return ["ok": false, "error": error.localizedDescription] }
+        case let .showCard(request):
+            guard configuration.enabled, cameraRunGate?.isActive == true else {
+                return ["ok": false, "error": "Visual tools require enabled Tools and an active camera."]
+            }
+            guard let card = agentPresentation.show(request) else { return ["ok": false, "error": "The card exceeds display limits."] }
+            return ["ok": true, "id": card.id.uuidString, "ttlSeconds": request.ttlSeconds, "visibility": "outgoing camera"]
+        case .clearCards:
+            guard configuration.enabled else { return ["ok": false, "error": "Visual tools are disabled in Settings."] }
+            agentPresentation.clear()
+            return ["ok": true]
+        case let .overlay(command):
+            return applyRealtimeOverlay(command)
+        }
+    }
+
+    private func applyRealtimeOverlay(_ command: RealtimeOverlayCommand) -> [String: Any] {
+        guard configurationController.configuration.overlays.script.enabled,
+              let renderer = scriptRenderer, cameraRunGate?.isActive == true else {
+            return ["ok": false, "error": "Overlay tools require enabled Tools and an active camera lane."]
         }
         switch command {
         case let .render(script, ttl):
@@ -1482,6 +1563,7 @@ final class AppModel: ObservableObject {
     }
 
     private func stopScriptRenderer() {
+        agentPresentation.clear()
         scriptRenderer?.stop()
         scriptRenderer = nil
     }

@@ -131,7 +131,7 @@ final class RealtimeSessionPolicyTests: XCTestCase {
             endpoint: endpoint, conversation: .init(), profile: .default, toolsAvailable: true
         )
         let tools = try XCTUnwrap(request["tools"] as? [[String: Any]])
-        XCTAssertEqual(tools.compactMap { $0["name"] as? String }, ["render_overlay", "clear_overlay"])
+        XCTAssertEqual(tools.compactMap { $0["name"] as? String }, ["render_overlay", "clear_overlay", "show_card", "clear_cards"])
         XCTAssertEqual(request["tool_choice"] as? String, "auto")
         XCTAssertTrue(JSONSerialization.isValidJSONObject(request))
     }

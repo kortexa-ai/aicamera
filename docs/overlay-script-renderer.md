@@ -5,6 +5,12 @@ three.js scenes run in a hidden WKWebView and publish transparent pixels to the 
 API-key and separate Codex authentication use the same public function-call contract. Normal
 Settings exposes Tools; the manual script editor appears only in Debug local camera tests.
 
+The companion `show_card` / `clear_cards` tools use a native text renderer for concise answers,
+requested sticky notes, and metrics. One card may coexist with the three.js scene. Card rasterization
+is cached; the capture path reads a small immutable value and never waits for a tool or disk I/O.
+Both visual layers are omitted from clean inference frames. See [agent tools](realtime-conversation.md#notes-cards-and-quiet-responses)
+for limits and note visibility.
+
 ## Current data flow
 
 ```text

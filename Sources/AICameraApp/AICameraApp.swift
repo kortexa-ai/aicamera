@@ -22,6 +22,12 @@ struct AICameraApp: App {
         }
         .windowResizability(.contentSize)
 
+        Window("AI Camera Notes", id: "notes") {
+            AgentNotesView(controller: model.agentNotes)
+        }
+        .defaultSize(width: 460, height: 560)
+        .windowResizability(.contentMinSize)
+
         Settings {
             SettingsView(model: model)
         }

@@ -68,6 +68,12 @@ and [the privacy documentation](SECURITY.md) for active data routes.
 
 ## Build from source
 
+Development on `main` adds independent agent listening pause (Control–Option–Space), an opt-in
+one-question mode, a local Notes window, and readable information-card tools. These additions
+are not in the downloadable 0.2.0 package. Notes are saved only on request; an explicit note lookup
+can return their text to the active agent. See [agent behavior and tools](docs/realtime-conversation.md)
+and [the product direction](docs/agent-roadmap.md).
+
 Building requires Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen), and macOS 14+.
 
 ```sh

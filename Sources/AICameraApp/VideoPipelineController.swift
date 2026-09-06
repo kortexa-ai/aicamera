@@ -23,6 +23,7 @@ final class VideoPipelineController: NSObject {
     /// Optional script-overlay producer. Read synchronously on the capture
     /// path; a stale or absent overlay never delays a frame.
     private let scriptRenderer: OverlayScriptRenderer?
+    private let agentPresentation: AgentPresentationState?
 
     private let session = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -58,7 +59,8 @@ final class VideoPipelineController: NSObject {
         onGestures: @escaping GestureHandler,
         onFrame: @escaping FrameHandler,
         onError: @escaping ErrorHandler,
-        scriptRenderer: OverlayScriptRenderer? = nil
+        scriptRenderer: OverlayScriptRenderer? = nil,
+        agentPresentation: AgentPresentationState? = nil
     ) {
         self.configuration = configuration
         self.privacyMute = privacyMute
@@ -69,6 +71,7 @@ final class VideoPipelineController: NSObject {
         self.onFrame = onFrame
         self.onError = onError
         self.scriptRenderer = scriptRenderer
+        self.agentPresentation = agentPresentation
         super.init()
     }
 
@@ -281,7 +284,8 @@ final class VideoPipelineController: NSObject {
             capture: configuration.capture,
             overlay: configuration.overlays,
             snapshot: currentSnapshot(),
-            scriptOverlay: scriptOverlay
+            scriptOverlay: scriptOverlay,
+            cards: !privacy.isMuted && configuration.overlays.script.enabled ? (agentPresentation?.cards() ?? []) : []
         ) else { return }
 
         guard privacyMute.isCurrent(privacy), runtimeFeatures.snapshot == features else { return }

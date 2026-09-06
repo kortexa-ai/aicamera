@@ -95,4 +95,17 @@ xcrun --sdk macosx clang \
     -o "$HARNESS"
 "$HARNESS" "$DRIVER"
 
+FRAMEWORKS="$ROOT/build/DerivedData-Validation/Build/Products/Debug"
+xcrun swiftc -parse-as-library -O \
+    -F "$FRAMEWORKS" -framework AICameraCore -Xlinker -rpath -Xlinker "$FRAMEWORKS" \
+    Sources/AICameraApp/AgentNotesController.swift Sources/AICameraApp/OverlayRenderer.swift \
+    Sources/AICameraApp/AgentCardRenderer.swift Sources/AICameraApp/AgentStatusRenderer.swift \
+    scripts/validate-agent-tools.swift -o "$VALIDATION_TMP/agent-tools"
+"$VALIDATION_TMP/agent-tools" "$VALIDATION_TMP/synthetic-cards"
+xcrun swiftc -parse-as-library -O \
+    -F "$FRAMEWORKS" -framework AICameraCore -Xlinker -rpath -Xlinker "$FRAMEWORKS" \
+    Sources/AICameraApp/RealtimeConversationSession.swift scripts/validate-realtime-activation.swift \
+    -o "$VALIDATION_TMP/realtime-activation"
+"$VALIDATION_TMP/realtime-activation"
+
 echo "Validation passed. No driver or system extension was installed."

@@ -21,6 +21,12 @@ trigger acknowledgements. This needs real conversational evaluation, not just a 
 These are design targets, not a claim that every tool is available. Advertise only implemented
 tools whose capabilities are available in the current session.
 
+The current host implementation provides `save_note`, `list_notes`, `delete_note`, `show_card`,
+`clear_cards`, `render_overlay`, `clear_overlay`, `wait_for_user`, and `sleep_agent`. Notes require
+enabled Tools; visual tools also require an active camera. Independent input pause and one-question
+mode are available on `main`. Current-information lookup, translation/layout control, timers,
+calculation, and face anchors below remain planned capabilities.
+
 | Job | Tool family | Example |
 | --- | --- | --- |
 | Remember | Save, find, edit, delete a local note | “Remember to send Maya the draft tomorrow.” |

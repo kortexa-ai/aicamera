@@ -32,6 +32,15 @@ are historical roadmap context.
 
 Implementation and acceptance priorities:
 
+- [x] Separate agent input pause from call microphone mute and retain continuous conversation
+  as the default. Add one-question mode and Control–Option–Space to ask again explicitly.
+- [x] Add a bounded sequence of agent tools, requested local notes with their own window,
+  readable native information cards, silent waiting, and agent sleep. Keep note storage separate
+  from camera presentation and preserve the published 0.2.0 package while these develop on main.
+- [ ] Add sourced current-information providers, voice-controlled translation/layout, and
+  face-tracked graphics in the staged companion roadmap. Validate new listening/tool interactions
+  with live speech after synthetic transport and native UI acceptance.
+
 - [x] Keep saved feature setup separate from runtime quick controls. The menu toolbar controls
   mute, original captions, translation, agent activation, and gestures. Global Control–Option–A/M
   toggle agent/mute; late results cannot cross quick-control generations. Preview and local tests

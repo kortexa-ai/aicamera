@@ -200,19 +200,23 @@ public enum RealtimeSessionConfiguration {
         endpoint: EndpointConfiguration,
         conversation: ConversationConfiguration,
         profile: AICameraConfiguration,
-        toolsAvailable: Bool
+        toolsAvailable: Bool,
+        agentTools: AgentToolCapabilities? = nil
     ) -> [String: Any] {
         let width = 640
         let height = 360
         let mirror = profile.capture.mirrorVideo ? "mirrored horizontally" : "not mirrored"
+        let capabilities = agentTools ?? AgentToolCapabilities(visuals: toolsAvailable)
+        let tools = AgentToolCatalog.definitions(capabilities: capabilities, script: profile.overlays.script)
         var instructions = conversation.systemPrompt
         instructions += "\nKeep spoken replies concise. Use one short sentence unless the user asks for detail."
-        if toolsAvailable {
+        instructions += AgentToolCatalog.instructions(capabilities: capabilities)
+        if capabilities.visuals {
             instructions += """
 
             You can control a transparent three.js overlay on the camera with the provided client tools.
             The overlay canvas is \(width)x\(height), origin is top-left in canvas pixels, and camera output is \(mirror).
-            For every visual request, call render_overlay before claiming it is visible.
+            For a three.js visual request, call render_overlay before claiming it is visible. Use show_card for readable text.
             The script runs immediately in an already-loaded page. Do not wait for DOMContentLoaded or another page event.
             THREE and window.AICamera are already available. Add meshes to AICamera.scene, position AICamera.camera, and use AICamera.onFrame(function(dt) { ... }) for animation.
             Follow this known-good pattern: const mesh = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.35, 32, 96), new THREE.MeshStandardMaterial({color: 0x8b5cf6})); AICamera.scene.add(mesh); AICamera.camera.position.set(0, 0, 5); AICamera.camera.lookAt(0, 0, 0); AICamera.onFrame(function(dt) { mesh.rotation.x += dt * 0.5; mesh.rotation.y += dt; });
@@ -222,23 +226,9 @@ public enum RealtimeSessionConfiguration {
             A new render replaces the old one and expires automatically.
             """
         }
-        if toolsAvailable && conversation.includeSceneSummary {
+        if capabilities.visuals && conversation.includeSceneSummary {
             instructions += "\nCurrent clean scene context: \(profile.overlays.script.allowSceneData ? "bounded sceneData is available to the script" : "no script sceneData is enabled")."
         }
-        let renderParameters: [String: Any] = [
-            "type": "object",
-            "properties": [
-                "script": ["type": "string", "description": "Immediate JavaScript that adds objects to AICamera.scene and optionally registers AICamera.onFrame; do not create a renderer, canvas, DOM load handler, or requestAnimationFrame loop"],
-                "ttlSeconds": ["type": "number", "minimum": 1, "maximum": profile.overlays.script.maximumTTLSeconds]
-            ],
-            "required": ["script"],
-            "additionalProperties": false
-        ]
-        let clearParameters: [String: Any] = [
-            "type": "object",
-            "properties": [:],
-            "additionalProperties": false
-        ]
         return [
             "type": "realtime",
             "model": endpoint.model ?? "",
@@ -260,21 +250,8 @@ public enum RealtimeSessionConfiguration {
                     "voice": endpoint.options["voice"]?.stringValue ?? ""
                 ]
             ],
-            "tool_choice": toolsAvailable ? "auto" : "none",
-            "tools": toolsAvailable ? [
-                [
-                    "type": "function",
-                    "name": "render_overlay",
-                    "description": "Replace the live transparent camera overlay with bounded three.js JavaScript. Canvas is \(width)x\(height) and transparent.",
-                    "parameters": renderParameters
-                ],
-                [
-                    "type": "function",
-                    "name": "clear_overlay",
-                    "description": "Remove the current generated camera overlay.",
-                    "parameters": clearParameters
-                ]
-            ] : []
+            "tool_choice": tools.isEmpty ? "none" : "auto",
+            "tools": tools
         ]
     }
 

@@ -152,6 +152,8 @@ struct ControlCenterView: View {
             Divider()
             HStack(spacing: 4) {
                 Button("Preview") { presentWindow("preview") }
+                Text("·").foregroundStyle(.tertiary).accessibilityHidden(true)
+                Button("Notes") { presentWindow("notes") }
                 Spacer()
                 Button("About") { presentWindow("about") }
                 Text("·").foregroundStyle(.tertiary).accessibilityHidden(true)

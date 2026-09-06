@@ -15,13 +15,15 @@ final class OverlayRenderer {
     private var pool: CVPixelBufferPool?
     private var poolSize = CGSize.zero
     private let agentRenderer = AgentStatusRenderer()
+    private let cardRenderer = AgentCardRenderer()
 
     func render(
         input: CVPixelBuffer,
         capture: CaptureConfiguration,
         overlay: OverlayConfiguration,
         snapshot: SceneSnapshot,
-        scriptOverlay: CVPixelBuffer? = nil
+        scriptOverlay: CVPixelBuffer? = nil,
+        cards: [AgentCard] = []
     ) -> CVPixelBuffer? {
         guard let output = outputBuffer(width: capture.width, height: capture.height) else { return nil }
         let target = CGRect(x: 0, y: 0, width: capture.width, height: capture.height)
@@ -41,7 +43,7 @@ final class OverlayRenderer {
             image = Self.composite(scriptOverlay: scriptOverlay, over: image, into: target)
         }
         ciContext.render(image, to: output, bounds: target, colorSpace: CGColorSpaceCreateDeviceRGB())
-        if overlay.enabled { draw(snapshot: snapshot, configuration: overlay, into: output) }
+        if overlay.enabled || !cards.isEmpty { draw(snapshot: snapshot, configuration: overlay, cards: cards, into: output) }
         return output
     }
 
@@ -116,7 +118,7 @@ final class OverlayRenderer {
         return buffer
     }
 
-    private func draw(snapshot: SceneSnapshot, configuration: OverlayConfiguration, into buffer: CVPixelBuffer) {
+    private func draw(snapshot: SceneSnapshot, configuration: OverlayConfiguration, cards: [AgentCard], into buffer: CVPixelBuffer) {
         CVPixelBufferLockBaseAddress(buffer, [])
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
         let width = CGFloat(CVPixelBufferGetWidth(buffer))
@@ -134,6 +136,12 @@ final class OverlayRenderer {
         context.saveGState()
         context.translateBy(x: 0, y: height)
         context.scaleBy(x: 1, y: -1)
+        let hasAgentCaption = configuration.enabled && configuration.showAgentResponse
+            && !(snapshot.agentResponse ?? "").isEmpty
+        for card in cards.prefix(1) {
+            cardRenderer.draw(card, width: width, height: height, hasAgentCaption: hasAgentCaption, context: context)
+        }
+        guard configuration.enabled else { context.restoreGState(); return }
         let accent = color(hex: configuration.accentHex) ?? NSColor.systemMint
         context.setStrokeColor(accent.cgColor)
         context.setLineWidth(max(2, width / 500))
