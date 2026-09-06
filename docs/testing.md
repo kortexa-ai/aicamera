@@ -781,6 +781,12 @@ This establishes local buffer-synthesis feasibility only. Format conversion, tra
 speech ownership, and actual local/virtual output routing follow the
 [spoken-translation acceptance order](spoken-translation-design.md#acceptance-order).
 
+`TranslationOutcomeTests` separates successful final microphone text from agent-response translation
+and every original-text fallback, while preserving caption timings and requested language metadata.
+The native controlled-caption fixture rejects empty/control-character/oversized translation output,
+keeps the original caption on errors, and verifies the same worker recovers on the next request.
+These checks do not authorize speech playback or replace generation/privacy/output-owner checks.
+
 ## Quiet timer regression
 
 Core presentation/tool tests cover whole-second duration and label bounds, exact tick/finish/expiry

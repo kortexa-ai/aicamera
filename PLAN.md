@@ -42,6 +42,9 @@ Implementation and acceptance priorities:
   restarting the active conversation. Spoken translation remains #57; its
   [routing design](docs/spoken-translation-design.md) and optional native system-voice buffer probe
   define the next implementation boundaries without changing current audio routes.
+- [x] Distinguish successful caption translations from original-text fallback, with microphone/agent
+  provenance and requested languages. Keep invalid output readable as original captions; future
+  speech must still pass its own freshness, privacy, and output-ownership checks.
 - [x] Add generated-scene presentation with an aspect-preserving camera inset, immediate full-camera
   fallback on missing/expired graphics, and a direct Reset view. External image/deck loading and
   independent call-client acceptance remain follow-up parts of #57.

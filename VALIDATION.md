@@ -913,3 +913,17 @@ of frames; the local-speech waveform RMS errors are below 0.000003. Stereo agree
 and final drain also pass, alongside the existing Realtime and integer-capture cases. The production
 converter itself was unchanged. Full validation retains 236 passing Swift tests and all native
 fixtures, with no audio playback, capture, credential, or installed-component operation.
+
+## Typed translation outcomes
+
+Full validation passes 240 Swift tests and the native fixtures. Translation outcome tests verify
+final microphone success, caption timing and requested-language metadata, agent-origin exclusion
+from candidate microphone speech, all original-text fallback reasons, and text/mode/language bounds.
+The type carries data only; it does not authorize playback or replace future utterance identity,
+freshness, privacy, feature-generation, and output-ownership checks.
+
+The controlled native coordinator fixture injects model failure, empty/whitespace text, a control
+character, and oversized output. Each keeps the original caption, reports an error, and recovers
+on the next valid request. Existing microphone/agent caption separation, partial/final behavior,
+one active/latest-pending translation, Stop, cancellation, supersession, and live target-language
+checks still pass. No spoken output, remote model call, capture, or installed-app change was used.

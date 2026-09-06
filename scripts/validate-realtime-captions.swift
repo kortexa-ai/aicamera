@@ -48,7 +48,12 @@ private actor ControlledTranslation: TranslationClient {
     }
     var started: [String] { inputs }
     var languages: [String] { requests.map { $0.sourceLanguage + "→" + $0.targetLanguage } }
-    func finish(_ text: String) { pending.removeValue(forKey: text)?.resume(returning: "translated-" + text) }
+    func finish(_ text: String, output: String? = nil) {
+        pending.removeValue(forKey: text)?.resume(returning: output ?? "translated-" + text)
+    }
+    func fail(_ text: String) {
+        pending.removeValue(forKey: text)?.resume(throwing: HarnessFailure(message: "Synthetic translation failure"))
+    }
 }
 
 @main private struct RealtimeCaptionValidation {
@@ -57,6 +62,7 @@ private actor ControlledTranslation: TranslationClient {
         try await talkCompletionChecks()
         try await speakerChecks()
         try await languageChangeChecks()
+        try await translationFailureChecks()
         if CommandLine.arguments.contains("--controlled-only") { return }
         let controller = BuiltinTranslationModelController()
         guard let client = controller.makeTranslationClient() else {
@@ -99,6 +105,27 @@ private actor ControlledTranslation: TranslationClient {
         profile.pipeline.translation.targetLanguage = "zh"
         return PipelineCoordinator(configuration: profile, secrets: NoSecrets(), runtimeFeatures: features, builtinTranslationClient: client,
             onSnapshot: { captions.record($0) }, onSpeech: { _ in true }, onError: { captions.recordError($0) })
+    }
+
+    private static func translationFailureChecks() async throws {
+        for output in [nil, "", " \n", "invalid\0text", String(repeating: "a", count: 8_193)] as [String?] {
+            let client = ControlledTranslation(), captions = Captions()
+            let coordinator = makeCoordinator(client: client, captions: captions)
+            await coordinator.setRealtimeTranscriptionActive(true)
+            await coordinator.submitRealtimeTranscript(source: .local, text: "original-on-failure", isFinal: true)
+            try await waitUntil { await client.started == ["original-on-failure"] }
+            if let output { await client.finish("original-on-failure", output: output) }
+            else { await client.fail("original-on-failure") }
+            try await waitUntil { captions.hasErrors }
+            try require(captions.texts.last == "original-on-failure", "Translation failure lost original caption")
+            await coordinator.submitRealtimeTranscript(source: .local, text: "recovered", isFinal: true)
+            try await waitUntil { await client.started == ["original-on-failure", "recovered"] }
+            await client.finish("recovered")
+            try await waitUntil { captions.texts.last == "translated-recovered" }
+            if let output { try require(!captions.texts.contains(output), "Invalid translation reached captions") }
+            await coordinator.stop()
+        }
+        print("Passed translation outcomes: failure/empty/invalid/oversized output preserves originals, reports errors, and recovers")
     }
 
     private static func languageChangeChecks() async throws {

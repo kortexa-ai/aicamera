@@ -102,12 +102,14 @@ completion callback finish the agent's response.
 
 ## Required changes found in the current host
 
-- `PipelineCoordinator.translated` returns the original transcript on translation failure. That
-  is an acceptable caption fallback but must not become speech labelled as a translation. Add
-  a typed translation result with success/failure, original/target language, source identity,
-  utterance identity, and completion time. Synthesize only successful microphone-source results.
-- Realtime caption translation can include agent-response text. Preserve caption behavior, but
-  never send the agent's own answer into microphone interpretation or produce a second spoken copy.
+- `PipelineCoordinator.translationOutcome` now separates successful translation from original-text
+  fallback, with host-assigned microphone/agent origin and requested language metadata. Empty,
+  invalid, or excessive output keeps the original caption and reports an error. Only successful
+  finalized microphone results expose candidate translated speech text. This is data, not playback
+  permission: the voice integration still needs utterance identity, completion time, and current
+  privacy/feature/output-owner checks. Requested auto/system values are not detected language claims.
+- Realtime caption translation can include agent-response text. Its typed origin excludes it from
+  candidate microphone speech. Preserve caption behavior and never produce a second spoken copy.
 - `AudioPipelineController.processMicrophone` suppresses its independent ASR lane while a Realtime
   input handler is attached. A translator needs independent admission from the same physical capture,
   including during agent work. Retain the agent's stale-PCM and input-pause guarantees when splitting
@@ -117,8 +119,9 @@ completion callback finish the agent's response.
   actual playback start/drain signals, not arrival of network or synthesis data.
 - Local speech buffers have their own sample format. The feasibility probe produced 22,050 Hz
   float PCM. Convert from the actual format with a continuous converter; do not relabel it as the
-  24 kHz agent/network format or the 44.1/48 kHz output mix. Preserve duration/pitch regression
-  coverage and drain the converter tail only for a normal completion.
+  24 kHz agent/network format or the 44.1/48 kHz output mix. The routine native conversion fixture now
+  verifies 22.05 kHz input at these destinations across regular/irregular buffers. Preserve that
+  duration/pitch coverage and drain the converter tail only for a normal completion.
 
 ## Bounded work and cancellation
 

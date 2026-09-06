@@ -203,7 +203,8 @@ actor PipelineCoordinator {
             guard let self else { return }
             let privacy = pending.privacy
             let displayed = self.privacyMute.permitsSpeech(privacy)
-                ? await self.translated(pending.event, features: pending.features) : pending.event
+                ? await self.translationOutcome(pending.event, source: pending.source == .local ? .microphone : .agent,
+                                                features: pending.features).caption : pending.event
             await self.finishRealtimeTranslation(displayed, source: pending.source, revision: pending.revision, privacy: privacy, features: pending.features)
         }
     }
@@ -484,11 +485,11 @@ actor PipelineCoordinator {
             ))
             try Task.checkCancellation()
             guard !transcript.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            let displayedTranscript = await translated(transcript, features: features)
+            let outcome = await translationOutcome(transcript, source: .microphone, features: features)
             try Task.checkCancellation()
             guard isRunning, !realtimeTranscriptionActive, privacyMute.permitsSpeech(privacy),
                   runtimeFeatures.permitsCaptions(from: features) else { return }
-            await scene.applyTranscript(displayedTranscript, privacyGeneration: privacy.generation, featureGeneration: features.captionGeneration)
+            await scene.applyTranscript(outcome.caption, privacyGeneration: privacy.generation, featureGeneration: features.captionGeneration)
             await publish()
             if !Task.isCancelled, privacyMute.permitsSpeech(privacy),
                conversation.enabled, !conversation.realtimeEnabled, let command = agentCommand(
@@ -525,29 +526,40 @@ actor PipelineCoordinator {
         return (try factory.transcription(for: endpoint), endpoint.options["language"]?.stringValue)
     }
 
-    private func translated(_ transcript: TranscriptEvent, features: RuntimeFeatureState.Snapshot) async -> TranscriptEvent {
+    private func translationOutcome(_ transcript: TranscriptEvent, source: TranslationSource,
+                                    features: RuntimeFeatureState.Snapshot) async -> TranslationOutcome {
         let translation = configuration.pipeline.translation
-        guard translation.enabled, features.translation, runtimeFeatures.permitsCaptions(from: features), transcript.mode == .final, let builtinTranslationClient else {
-            return transcript
+        let sourceLanguage = features.translationSourceLanguage ?? translation.sourceLanguage
+        let targetLanguage = features.translationTargetLanguage ?? translation.targetLanguage
+        func fallback(_ reason: TranslationOutcome.FallbackReason) -> TranslationOutcome {
+            .fallback(transcript, source: source, sourceLanguage: sourceLanguage,
+                      targetLanguage: targetLanguage, reason: reason)
         }
+        guard !Task.isCancelled else { return fallback(.cancelled) }
+        guard translation.enabled, features.translation else { return fallback(.disabled) }
+        guard runtimeFeatures.permitsCaptions(from: features) else { return fallback(.superseded) }
+        guard transcript.mode == .final else { return fallback(.partial) }
+        guard let builtinTranslationClient else { return fallback(.modelUnavailable) }
         do {
             let text = try await builtinTranslationClient.translate(.init(
                 text: transcript.text,
-                sourceLanguage: features.translationSourceLanguage ?? translation.sourceLanguage,
-                targetLanguage: features.translationTargetLanguage ?? translation.targetLanguage
+                sourceLanguage: sourceLanguage, targetLanguage: targetLanguage
             ))
-            return TranscriptEvent(
-                text: text,
-                mode: transcript.mode,
-                startSeconds: transcript.startSeconds,
-                endSeconds: transcript.endSeconds
-            )
+            guard !Task.isCancelled else { return fallback(.cancelled) }
+            guard runtimeFeatures.permitsCaptions(from: features) else { return fallback(.superseded) }
+            guard let result = TranslationOutcome.success(transcript, text: text, source: source,
+                sourceLanguage: sourceLanguage, targetLanguage: targetLanguage) else {
+                onError("translation: The model returned empty, invalid, or excessive text.")
+                return fallback(.invalidOutput)
+            }
+            return result
         } catch is CancellationError {
-            return transcript
+            return fallback(.cancelled)
         } catch {
-            guard !Task.isCancelled, runtimeFeatures.permitsCaptions(from: features) else { return transcript }
+            guard !Task.isCancelled else { return fallback(.cancelled) }
+            guard runtimeFeatures.permitsCaptions(from: features) else { return fallback(.superseded) }
             onError("translation: \(error.localizedDescription)")
-            return transcript
+            return fallback(.failed)
         }
     }
 
