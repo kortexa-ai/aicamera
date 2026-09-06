@@ -7,7 +7,7 @@ public enum PrivacyGateError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case let .remoteHostNotAllowed(host):
-            return "Network egress to '\(host)' is not allowed by this profile."
+            return "Network egress to '\(host)' is not allowed by these settings."
         case let .dataClassNotGranted(endpointID, dataClass):
             return "Endpoint '\(endpointID)' is not allowed to receive \(dataClass.rawValue)."
         }

@@ -928,7 +928,7 @@ on the next valid request. Existing microphone/agent caption separation, partial
 one active/latest-pending translation, Stop, cancellation, supersession, and live target-language
 checks still pass. No spoken output, remote model call, capture, or installed-app change was used.
 
-Settings-repair and hidden transfer messages now use settings terminology. The existing full
+Settings-repair, shared validation/privacy errors, and hidden transfer messages use settings terminology. The existing full
 validation passes 240 Swift tests and native fixtures after this wording change. Internal profile
 types, saved-file compatibility, migration/repair behavior, and transfer visibility are unchanged;
 no tests that merely repeat the new labels or installed-state changes were added.

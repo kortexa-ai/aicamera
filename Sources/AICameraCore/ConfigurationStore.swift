@@ -28,10 +28,10 @@ public enum ConfigurationError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case let .unsupportedSchema(version): return "Unsupported configuration schema version: \(version)."
-        case .emptyProfileName: return "The profile name cannot be empty."
-        case .profileTooLarge: return "The profile exceeds the 1 MiB safety limit."
-        case let .invalidText(field): return "Profile text field '\(field)' is empty or too long."
-        case let .tooManyComponents(field): return "Profile has too many \(field)."
+        case .emptyProfileName: return "The settings name cannot be empty."
+        case .profileTooLarge: return "The settings file exceeds the 1 MiB safety limit."
+        case let .invalidText(field): return "Settings text field '\(field)' is empty or too long."
+        case let .tooManyComponents(field): return "Settings contain too many \(field)."
         case .invalidCaptureDimensions: return "Capture width and height must be positive."
         case .invalidFrameRate: return "Capture frame rate must be 15, 30, or 60 fps."
         case .unsupportedVirtualCameraFormat: return "Virtual camera size must be 640×480, 1280×720, or 1920×1080."
@@ -41,7 +41,7 @@ public enum ConfigurationError: LocalizedError, Equatable {
         case let .missingEndpoint(stage, endpoint): return "Stage '\(stage)' references missing endpoint '\(endpoint)'."
         case let .incompatibleEndpoint(stage, adapter): return "Stage '\(stage)' cannot use adapter '\(adapter.rawValue)'."
         case let .insecureRemoteEndpoint(id): return "Endpoint '\(id)' must use HTTPS unless it is on the local machine."
-        case let .invalidSecretReference(id): return "Endpoint '\(id)' contains an invalid secret reference or credential-like profile value."
+        case let .invalidSecretReference(id): return "Endpoint '\(id)' contains an invalid secret reference or credential-like settings value."
         case let .invalidEndpointURL(id): return "Endpoint '\(id)' must use a plain HTTP(S) base URL without user info, query, or fragment."
         case let .invalidRate(id): return "Stage '\(id)' must have a positive maximum rate and frame age."
         case let .invalidTimeout(id): return "Endpoint '\(id)' timeout must be finite and from 0.1 through 600 seconds."
