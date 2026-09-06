@@ -9,3 +9,9 @@ docs/legal/APPLE_NULLAUDIO_LICENSE.txt
 
 The project-level MIT License applies to original AI Camera project code. It
 does not replace third-party notices retained with derived files.
+
+The app also includes llama.cpp, whisper.cpp, and three.js under their MIT
+licenses. Optional model downloads have separate licenses and are not bundled
+in the installer. See Resources/ThirdParty/THIRD_PARTY_NOTICES.md and the full
+notices retained beside the code and model integrations. LICENSE, NOTICE, and
+these third-party notices are included in the installed application resources.

@@ -1,99 +1,97 @@
 # AI Camera
 
-AI Camera publishes native macOS **AI Camera** and **AI Camera Microphone** devices. After one-time device setup, selecting either virtual device in another app automatically starts only the matching physical camera or microphone. Closing the client releases that hardware again; there is no daily Start/Stop control.
+**Your camera, with a little AI.**
 
-A fresh profile uses the system-default hardware inputs and pure passthrough: no AI stages, transcription, overlays, or mirroring are enabled. Optional local or remote stages can add recognition, annotations, conversation, and generated speech. The SwiftUI menu-bar host owns capture and processing, the video output uses a CoreMediaIO camera system extension, and the audio output uses a Core Audio HAL loopback plug-in derived from Apple’s NullAudio sample.
+Live captions, translation, gestures, and a voice agent in the camera feed you share with other
+people. AI Camera is a native macOS menu-bar app that provides **AI Camera** and
+**AI Camera Microphone** as virtual devices for your call or recording app.
 
-## Features
+[Download 0.2.0 early alpha](https://github.com/kortexa-ai/aicamera/releases/tag/v0.2.0) ·
+[Website](https://kortexa-ai.github.io/aicamera/) ·
+[Install or remove](docs/installation.md) ·
+[Report an issue](https://github.com/kortexa-ai/aicamera/issues)
 
-- Independent, client-demanded camera and microphone activation with loop-safe system-default hardware selection. Only recognized direct-hardware inputs are eligible; virtual, aggregate, network, unknown-transport, and Continuity inputs are excluded. If the default is ineligible, the host warns and uses the first eligible physical input.
-- Pure passthrough defaults; configurable physical inputs, resolution, frame rate, mirroring, overlays, gains, and AI stages remain optional.
-- Idle-only local camera and microphone tests show the processed preview and a bounded live input meter. Real client demand cancels testing immediately; inline settings buttons open the matching in-app device controls.
-- Optional launch at login so the menu-bar host is available before a virtual-device client opens.
-- OpenAI Realtime through an API key or [separate Codex login](docs/codex-login.md), with one-utterance Talk, bounded host audio, and normal playback through speakers/headphones. Account access and subscription coverage of Realtime usage are not guaranteed.
-- Independent transcription with OpenAI or embedded multilingual Whisper Base/Small, plus local HY-MT2 translation. Local weights have explicit downloads, progress, cancellation, integrity checks, and removal.
-- In-process object detection with YOLOv3 Tiny or RF-DETR Medium/Large, plus Apple Vision hand gestures. Model loading and inference stay off the UI and capture callbacks.
-- Detection boxes, gestures, transcripts, agent text, and status annotations, plus bounded transparent three.js overlays created through Realtime tools.
-- Install, activate, deactivate, and remove controls for both virtual devices.
-- Local-only network policy by default. Remote use needs an HTTPS host allowlist and exact per-data grants.
-- No raw media recording by default. Profiles contain secret references, not secret values.
+> **Early alpha:** expect rough edges. Start with a nonessential call. Keep these
+> [recovery and manual cleanup instructions](docs/installation.md#manual-cleanup) handy.
 
-## Requirements
+## What it does
 
-- macOS 14 or newer.
-- Xcode 15 or newer. Xcode 16 is recommended.
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen).
-- An Apple development team and provisioning profiles with the System Extension capability for camera activation.
+- **Captions and translation:** Whisper transcription and local translation appear directly in
+  your outgoing video. Translation currently replaces the original-language caption.
+- **A voice agent on your call:** activate OpenAI Realtime with the Agent button, a held victory
+  gesture, or Control–Option–A. Replies play locally and through AI Camera Microphone when selected.
+- **Quick controls:** mute, captions, translation, agent, and gestures in the menu-bar toolbar.
+  Control–Option–M toggles AI Camera mute; holding a fist also mutes audio and speech captions.
+- **Optional vision and overlays:** local object detection, gesture labels, and animated graphics
+  created through the agent's overlay tools.
+- **A quiet native app:** a separate Preview window for local camera/microphone tests, Settings,
+  and optional launch at login. Physical capture follows client demand and explicit local tests.
 
-## Build and test
+## Get started
+
+1. Download and open the signed `AICamera-0.2.0.pkg`, then follow macOS Installer.
+2. Open **AI Camera** from Applications and click its icon in the menu bar.
+3. Install the virtual camera and, optionally, virtual microphone from the app. Follow the
+   macOS permission and Media Extension prompts. A system-component change can require a restart.
+4. Select **AI Camera** and **AI Camera Microphone** in your call app.
+5. Enable the features you want in **Settings → AI**. Local models download only when requested.
+
+A new installation is plain passthrough with AI features off. No account or model is needed for
+passthrough. Use **Preview** in the footer to test locally while the virtual devices are idle.
+The installer upgrades the host in place and preserves settings, models, login, and installed devices.
+
+## Requirements and limits
+
+- macOS **14 or newer**. The app includes Apple Silicon and Intel binaries; alpha runtime
+  acceptance has been performed on Apple Silicon, and Intel remains untested.
+- A directly connected camera/microphone. Continuity cameras, aggregate devices, and other virtual
+  inputs are currently excluded to prevent feedback loops.
+- Local AI performance depends on your Mac. Whisper offers Base, Small, and Large; Large is shown
+  only on supported M4 Pro/Max/Ultra and M5 hardware. Optional models require separate disk space.
+- OpenAI features need an API key or a separate Codex login. Codex login also requires the Codex CLI.
+  **Use Codex login at your own risk:** Realtime works in our testing, but OpenAI approval of this
+  use is unconfirmed, and we do not know how OpenAI may respond or whether usage is covered.
+- Muting inside another call app does **not** reliably hide AI Camera captions. Use AI Camera's
+  own **Mute** control as well. Its audio mute protects the call when AI Camera Microphone is selected.
+- Translation may occasionally return no text. There is one caption language at a time. Gestures
+  depend on lighting and hand position; the toolbar provides a direct alternative.
+- Camera compatibility and system-extension approval vary between apps/macOS versions. QuickTime
+  has been exercised; broad conferencing-app and clean-machine coverage remains alpha follow-up work.
+
+## Privacy
+
+Camera/microphone buffers stay in memory; AI Camera does not record raw media. Local Whisper,
+translation, detection, and gestures process on your Mac. Model downloads fetch weights, not your
+media. Enabling OpenAI transcription or conversation sends microphone audio to OpenAI; Realtime
+conversation does not send camera frames in the supported configuration. See **Settings → Privacy**
+and [the privacy documentation](SECURITY.md) for active data routes.
+
+## Build from source
+
+Building requires Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen), and macOS 14+.
 
 ```sh
 scripts/bootstrap.sh
 scripts/validate.sh
 ```
 
-`validate.sh` runs unit tests, validates metadata and installer syntax, compiles and exercises the HAL driver, and makes an unsigned four-target Xcode build. It does **not** install or activate system software.
-
-An unsigned development build is also available with:
-
-```sh
-scripts/build.sh
-scripts/run.sh
-```
-
-For signed work, copy `Config/Local.example.xcconfig` to the ignored `Config/Local.xcconfig`, select a valid team, and add the required capabilities to its profiles. For a signed non-installing build, run:
-
-```sh
-SIGNING=1 scripts/build.sh
-```
-
-To build and install the signed Release configuration through the protected installer, run:
-
-```sh
-scripts/install-app.sh
-```
-
-The app must be in `/Applications` before macOS can activate its camera system extension. The installer verifies exact host and extension identity before and after root-private staging, serializes concurrent installs, rolls back catchable failures, and verifies the final inode and `uchg` protection. Installation can show standard macOS authorization and approval dialogs.
-
-## First use
-
-1. Open **AI Camera** from `/Applications`.
-2. In the menu-bar panel, install the camera, microphone, or both. The components are independent. Installation can show normal macOS approval or administrator dialogs; an extension approval or reboot can be necessary.
-3. Select **Allow** for only the hardware permissions that the installed devices need. A denied permission row opens the matching System Settings privacy pane.
-4. Leave the physical input set to **System Default**, or select a specific device in Settings. If that default is not an eligible direct-hardware input, AI Camera warns and falls back to an eligible physical input; select an explicit device if that fallback is not the one you want.
-5. While both virtual devices are idle, optionally use **Test camera** for the processed preview or **Test microphone** for the live input meter. Either test becomes **Stop testing**; opening either virtual device in another app cancels both tests and gives the client priority.
-6. Use the small settings button beside either resolved input to open its controls under **Settings → General**. Optionally enable **Open AI Camera at login** there.
-7. Select **AI Camera** or **AI Camera Microphone** in another app. The matching lane starts and stops automatically.
-
-No model configuration is needed for passthrough. **Settings → AI** offers public OpenAI Realtime,
-OpenAI or Local Whisper transcription, local translation, vision, gestures, and overlays. Setup for
-Conversation, Transcription, and local vision is available while those features are off. **Privacy**
-shows enabled data routes. Settings import/export and custom endpoints are hidden for now.
-
-Settings are saved at `~/Library/Application Support/AI Camera/profile.json`. Loading older settings
-preserves endpoint metadata but disables unsupported conversation, transcription, and remote video
-routes. Migration never selects a different service or enables new microphone uploads.
+Validation runs unit tests and an unsigned app/framework/extension/audio-driver build. It never
+installs or activates system software. Signed device development requires your own Apple team and
+profiles in the ignored `Config/Local.xcconfig`; see [contributing](CONTRIBUTING.md) and
+[signing and installation](docs/installation.md#building-and-signing).
 
 ## Documentation
 
-- [Architecture and media flow](docs/architecture.md)
-- [Profile and adapter configuration](docs/configuration.md)
-- [Embedded model downloads and provenance](docs/local-models.md)
-- [Separate Codex login and authentication boundaries](docs/codex-login.md)
-- [Signing, installation, and removal](docs/installation.md)
-- [Testing and diagnostics](docs/testing.md)
-- [Latest validation record and signing boundary](VALIDATION.md)
-- [Security and privacy](SECURITY.md)
-- [Implementation plan and acceptance state](PLAN.md)
-
-## Current validation boundary
-
-Core tests, native synthetic/public-fixture checks, and the unsigned app, framework, camera-extension,
-and audio-driver build are automated. The signed host has passed local camera/microphone testing,
-normal Realtime playback, and native local-model validation; details are in [VALIDATION.md](VALIDATION.md).
-System-extension activation and HAL installation are separate manual operations. Acceptance of the
-current host's output in another call app remains deferred; no automated test installs components.
+- [Settings and quick controls](docs/configuration.md)
+- [Installation, repair, and manual cleanup](docs/installation.md)
+- [Local models and download provenance](docs/local-models.md)
+- [Codex authentication boundaries](docs/codex-login.md)
+- [Architecture](docs/architecture.md) and [security/privacy](SECURITY.md)
+- [Tests and diagnostics](docs/testing.md) and [validation evidence](VALIDATION.md)
+- [Release process](docs/release.md) and [0.2.0 release notes](docs/releases/0.2.0.md)
 
 ## License
 
-Project code is available under the MIT License. The derived audio-driver files retain Apple’s separate permissive notice. See [`LICENSE`](LICENSE), [`NOTICE`](NOTICE), and [`docs/legal/APPLE_NULLAUDIO_LICENSE.txt`](docs/legal/APPLE_NULLAUDIO_LICENSE.txt).
+Original AI Camera code is [MIT licensed](LICENSE), copyright Kortexa.
+Bundled code and optional model downloads retain their respective licenses; see
+[NOTICE](NOTICE) and [third-party notices](Resources/ThirdParty/THIRD_PARTY_NOTICES.md).

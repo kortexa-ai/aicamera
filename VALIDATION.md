@@ -1,5 +1,19 @@
 # Validation record
 
+## 0.2.0 release preparation
+
+- Full local validation passes with 182 Swift tests, rendered installer version checks, unsigned
+  app/framework/extension/driver builds, metadata/entitlement checks, and the HAL harness.
+- The protected transaction extracted for package reuse is byte-identical to the prior validated
+  implementation; development installation now calls that shared source. The package entry point
+  runs only on the startup volume as root and does not activate system components.
+- Source/history and GitHub issue/comment secret scans report no findings; see docs/public-audit.md
+  for scope and limitations. Added license notices are included as app resources.
+- The static website renders at 1400px desktop and 390px mobile widths with no horizontal overflow,
+  loaded image assets, and one primary heading. Manual visual inspection covers both layouts.
+- Actual package/notarization/installation and publication evidence is recorded in release issue 56
+  after those operations complete; these preparation checks alone do not establish distribution acceptance.
+
 ## Build 52: Codex login approval warning
 
 - The Codex login description now shows a yellow, fully wrapped “Use at your own risk” warning.
@@ -474,7 +488,7 @@ Date: 2026-09-05
 
 Date: 2026-09-05
 
-Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
+Machine: the development Mac, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 - Token pieces accumulate as bounded bytes and decode once after end-of-generation. Incomplete
   UTF-8, empty output, and output limits fail explicitly. The 256-token generation limit no longer
@@ -510,7 +524,7 @@ Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 Date: 2026-09-05
 
-Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
+Machine: the development Mac, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 - Realtime now uses public OpenAI WebSocket PCM from the selected AVCapture microphone through
   the `RealtimeConversationClient` Core protocol. The separate WebRTC capture/rendering dependency
@@ -546,7 +560,7 @@ Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 Date: 2026-08-31
 
-Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
+Machine: the development Mac, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 - Normal Transcription Settings now identifies OpenAI directly and exposes no custom or nominally embedded provider. Embedded Whisper remains a separate milestone and will appear only with a real integrity-checked model download, readiness, and removal lifecycle.
 - At launch, import, and reload, an enabled non-OpenAI transcription endpoint is replaced by canonical OpenAI when the shared Keychain credential exists. Without that credential, the unsupported lane, translation, and transcript overlay are disabled. The prior endpoint definition remains inert so profile round trips do not destroy advanced metadata.
@@ -558,7 +572,7 @@ Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 Date: 2026-08-31
 
-Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
+Machine: the development Mac, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 - Transcription now runs independently of Conversation. Its OpenAI-first Settings card configures service, model, language, and a masked Keychain credential shared with canonical OpenAI Realtime; `gpt-transcribe` is the default model. Translation remains nested under Transcription.
 - Compatible imported ASR endpoints remain selected when Transcription is toggled back on. An explicit save switches that lane to OpenAI. Active Realtime sessions suppress and cancel batch ASR while continuing to publish Realtime transcripts, so the same microphone audio is not uploaded twice.
@@ -571,7 +585,7 @@ Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 Date: 2026-08-21
 
-Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
+Machine: the development Mac, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 - Updated LiveKit WebRTC from `144.7559.13` to `144.7559.14` and the vendored three.js overlay runtime from r149 to npm release `0.185.1` / r185. Both three.js copies are byte-identical classic-script bundles generated from the official ESM release and retain the upstream MIT license. Added `LSApplicationCategoryType=public.app-category.video` to remove the actionable archive metadata warning.
 - The overlay spike now records the page's three.js revision and WebGL2 availability. Its development-only content security policy permits its existing inline harness script; the production overlay keeps its strict external-script policy. The final r185 spike rendered 55 frames in two seconds at 29.7 fps through WebGL2 and completed alpha-compositing samples successfully.
@@ -584,7 +598,7 @@ Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 Date: 2026-08-16
 
-Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
+Machine: the development Mac, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 - The restart removed the retired camera-extension generation. Camera extension build 10 is active, enabled, and published. Its newer embedded generation has not been activated.
 - Native inspection showed why the build-10 HAL selector was invisible through Core Audio although the direct driver harness could call it: custom HAL selectors must be declared through `kAudioObjectPropertyCustomPropertyInfoList` and use a supported cross-process type.
@@ -610,7 +624,7 @@ Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 Date: 2026-08-16
 
-Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
+Machine: the development Mac, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 - Added idle-only **Test camera** and **Test microphone** controls. The camera uses the normal processed preview; the microphone displays a 10 Hz UI poll of a one-slot, normalized peak snapshot written only on the bounded audio processing queue.
 - Local tests may run together. Any external camera or microphone demand cancels both tests and performs a serialized full coordinator teardown and scene reset before client capture starts, so test-derived inference, transcripts, speech, and overlays cannot enter a client session.
@@ -636,7 +650,7 @@ Two daemon-level acceptance items remain after the user-owned reboot. The extens
 
 Date: 2026-08-16
 
-Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
+Machine: the development Mac, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 - The protected installer replaced `/Applications/AI Camera.app` with a strict-signed Release build 10. The app is running; camera extension build 10 reports **activated enabled**; HAL microphone build 10 is loaded and visible to Core Audio. Camera extension build 9 remains reboot-gated for cleanup.
 - The menu-bar panel keeps permanent virtual-device health rows, reports the resolved physical inputs, uses a foregrounded Settings window, and keeps the login-item control under **Settings → General**.
@@ -652,7 +666,7 @@ This follow-up did not change the system camera or microphone default to AI Came
 
 Date: 2026-08-16
 
-Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
+Machine: the development Mac, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 - `scripts/validate.sh` passed after the build-10 automatic lifecycle and documentation changes.
 - Swift Package Manager ran 54 tests with 0 failures, including pure-passthrough defaults, independent camera/microphone decisions, and fail-closed invalid-profile demand.
@@ -667,7 +681,7 @@ This validation did not request camera/microphone access, register a login item,
 ## Build 9 signed acceptance record
 
 Date: 2026-08-13
-Machine: `snappy`, Apple Silicon, macOS 26.5.2, Xcode 26.6
+Machine: the development Mac, Apple Silicon, macOS 26.5.2, Xcode 26.6
 
 ## Safe automated validation
 

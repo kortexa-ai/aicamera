@@ -2,7 +2,7 @@
 
 ## Supported version
 
-This repository currently supports the `main` branch. Report a vulnerability privately to the repository maintainers. Do not open a public issue that contains a credential, personal media, or an exploitable system-installation detail.
+Version 0.2.0 is an early alpha. Security fixes are developed on the `main` branch. Report a vulnerability privately to the repository maintainers. Do not open a public issue that contains a credential, personal media, or an exploitable system-installation detail.
 
 ## Media handling
 
@@ -14,7 +14,7 @@ The camera extension has no network client. If the CMIO service can resolve the 
 
 ## Network egress
 
-The profile defaults to loopback-only access. Remote egress fails closed unless all of these conditions hold:
+The default configuration has remote AI processing disabled. Remote egress fails closed unless all of these conditions hold:
 
 - the URL uses HTTPS;
 - privacy mode is `allowListed`;
@@ -23,7 +23,7 @@ The profile defaults to loopback-only access. Remote egress fails closed unless 
 
 Model HTTP sessions are ephemeral, do not store cookies or URL-cache data, and reject redirects. Network analysis uses a clean transformed camera frame before private overlays are drawn.
 
-Review a remote profile before applying it. A host allowlist controls destination names, not the operator of that service.
+Review enabled data routes in Settings → Privacy. A host allowlist controls destination names, not the operator of that service.
 
 ## Credentials
 
@@ -33,7 +33,7 @@ Do not put credentials in `Config/Local.xcconfig`, example profiles, source, log
 
 ## Privileged operations
 
-The app uses Apple’s system-extension API for the camera. The development installer verifies exact Apple-anchored, same-team host and camera-extension requirements before and after copying into a root-private staging directory, strips ACL and write access, serializes transactions, and uses no-follow same-filesystem moves. It protects the installed root and verifies that its inode is the verified staged inode before it commits the build marker. Catchable failures and signals restore the prior app and marker. The installer uses one administrator-authorized AppleScript transaction. The app uses a separate administrator-authorized command for the HAL driver. Install and removal paths are fixed and shell quoted. The removal command targets only `AICameraAudioDriver.driver`.
+The app uses Apple’s system-extension API for the camera. The development installer verifies exact Apple-anchored, same-team host and camera-extension requirements before and after copying into a root-private staging directory, strips ACL and write access, serializes transactions, and uses no-follow same-filesystem moves. It protects the installed root and verifies that its inode is the verified staged inode before it commits the build marker. Catchable failures and signals restore the prior app and marker. The developer install uses an administrator-authorized transaction; the signed production package runs the same transaction through macOS Installer. The app uses a separate administrator-authorized command for the HAL driver. Install and removal paths are fixed and shell quoted. The removal command targets only `AICameraAudioDriver.driver`.
 
 Verify the app’s signature and bundled driver before authorizing installation. Device lifecycle tests are manual and opt-in.
 

@@ -6,8 +6,8 @@ transcripts, or credentials. Inference uses memory-only inputs; AI Camera does n
 
 ## Whisper transcription
 
-Choose **Settings → AI → Transcription → Local Whisper**. Base is the lower-memory, faster choice;
-Small uses more compute and offers a larger multilingual model. Auto-detect is available, but choosing
+Choose **Settings → AI → Transcription → Whisper**. Base is the lower-memory, faster choice;
+Small uses more compute and offers a larger multilingual model. Large v3 is available on M4 Pro/Max/Ultra and M5 hardware. Auto-detect is available, but choosing
 a known language avoids detection overhead and can help short utterances. Download a model before
 saving and enabling the local provider. The readiness row reports its installed file size.
 
@@ -15,8 +15,9 @@ saving and enabling the local provider. The readiness row reports its installed 
 |---|---:|---|
 | `ggml-base.bin` | 147951465 | `60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe` |
 | `ggml-small-q5_1.bin` | 190085487 | `ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb` |
+| `ggml-large-v3-q5_0.bin` | 1081140203 | `d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1` |
 
-Both artifacts come from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/5359861c739e955e79d9a303bcbc70fb988958b1),
+Whisper artifacts come from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/5359861c739e955e79d9a303bcbc70fb988958b1),
 pinned to revision `5359861c739e955e79d9a303bcbc70fb988958b1`. The upstream model card identifies
 the converted Whisper models as MIT licensed.
 
@@ -77,6 +78,6 @@ then discards the result. The UI reports this final cleanup instead of permittin
 
 HY-MT2 uses the pinned llama.cpp package and Q4_K_M artifact recorded in
 `BuiltinTranslationModelController.swift`. RF-DETR uses the pinned Core ML artifacts recorded in
-`BuiltinVisionModelController.swift`. Their existing license notices ship in `Resources/ThirdParty`.
+`BuiltinVisionModelController.swift`. Their license notices ship in `Resources/ThirdParty`.
 See [native validation procedures](testing.md#native-local-whisper) and
 [measured results](../VALIDATION.md) for the tested hardware and performance limits.

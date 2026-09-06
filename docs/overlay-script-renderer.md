@@ -85,7 +85,7 @@ The measurements below describe the original August experiment, not the current 
 Its WebKit observations informed the fixed 640 × 360 base64 channel. The production window stays
 on-screen beneath the desktop with near-zero alpha so WebKit continues rendering.
 
-## Phase 0 spike results (2026-08-19, snappy, macOS 26.5 SDK, M4 Pro)
+## Phase 0 spike results (2026-08-19, the development Mac, macOS 26.5 SDK, M4 Pro)
 
 Run: `swift run AICameraOverlaySpike --channel base64 --width <w> --height <h> --mode hidden`
 

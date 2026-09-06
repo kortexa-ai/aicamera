@@ -10,10 +10,17 @@ swift test
 for script in scripts/*.sh; do
     bash -n "$script"
 done
+bash -n Resources/Installer/postinstall
+xmllint --noout Resources/Installer/Distribution.xml
+python3 - <<'PY'
+import ast
+from pathlib import Path
+for script in Path('scripts').glob('*.py'):
+    ast.parse(script.read_text(), filename=str(script))
+PY
 VALIDATION_TMP="$(mktemp -d "${TMPDIR:-/tmp}/aicamera-validation.XXXXXX")"
 trap 'rm -rf "$VALIDATION_TMP"' EXIT
-sed -n '/^on run argv$/,/^end run$/p' scripts/install-app.sh \
-    > "$VALIDATION_TMP/install-app.applescript"
+cp scripts/installer-transaction.applescript "$VALIDATION_TMP/install-app.applescript"
 osacompile \
     -o "$VALIDATION_TMP/install-app.scpt" \
     "$VALIDATION_TMP/install-app.applescript"

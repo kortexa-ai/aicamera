@@ -61,7 +61,7 @@ documents bearer API-key authentication. It does not establish that a dedicated 
 is a supported general-purpose Realtime credential or that its audio usage is covered by a
 subscription. The separate `esp32-voice` experiment observed public Realtime session acceptance
 for this account. AI Camera's signed-app check also completed sign-in, refresh, and public session
-setup, and the user heard a spoken reply. A reported playback-speed issue remains under review.
+setup, and the user heard a spoken reply. Subsequent playback-rate correction was confirmed by the user.
 These results establish observed account access, not subscription billing or a distribution contract.
 
 Use the signed-app acceptance procedure in [testing.md](testing.md#codex-login) to verify account

@@ -22,8 +22,8 @@ settings:
   base:
     SWIFT_VERSION: "5.10"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "52"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "53"
     CODE_SIGN_STYLE: Automatic
     CLANG_ENABLE_MODULES: true
   configs:
@@ -59,6 +59,10 @@ targets:
       - path: Resources/Overlay
         buildPhase: resources
       - path: Resources/ThirdParty
+        buildPhase: resources
+      - path: LICENSE
+        buildPhase: resources
+      - path: NOTICE
         buildPhase: resources
     configFiles:
       Debug: Config/Local.xcconfig
@@ -99,7 +103,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ai.kortexa.aicamera.camera-extension
         PRODUCT_NAME: ai.kortexa.aicamera.camera-extension
         # Independent of the host: bump only when this component or its shared protocol changes.
-        CURRENT_PROJECT_VERSION: "44"
+        CURRENT_PROJECT_VERSION: "45"
         MARKETING_VERSION: "0.1.0"
         INFOPLIST_FILE: Resources/CameraExtension/Info.plist
         CODE_SIGN_ENTITLEMENTS: Resources/CameraExtension/AICameraCameraExtension.entitlements
@@ -128,6 +132,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ai.kortexa.aicamera.audio.driver
         PRODUCT_NAME: AICameraAudioDriver
         CURRENT_PROJECT_VERSION: "12"
+        MARKETING_VERSION: "0.1.0"
         INFOPLIST_FILE: Resources/AudioDriver/Info.plist
         GENERATE_INFOPLIST_FILE: false
         WRAPPER_EXTENSION: driver

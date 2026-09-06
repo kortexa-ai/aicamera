@@ -1,0 +1,19 @@
+#!/bin/bash
+set -euo pipefail
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+umask 077
+
+# Installer runs this script as root, from its verified, private script payload.
+# The app is installed by the same protected transaction as development builds.
+# Never activate a system extension, install/reload a HAL driver, or launch a GUI here.
+if [[ "${3:-}" != "/" || "$(id -u)" != "0" ]]; then
+    echo "AI Camera must be installed on the running macOS startup volume." >&2
+    exit 1
+fi
+INSTALLER_PAYLOAD="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+INSTALLER_SOURCE="$INSTALLER_PAYLOAD/AI Camera.app"
+test -d "$INSTALLER_SOURCE"
+INSTALLER_TRANSACTION="$(/usr/bin/osascript "$INSTALLER_PAYLOAD/installer-transaction.applescript" \
+    "$INSTALLER_SOURCE" '/Applications/AI Camera.app' \
+    'ai.kortexa.aicamera' 'ai.kortexa.aicamera.camera-extension' render)"
+/usr/bin/printf '%s\n' "$INSTALLER_TRANSACTION" | /bin/sh

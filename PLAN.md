@@ -4,11 +4,20 @@ AI Camera is a demand-driven macOS virtual camera and microphone. The host acqui
 
 Detailed test evidence belongs in [`VALIDATION.md`](VALIDATION.md). Manual acceptance procedures belong in [`docs/testing.md`](docs/testing.md). This file is the canonical roadmap and backlog.
 
+## Public early alpha 0.2.0
+
+Prepare a public early-alpha release with a Developer ID-signed app, a signed/notarized installer,
+manual cleanup instructions, and a single-page GitHub Pages site. Reuse the protected host
+replacement transaction; package execution must not activate or remove system components.
+Keep the camera extension installed during development-host upgrade acceptance. No restart is
+available on the current Mac. The release checklist and actual acceptance/deployment evidence are
+tracked in issue 56; broader production lifecycle coverage remains follow-up work.
+
 ## Current product direction
 
 The active target is a complete local desktop experience: OpenAI Realtime with an API key or a
 dedicated Codex login, plus in-process transcription, translation, object detection, and gestures.
-Kortexa services, `api.server`, Hermes, and their normal Settings controls are out of scope for
+Custom service integrations and their normal Settings controls are out of scope for
 this phase. Settings import/export also remains hidden; if exposed later, label it Settings
 import/export without deployment-specific terminology. Older compatible-service milestones below
 are historical roadmap context.
@@ -170,7 +179,7 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 - [x] Keep secrets out of ordinary profile exports. Export secret references by default and require a separate explicit secure flow for any secret transfer.
 - [x] Ship an importable example OpenAI profile with OpenAI endpoint definitions and an `OPENAI_API_KEY` environment/Keychain reference. Never include a real API key in the repository or app bundle.
 - [x] Replace the raw Profile JSON editor with validated individual profile, model, vision, conversation, overlay, import, export, reload, and reset controls.
-- [x] Restrict normal Settings choices to models and media services verified as running on Smarty; store the Kortexa API credential beside those AI controls in Keychain and keep maintenance credential-free.
+- [x] Restrict normal Settings choices to models and media services verified as running on a development service; store the Kortexa API credential beside those AI controls in Keychain and keep maintenance credential-free.
 - [x] Restore a mutually exclusive voice-pipeline selector for separate ASR/agent/TTS, canonical OpenAI Realtime, or a custom OpenAI-compatible Realtime endpoint.
 - [ ] Add the bounded WebRTC conversation session described in `docs/realtime-conversation.md`: canonical OpenAI Realtime, self-hosted OpenAI-compatible Realtime, and an explicitly experimental ChatGPT/Codex subscription provider; keep separate ASR, agent, and TTS stages as the selectable fallback.
 - [x] Add explicit agent start/stop with server VAD and bounded utterances: connect with microphone egress closed, admit audio only while armed, pause during replies, and route bounded PCM to the call and local output.
@@ -178,7 +187,7 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 - [x] Normalize public Realtime function calls into one bounded local `render_overlay`/`clear_overlay`
   executor. API-key and separate Codex login use this same public contract; private delegation is
   outside the current product. Live voice-to-tool acceptance remains in the current priorities.
-- [x] Redesign AI & Advanced around an OpenAI-first Conversation flow with masked Keychain credentials, current Realtime model/voice choices, collapsible Tools, Vision & Gestures, and Overlays groups; hide profile and Smarty-specific controls from the normal UI.
+- [x] Redesign AI & Advanced around an OpenAI-first Conversation flow with masked Keychain credentials, current Realtime model/voice choices, collapsible Tools, Vision & Gestures, and Overlays groups; hide profile and a development service-specific controls from the normal UI.
 - [x] Add an advanced compatible Realtime path, including the public Kortexa `/v1/realtime/calls` endpoint and an isolated Hermes selector that sends `X-Kortexa-Agent: hermes` only when explicitly enabled.
 - [x] Securely download the compact YOLOv3 Tiny model from Apple's Core ML gallery, verify its pinned SHA-256 artifact integrity, and run bounded in-process object detection without network inference before enabling the Built-in control.
 - [x] Reorganize Settings into General, AI, and Privacy; use native switches for feature groups; move Virtual Devices to General; remove the Processing and credential-maintenance copy; and derive privacy disclosure from active local and external routes.

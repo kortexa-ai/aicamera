@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "profileName": "Kortexa Smarty",
+  "profileName": "Kortexa Example",
   "capture": {
     "width": 1280,
     "height": 720,
@@ -14,9 +14,9 @@
   },
   "endpoints": [
     {
-      "id": "smarty-objects",
+      "id": "example-objects",
       "adapter": "kortexaDetection",
-      "baseURL": "https://api.kortexa.ai/vision",
+      "baseURL": "https://api.example.com/vision",
       "model": "yolo26n.pt",
       "auth": {
         "kind": "apiKeyKeychain",
@@ -30,9 +30,9 @@
       }
     },
     {
-      "id": "smarty-asr",
+      "id": "example-asr",
       "adapter": "openAITranscription",
-      "baseURL": "https://api.kortexa.ai",
+      "baseURL": "https://api.example.com",
       "model": "Qwen/Qwen3-ASR-1.7B",
       "auth": {
         "kind": "apiKeyKeychain",
@@ -44,9 +44,9 @@
       "options": {}
     },
     {
-      "id": "smarty-agent",
+      "id": "example-agent",
       "adapter": "openAIChat",
-      "baseURL": "https://api.kortexa.ai",
+      "baseURL": "https://api.example.com",
       "model": "qwen-3.8-27b",
       "auth": {
         "kind": "apiKeyKeychain",
@@ -61,9 +61,9 @@
       }
     },
     {
-      "id": "smarty-vision",
+      "id": "example-vision",
       "adapter": "openAIVision",
-      "baseURL": "https://api.kortexa.ai",
+      "baseURL": "https://api.example.com",
       "model": "lfm2.5-vl-3b",
       "auth": {
         "kind": "apiKeyKeychain",
@@ -75,9 +75,9 @@
       "options": {}
     },
     {
-      "id": "smarty-speech",
+      "id": "example-speech",
       "adapter": "openAISpeech",
-      "baseURL": "https://api.kortexa.ai",
+      "baseURL": "https://api.example.com",
       "model": "qwen3-tts-customvoice-1.7b",
       "auth": {
         "kind": "apiKeyKeychain",
@@ -92,9 +92,9 @@
       }
     },
     {
-      "id": "smarty-realtime",
+      "id": "example-realtime",
       "adapter": "openAIRealtime",
-      "baseURL": "https://api.kortexa.ai",
+      "baseURL": "https://api.example.com",
       "model": "qwen-3.8-27b",
       "auth": {
         "kind": "apiKeyKeychain",
@@ -122,7 +122,7 @@
         "id": "objects",
         "kind": "objectDetection",
         "enabled": true,
-        "endpointID": "smarty-objects",
+        "endpointID": "example-objects",
         "maximumRateHz": 2,
         "maximumFrameAgeMilliseconds": 1000,
         "options": {
@@ -133,7 +133,7 @@
         "id": "vision",
         "kind": "visionLanguage",
         "enabled": false,
-        "endpointID": "smarty-vision",
+        "endpointID": "example-vision",
         "maximumRateHz": 0.2,
         "maximumFrameAgeMilliseconds": 2000,
         "prompt": "Describe only visual facts useful to a conversational camera assistant.",
@@ -143,11 +143,11 @@
     "conversation": {
       "enabled": true,
       "realtimeEnabled": false,
-      "realtimeEndpointID": "smarty-realtime",
+      "realtimeEndpointID": "example-realtime",
       "transcriptionEnabled": true,
-      "transcriptionEndpointID": "smarty-asr",
-      "agentEndpointID": "smarty-agent",
-      "speechEndpointID": "smarty-speech",
+      "transcriptionEndpointID": "example-asr",
+      "agentEndpointID": "example-agent",
+      "speechEndpointID": "example-speech",
       "systemPrompt": "You are an assistant present in a live camera conversation. Respond briefly and never claim to see facts that are not in the supplied scene context.",
       "respondToFinalTranscripts": true,
       "activationMode": "wakePhrase",
@@ -182,31 +182,31 @@
   "privacy": {
     "networkMode": "allowListed",
     "allowedHosts": [
-      "api.kortexa.ai"
+      "api.example.com"
     ],
     "grants": [
       {
-        "endpointID": "smarty-objects",
+        "endpointID": "example-objects",
         "allowedData": ["rawFrame"]
       },
       {
-        "endpointID": "smarty-asr",
+        "endpointID": "example-asr",
         "allowedData": ["rawAudio"]
       },
       {
-        "endpointID": "smarty-agent",
+        "endpointID": "example-agent",
         "allowedData": ["promptText", "transcript", "sceneMetadata"]
       },
       {
-        "endpointID": "smarty-vision",
+        "endpointID": "example-vision",
         "allowedData": ["rawFrame", "promptText"]
       },
       {
-        "endpointID": "smarty-speech",
+        "endpointID": "example-speech",
         "allowedData": ["promptText"]
       },
       {
-        "endpointID": "smarty-realtime",
+        "endpointID": "example-realtime",
         "allowedData": ["rawAudio", "transcript", "promptText", "sceneMetadata"]
       }
     ],
