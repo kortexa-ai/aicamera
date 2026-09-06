@@ -947,3 +947,25 @@ settings, defaults domain, notebook, credentials, model, network, device, or ins
 used. Signed package downgrade and live call acceptance remain separate operator checks.
 The wrapper passes Bash and Zsh syntax checks and completes under both shells. Full local
 validation retains 240 passing Swift tests and all native fixtures.
+
+## Offline addressed-speech feasibility
+
+CPU-only LFM2-350M and LFM2.5-350M Q8_0 runs each completed a frozen 60-case synthetic corpus
+with valid constrained outputs. LFM2 matched 23 labels with seven false agent admissions; LFM2.5
+matched 19 and admitted nothing, including direct requests. A simple name-invocation baseline
+found 19 direct requests with no false admissions on this corpus.
+
+Stronger JSON input-reading controls then failed on both setups. These classifier counts are
+therefore unqualified diagnostic observations, not evidence about model quality or real-call
+accuracy. Raw/native chat, grammar on/off, and warmup on/off did not fix the newer model's cat
+control. The optional probe now preserves and stops on input-reading failure before running any
+classifier cases. See docs/addressed-speech-probe.md for exact inputs, predictions, hashes, method,
+and limits. No classifier is connected to the app.
+
+The optional probe verifies fixed inputs and strict output parsing, bounds each CPU process and
+the complete loop, and preserves raw synthetic evidence without overwriting a previous run.
+No capture, playback, user transcript, remote inference, installed app, credential, package,
+camera-extension, or audio-driver change was used for the inference test.
+Full local validation passes 240 Swift tests and all native fixtures. The stronger optional
+probe correctly stops on failed qualification and preserves both control results with zero
+classifier cases; the initial diagnostic evidence remains byte-for-byte unchanged.

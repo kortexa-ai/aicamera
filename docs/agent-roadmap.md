@@ -15,6 +15,9 @@ Use a visible input state and a direct shortcut as the authority. A later small 
 help recognize addressed speech, but an uncertain classification must never open a user-closed
 input gate. Background speech, conversation with another person, or a television should not
 trigger acknowledgements. This needs real conversational evaluation, not just a clever prompt.
+The first [offline LFM2/LFM2.5-350M probe](addressed-speech-probe.md) also failed basic JSON
+input-reading controls, so its classifier counts are inconclusive. The inference setup needs
+qualification before further feature work; no automatic classifier is wired into the app.
 
 ## Useful tools in a small vocabulary
 
