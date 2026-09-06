@@ -6,7 +6,8 @@ import Security
 import LocalAuthentication
 
 // Public Realtime + the production overlay renderer, using synthetic instructions only.
-// Reads credentials in memory with Keychain UI forbidden. No captured media, playback, or files.
+// Reads credentials in memory with Keychain UI forbidden. No captured media or playback.
+// Optional assistant mode writes only explicitly synthetic notes in a temporary directory.
 @main
 struct RealtimeToolValidation {
     struct Failure: Error, CustomStringConvertible { let description: String }
@@ -21,14 +22,20 @@ struct RealtimeToolValidation {
     }
 
     @MainActor static func run() async throws {
-        guard CommandLine.arguments.count == 3, ["api-key", "codex"].contains(CommandLine.arguments[2]) else {
-            throw Failure(description: "Supply Resources/Overlay/overlay.html and api-key or codex")
+        guard (3...5).contains(CommandLine.arguments.count), ["api-key", "codex"].contains(CommandLine.arguments[2]),
+              CommandLine.arguments.count < 5 || CommandLine.arguments[4] == "assistant" else {
+            throw Failure(description: "Supply Resources/Overlay/overlay.html, api-key or codex, optional model, and optional assistant")
         }
         let credential = try readCredential(mode: CommandLine.arguments[2])
+        let model = CommandLine.arguments.count >= 4 ? CommandLine.arguments[3] : "gpt-realtime"
+        if CommandLine.arguments.count == 5 {
+            try await runAssistant(credential: credential, model: model)
+            return
+        }
         var profile = AICameraConfiguration.default
         profile.overlays.script.enabled = true
         let endpoint = EndpointConfiguration(id: "validation", adapter: .openAIRealtime,
-            baseURL: URL(string: "https://api.openai.com")!, model: "gpt-realtime", options: ["voice": .string("marin")])
+            baseURL: URL(string: "https://api.openai.com")!, model: model, options: ["voice": .string("marin")])
         let session = RealtimeConversationSession(signalingURL: endpoint.baseURL, credential: .init(value: "Bearer " + credential))
         let renderer = OverlayScriptRenderer(scriptConfiguration: profile.overlays.script,
             pageURL: URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL, onLog: { _ in })
@@ -103,6 +110,99 @@ struct RealtimeToolValidation {
             await session.close()
             throw error
         }
+    }
+
+    @MainActor static func runAssistant(credential: String, model: String) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("aicamera-provider-notes-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let notes = AgentNoteStore(fileURL: directory.appendingPathComponent("notes.json"))
+        let cards = AgentPresentationState()
+        var profile = AICameraConfiguration.default
+        profile.overlays.script.enabled = true
+        let endpoint = EndpointConfiguration(id: "validation", adapter: .openAIRealtime,
+            baseURL: URL(string: "https://api.openai.com")!, model: model, options: ["voice": .string("marin")])
+        let session = RealtimeConversationSession(signalingURL: endpoint.baseURL, credential: .init(value: "Bearer " + credential))
+        let timeout = Task {
+            try? await Task.sleep(for: .seconds(45))
+            if !Task.isCancelled { await session.close() }
+        }
+        defer { timeout.cancel() }
+        let request = RealtimeSessionConfiguration.request(endpoint: endpoint, conversation: profile.pipeline.conversation,
+            profile: profile, toolsAvailable: true, agentTools: .init(visuals: true, notes: true, conversationControls: true))
+        let baseInstructions = request["instructions"] as? String ?? ""
+        let task = "The user explicitly asks: Remember this note: SYNTHETIC — send Maya the draft Tuesday. Then show that note on a small sticky card titled Tuesday. Complete both actions and keep your answer brief. This is synthetic test text."
+        var turn = AgentToolTurn()
+        var completed = false, phase = 0, audioBytes = 0
+        var savedID: UUID?
+        do {
+            try await session.connect(session: request)
+            try await session.requestContinuation(["tool_choice": "auto", "instructions": baseInstructions + "\n" + task])
+            for await event in session.events {
+                switch event {
+                case let .functionCall(call):
+                    guard turn.admit(callID: call.callID),
+                          let command = AgentToolCommand.parse(name: call.name, arguments: call.arguments, script: profile.overlays.script) else {
+                        throw Failure(description: "Assistant returned an invalid or unbounded tool call")
+                    }
+                    let result: [String: Any]
+                    switch command {
+                    case let .saveNote(text, id):
+                        guard phase == 0, savedID == nil, id == nil, text.contains("Maya") else {
+                            throw Failure(description: "Unexpected synthetic save")
+                        }
+                        savedID = try await notes.save(text: text).id
+                        guard cards.cards().isEmpty else { throw Failure(description: "Save unexpectedly displayed a card") }
+                        result = ["ok": true, "id": savedID!.uuidString, "visibility": "local notebook"]
+                    case let .showCard(request):
+                        guard phase == 0, savedID != nil, request.style == .sticky,
+                              cards.show(request) != nil else { throw Failure(description: "Missing or invalid synthetic sticky card") }
+                        result = ["ok": true, "visibility": "outgoing camera"]
+                    case .waitForUser:
+                        guard phase == 1 else { throw Failure(description: "Unexpected wait") }
+                        result = ["ok": true]
+                    case .sleep:
+                        guard phase == 2 else { throw Failure(description: "Unexpected sleep") }
+                        result = ["ok": true]
+                    default: throw Failure(description: "Unexpected assistant tool: \(call.name)")
+                    }
+                    let output = String(decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self)
+                    try await session.completeFunctionCall(callID: call.callID, output: output)
+                    turn.completed(callID: call.callID, quiet: phase > 0)
+                    print("Accepted synthetic assistant tool: \(call.name)")
+                case .responseDone:
+                    turn.endedResponse()
+                    switch turn.takeNext() {
+                    case .waiting: throw Failure(description: "Provider fixture left a tool pending")
+                    case let .continueResponse(allowTools):
+                        try await session.requestContinuation(["tool_choice": allowTools ? "auto" : "none",
+                            "instructions": baseInstructions + "\n" + task])
+                    case .finish:
+                        if phase == 0 {
+                            guard try await notes.all().count == 1, cards.cards().count == 1 else {
+                                throw Failure(description: "Model did not complete both note and card actions")
+                            }
+                            phase = 1; turn = AgentToolTurn()
+                            try await session.requestContinuation(["tool_choice": ["type": "function", "name": "wait_for_user"],
+                                "instructions": baseInstructions + "\nThis synthetic input is a side conversation between two other people. Call wait_for_user only; do not speak."])
+                        } else if phase == 1 {
+                            phase = 2; turn = AgentToolTurn()
+                            try await session.requestContinuation(["tool_choice": ["type": "function", "name": "sleep_agent"],
+                                "instructions": baseInstructions + "\nThe user explicitly asks you to go to sleep. Call sleep_agent only; do not speak."])
+                        } else { completed = true; await session.close() }
+                    }
+                case let .audio(chunk):
+                    guard phase == 0, chunk.sampleRate == 24_000, chunk.playbackBuffers != nil else {
+                        throw Failure(description: "Invalid audio or provider spoke during quiet control")
+                    }
+                    audioBytes += chunk.data.count
+                    guard audioBytes < 4 * 1_024 * 1_024 else { throw Failure(description: "Synthetic audio exceeded bounds") }
+                case let .error(error): throw error
+                default: break
+                }
+            }
+            guard completed else { throw Failure(description: "Assistant probe timed out or closed early") }
+            print("Passed assistant provider contract: automatic note/card tools and continuation, quiet wait and sleep schemas; model=\(model). No captured media or playback.")
+        } catch { await session.close(); throw error }
     }
 
     @MainActor static func waitForPixels(_ renderer: OverlayScriptRenderer) async throws {

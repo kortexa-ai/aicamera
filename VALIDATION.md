@@ -771,3 +771,8 @@ completion, duplicate-call denial, eight-call/three-round limits, and quiet comp
 or microphone buffers were recorded. The published package and installed host were not changed.
 Actual model choice of tools, spoken note recall, and one-question listening during a live call
 remain human/provider acceptance work.
+
+The optional assistant provider probe compiles. Both Codex and API-key attempts stopped before
+connecting because the standalone helper could not read a credential without interaction
+(OSStatus -25293). No authentication prompt was requested, ACL changed, or credential refreshed.
+Consequently the expanded public-provider tool contract is prepared but not accepted by this run.

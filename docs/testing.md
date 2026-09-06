@@ -671,3 +671,23 @@ mute in the actual virtual camera. In one-question mode, ask for a note or card,
 another person, and confirm the agent waits for Ask again. Ask it to go to sleep and confirm the
 call's microphone continues. Run synthetic checks first; live speech/model judgment still needs
 its own acceptance and must not be inferred from these fixtures.
+
+For an optional public-provider contract check, compile the existing Realtime tool probe with the
+production session and script renderer, then select `assistant` mode. Use the model already
+configured in the app; the example uses `gpt-realtime`:
+
+```sh
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug -framework AICameraCore \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  Sources/AICameraApp/RealtimeConversationSession.swift Sources/AICameraApp/OverlayScriptRenderer.swift \
+  scripts/validate-realtime-tools.swift -o /tmp/aicamera-realtime-tools-validation
+/tmp/aicamera-realtime-tools-validation Resources/Overlay/overlay.html codex gpt-realtime assistant
+```
+
+This 45-second bounded probe advertises the production tool catalog/instructions, requests an
+automatically chosen synthetic note/card sequence, and checks the wait/sleep schemas explicitly.
+It creates only a temporary synthetic notebook, discards received audio, captures no media, and
+never plays a response. Both `codex` and `api-key` reads forbid Keychain interaction. An unavailable
+credential stops the check; do not retry with UI enabled during unattended work. This verifies a
+provider contract, not real-world addressed-speech recognition or installed-app behavior.
