@@ -11,6 +11,10 @@ is cached; the capture path reads a small immutable value and never waits for a 
 Both visual layers are omitted from clean inference frames. See [agent tools](realtime-conversation.md#notes-cards-and-quiet-responses)
 for limits and note visibility.
 
+The optional `render_face_effect` tool uses the same renderer with a small local face anchor.
+Native gating hides its pixels when tracking is absent, stale, or from a retired track; a normal
+overlay does not activate tracking. See [face effects](face-effects.md) for the coordinate contract.
+
 ## Current data flow
 
 ```text

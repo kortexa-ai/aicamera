@@ -23,13 +23,15 @@ tools whose capabilities are available in the current session.
 
 The current host implementation provides `save_note`, `list_notes`, `delete_note`, `show_card`,
 `clear_cards`, `render_overlay`, `clear_overlay`, `wait_for_user`, `sleep_agent`, `get_camera_state`,
-`set_translation`, `set_camera_layout`, `calculate`, and the opt-in `get_weather_forecast`. Notes and
+`set_translation`, `set_camera_layout`, `calculate`, `render_face_effect`, and the opt-in
+`get_weather_forecast`. Notes and
 calculation require enabled Tools; visual tools also require an active camera,
 and translation control requires configured caption translation. Independent input pause and
 one-question mode are available on `main`. U.S. weather forecasts use the public NWS service with
 explicit approximate-location permission; see [weather forecasts](weather-forecasts.md). Market
 quotes and worldwide weather, spoken translation,
-external image/slide assets, timers, and face anchors below remain planned capabilities.
+external image/slide assets, timers, and richer face tracking remain planned capabilities.
+Requested face effects now use a bounded local 2D anchor; see [face effects](face-effects.md).
 The current presentation mode uses the existing generated three.js scene with a bounded camera inset.
 
 | Job | Tool family | Example |
@@ -66,8 +68,9 @@ product just to make a demo appear live.
 - Rich visuals use the existing bundled three.js runtime. Scripts cannot fetch external assets,
   record media, write files, or create their own renderer. Simple cards use a deterministic native
   renderer so text does not depend on the model implementing typography correctly.
-- Above-head or face-following graphics need a real local tracking anchor. Until that exists,
-  describe a fixed position honestly. Do not promise that a floating sun follows a face.
+- Requested face-following graphics use the local single-face anchor and hide when tracking is
+  lost. Keep fixed scenes distinct, and do not promise hair-aware placement, occlusion, or a dense
+  3D mesh. Real movement and lighting still need acceptance.
 - A presentation layout should retain an easy return to the full camera, preserve camera aspect
   ratio, and place the original video above the slide in the actual virtual-camera output.
 

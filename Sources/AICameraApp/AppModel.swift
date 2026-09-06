@@ -100,7 +100,11 @@ final class AppModel: ObservableObject {
     let agentNotes = AgentNotesController()
     private let agentWeather: any WeatherForecastClient = NWSWeatherClient()
     private let agentPresentation = AgentPresentationState()
+    private let faceAnchors = FaceAnchorState()
     @Published private(set) var cameraInsetRequested = false
+    var canResetAgentView: Bool {
+        cameraInsetRequested || scriptRenderer?.scriptIsRunning == true || !agentPresentation.cards().isEmpty
+    }
     private var cameraLayoutID: UUID?
     private var cameraLayoutTask: Task<Void, Never>?
 
@@ -804,7 +808,8 @@ final class AppModel: ObservableObject {
                 }
             },
             scriptRenderer: scriptRenderer,
-            agentPresentation: agentPresentation
+            agentPresentation: agentPresentation,
+            faceAnchors: faceAnchors
         )
 
         do {
@@ -1167,7 +1172,8 @@ final class AppModel: ObservableObject {
                         cameraState: profile.overlays.script.enabled,
                         translation: profile.overlays.script.enabled && self.translationConfigured,
                         weather: AgentWeatherPolicy.isAvailable(in: profile),
-                        calculation: profile.overlays.script.enabled
+                        calculation: profile.overlays.script.enabled,
+                        faceEffects: profile.overlays.script.enabled && self.cameraRunGate?.isActive == true
                     )
                 )
                 try await session.connect(session: request)
@@ -1495,6 +1501,35 @@ final class AppModel: ObservableObject {
             return ["ok": false, "error": "Unknown tool or invalid arguments."]
         }
         switch command {
+        case let .faceEffect(script, ttl):
+            guard configuration.enabled, cameraRunGate?.isActive == true, let renderer = scriptRenderer else {
+                return ["ok": false, "error": "Face effects require enabled Tools and an active camera."]
+            }
+            guard !cameraInsetRequested else {
+                return ["ok": false, "error": "Restore full-camera mode before starting a face effect."]
+            }
+            guard renderer.load(script: script, ttlSeconds: ttl, followsFace: true) else {
+                return ["ok": false, "error": "The face effect was rejected."]
+            }
+            let effect = faceAnchors.requestedGeneration
+            let generation = realtimeGeneration
+            let deadline = ProcessInfo.processInfo.systemUptime + 3
+            while renderer.isFaceEffect, !renderer.scriptIsRunning, !Task.isCancelled,
+                  generation == realtimeGeneration, ProcessInfo.processInfo.systemUptime < deadline {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            guard !Task.isCancelled, generation == realtimeGeneration, !privacyMuted,
+                  renderer === scriptRenderer, cameraRunGate?.isActive == true,
+                  configurationController.configuration.overlays.script.enabled else {
+                return ["ok": false, "error": "The face effect was cancelled."]
+            }
+            guard faceAnchors.requestedGeneration == effect, renderer.isFaceEffect, renderer.scriptIsRunning else {
+                if faceAnchors.requestedGeneration == effect { renderer.clear() }
+                return ["ok": false, "error": "The face script could not start. Check the script and try again."]
+            }
+            return ["ok": true, "ttlSeconds": ttl,
+                    "tracking": renderer.latestFreshOverlay() == nil ? "waiting for one clear face" : "active",
+                    "visibility": "outgoing camera only while a single face is tracked"]
         case let .calculate(expression):
             guard configuration.enabled else { return ["ok": false, "error": "Tools are disabled in Settings."] }
             do { return try AgentCalculation.evaluate(expression).toolResult }
@@ -1523,6 +1558,9 @@ final class AppModel: ObservableObject {
         case let .cameraInset(request):
             guard configuration.enabled, cameraRunGate?.isActive == true, let renderer = scriptRenderer else {
                 return ["ok": false, "error": "Presentation requires enabled Tools and an active camera."]
+            }
+            guard !renderer.isFaceEffect else {
+                return ["ok": false, "error": "Clear the face effect before starting a presentation layout."]
             }
             let capture = configurationController.configuration.capture
             guard let insetFrame = request.frame(in: CGSize(width: capture.width, height: capture.height)) else {
@@ -1664,6 +1702,7 @@ final class AppModel: ObservableObject {
         guard configuration.overlays.script.enabled, scriptRenderer == nil else { return }
         let renderer = OverlayScriptRenderer(
             scriptConfiguration: configuration.overlays.script,
+            faceAnchors: faceAnchors,
             onLog: { [weak self] line in
                 Task { @MainActor [weak self] in
                     self?.overlayScriptLog = line

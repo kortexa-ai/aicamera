@@ -212,11 +212,14 @@ public enum RealtimeSessionConfiguration {
         instructions += "\nKeep spoken replies concise. Use one short sentence unless the user asks for detail."
         instructions += AgentToolCatalog.instructions(capabilities: capabilities)
         if capabilities.visuals {
+            let renderingTool = capabilities.faceEffects
+                ? "Use render_overlay for a fixed scene or render_face_effect for a requested face-following graphic. A face effect waits for tracking; do not claim it is already visible before a face is found."
+                : "For a three.js visual request, call render_overlay before claiming it is visible."
             instructions += """
 
             You can control a transparent three.js overlay on the camera with the provided client tools.
             The overlay canvas is \(width)x\(height), origin is top-left in canvas pixels, and camera output is \(mirror).
-            For a three.js visual request, call render_overlay before claiming it is visible. Use show_card for readable text.
+            \(renderingTool) Use show_card for readable text.
             The script runs immediately in an already-loaded page. Do not wait for DOMContentLoaded or another page event.
             THREE and window.AICamera are already available. Add meshes to AICamera.scene, position AICamera.camera, and use AICamera.onFrame(function(dt) { ... }) for animation.
             Follow this known-good pattern: const mesh = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.35, 32, 96), new THREE.MeshStandardMaterial({color: 0x8b5cf6})); AICamera.scene.add(mesh); AICamera.camera.position.set(0, 0, 5); AICamera.camera.lookAt(0, 0, 0); AICamera.onFrame(function(dt) { mesh.rotation.x += dt * 0.5; mesh.rotation.y += dt; });

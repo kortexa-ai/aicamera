@@ -760,3 +760,38 @@ register successfully. Without the flag, all three shortcuts must register. If a
 owns Space too, the fixture must fail; do not quit the user's app merely to get a green result.
 This establishes native registration/event routing, not a live spoken Pause listening/Ask again
 cycle. Keep the latter in the installed-candidate acceptance matrix.
+
+## Face-effect anchors
+
+`FaceAnchorTests` validates coordinate transforms, mirror/roll, partial/invalid geometry, effect
+and track generations, expiry, bounded local payloads, and capability/argument/prompt contracts.
+The full validation also runs the native WebKit overlay fixture and blank-frame Vision fixture.
+It checks actual face-effect pixel positions, initial/lost/stale tracking suppression, reacquisition
+without retired pixels, replacement with a normal overlay, expiry, and Stop. No camera or microphone
+is opened; the renderer uses only generated geometry and synthetic anchors.
+
+An optional fictional/generated portrait can exercise native landmarks and a charming three.js sun
+through the host compositor. After the validation build:
+
+```sh
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug -framework AICameraCore \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  Sources/AICameraApp/FaceAnchorDetector.swift Sources/AICameraApp/OverlayScriptRenderer.swift \
+  Sources/AICameraApp/OverlayRenderer.swift Sources/AICameraApp/AgentCardRenderer.swift \
+  Sources/AICameraApp/AgentStatusRenderer.swift scripts/validate-face-anchors.swift \
+  -o /tmp/aicamera-face-anchor-validation
+/tmp/aicamera-face-anchor-validation Resources/Overlay/overlay.html \
+  build/face-fixtures/synthetic-portrait.png build/face-fixtures
+```
+
+The optional image is not a required repository asset. Supply only an explicitly synthetic fixture;
+automatic validation uses a blank frame and does not read a user's photo library. The optional
+fixture produces PNGs at 1280×720 and 640×480 with mirroring both off and on. Inspect position,
+orientation, graphic scale, and clear eyes/caption space. The overlay fixture's publication sample
+is a liveness check, not an isolated performance benchmark.
+
+Installed acceptance should cover real movement/rotation, leaving/re-entering the frame, multiple
+faces, partial faces, glasses and different lighting, privacy mute, Tools off, Clear, expiry, and
+an independent virtual-camera client. Confirm call audio and agent-only input pause continue to
+work. Dense meshes and occlusion are not part of this initial 2D contract.

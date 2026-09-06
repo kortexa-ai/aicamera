@@ -21,6 +21,8 @@ final class OverlayScriptRenderer: NSObject {
     struct Frame {
         let pixelBuffer: CVPixelBuffer
         let date: Date
+        let faceGeneration: UUID?
+        let faceTrackingID: String?
     }
 
     /// An overlay frame older than this is ignored by the compositor.
@@ -33,6 +35,7 @@ final class OverlayScriptRenderer: NSObject {
 
     private let scriptConfiguration: ScriptOverlayConfiguration
     private let onLog: @Sendable (String) -> Void
+    private let faceAnchors: FaceAnchorState?
     private let slot = LatestValueSlot<Frame>()
     // Script messages may contain scene or transcript text. Keep only a bounded UI value;
     // never send them to persistent logs. Throttle before scheduling the UI callback.
@@ -57,15 +60,22 @@ final class OverlayScriptRenderer: NSObject {
     private let pageURL: URL?
     private var pendingSceneData: String?
     private var sceneUpdateInFlight = false
+    private var faceEffectGeneration: UUID?
+    private var faceUpdateTask: Task<Void, Never>?
+    private var faceUpdateInFlight = false
+    var isFaceEffect: Bool { faceEffectGeneration != nil }
+    private(set) var scriptIsRunning = false
 
     init(
         scriptConfiguration: ScriptOverlayConfiguration,
         pageURL: URL? = Bundle.main.url(forResource: "overlay", withExtension: "html"),
+        faceAnchors: FaceAnchorState? = nil,
         onLog: @escaping @Sendable (String) -> Void
     ) {
         self.scriptConfiguration = scriptConfiguration
         self.pageURL = pageURL
         self.onLog = onLog
+        self.faceAnchors = faceAnchors
     }
 
     // MARK: - Lifecycle (main thread)
@@ -130,6 +140,8 @@ final class OverlayScriptRenderer: NSObject {
     }
 
     func stop() {
+        scriptIsRunning = false
+        endFaceEffect()
         frameGeneration = UUID().uuidString
         lastFrameSequence = -1
         scriptExpiry = nil
@@ -154,16 +166,23 @@ final class OverlayScriptRenderer: NSObject {
     /// Loads and runs a new overlay script, replacing any active one.
     /// Returns false when the script is rejected (empty or oversized).
     @discardableResult
-    func load(script: String, ttlSeconds: Double) -> Bool {
+    func load(script: String, ttlSeconds: Double, followsFace: Bool = false) -> Bool {
         guard scriptConfiguration.enabled,
               webView != nil, !script.isEmpty,
               script.utf8.count <= scriptConfiguration.maxScriptBytes,
-              ttlSeconds.isFinite, (1...scriptConfiguration.maximumTTLSeconds).contains(ttlSeconds) else {
+              ttlSeconds.isFinite, (1...scriptConfiguration.maximumTTLSeconds).contains(ttlSeconds),
+              !followsFace || faceAnchors != nil else {
             return false
         }
         frameGeneration = UUID().uuidString
         lastFrameSequence = -1
         slot.clear()
+        scriptIsRunning = false
+        endFaceEffect()
+        if followsFace, let faceAnchors {
+            faceEffectGeneration = faceAnchors.begin()
+            startFaceUpdates()
+        }
         scriptExpiry = Date().addingTimeInterval(ttlSeconds)
         pendingScript = script
         // A new document releases old timers, callbacks, scene globals, and GPU resources.
@@ -175,6 +194,8 @@ final class OverlayScriptRenderer: NSObject {
 
     /// Deactivates the current script and clears pending overlay frames.
     func clear() {
+        scriptIsRunning = false
+        endFaceEffect()
         frameGeneration = UUID().uuidString
         lastFrameSequence = -1
         scriptExpiry = nil
@@ -207,11 +228,48 @@ final class OverlayScriptRenderer: NSObject {
         }
     }
 
+    private func endFaceEffect() {
+        faceUpdateTask?.cancel()
+        faceUpdateTask = nil
+        if let generation = faceEffectGeneration { faceAnchors?.end(generation: generation) }
+        faceEffectGeneration = nil
+        faceUpdateInFlight = false
+    }
+
+    private func startFaceUpdates() {
+        let generation = faceEffectGeneration
+        faceUpdateTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.faceEffectGeneration == generation else { return }
+                self.sendFaceUpdate()
+                try? await Task.sleep(for: .milliseconds(60))
+            }
+        }
+    }
+
+    private func sendFaceUpdate() {
+        guard pageReady, faceEffectGeneration != nil, !faceUpdateInFlight else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let json = faceAnchors?.fresh(at: now)?.json(at: now) ?? "null"
+        guard json.utf8.count <= 2_048 else { return }
+        faceUpdateInFlight = true
+        let generation = frameGeneration
+        webView?.evaluateJavaScript("window.AICamera._setFaceAnchor(\(json))") { [weak self] _, _ in
+            guard let self, self.frameGeneration == generation else { return }
+            self.faceUpdateInFlight = false
+        }
+    }
+
     // MARK: - Real-time read path (any thread)
 
     /// Returns the latest overlay frame when it is still fresh, else nil.
     func latestFreshOverlay() -> CVPixelBuffer? {
-        slot.fresh(maxAge: Self.overlayFreshnessSeconds)?.pixelBuffer
+        guard let frame = slot.fresh(maxAge: Self.overlayFreshnessSeconds) else { return nil }
+        if let generation = frame.faceGeneration {
+            guard let tracked = faceAnchors?.fresh(), tracked.generation == generation,
+                  tracked.trackingID.uuidString == frame.faceTrackingID else { return nil }
+        }
+        return frame.pixelBuffer
     }
 
     // MARK: - Frame intake (main thread)
@@ -224,7 +282,8 @@ final class OverlayScriptRenderer: NSObject {
         // instead of accumulating megabyte messages; rendering and camera capture stay independent.
         webView?.evaluateJavaScript("window.AICamera._ackFrame('\(frameGeneration)', \(frame.sequence))")
         guard let pixelBuffer = Self.makeOverlayPixelBuffer(data: frame.pixels, width: canvasWidth, height: canvasHeight) else { return }
-        slot.store(Frame(pixelBuffer: pixelBuffer, date: Date()))
+        slot.store(Frame(pixelBuffer: pixelBuffer, date: Date(), faceGeneration: faceEffectGeneration,
+                         faceTrackingID: body["faceTrackingID"] as? String))
     }
 
     /// Wraps readPixels RGBA bytes (bottom row first, straight alpha) into a
@@ -282,23 +341,27 @@ final class OverlayScriptRenderer: NSObject {
           var diag = 'AICamera=' + (typeof window.AICamera) + ' THREE=' + (typeof window.THREE);
           if (typeof window.AICamera === 'undefined') {
             window.webkit.messageHandlers.log.postMessage('INJECT ABORT: bridge not ready | ' + diag);
-            return;
+            return false;
           }
           window.AICamera._reset();
           try {
             (0, eval)(\(scriptJSON));
             window.AICamera._activate(\(fps), '\(currentGeneration)');
             window.AICamera.log('overlay script active');
+            return true;
           } catch (e) {
             window.AICamera.log('SCRIPT ERROR: ' + (e && e.message ? e.message : e) + ' | ' + diag);
+            return false;
           }
         })()
         """
-        webView?.evaluateJavaScript(js) { [weak self] _, error in
+        webView?.evaluateJavaScript(js) { [weak self] result, error in
             guard let self, self.frameGeneration == currentGeneration else { return }
             if let error {
                 self.logLine("Overlay script failed to run: \(error.localizedDescription)")
             }
+            self.scriptIsRunning = error == nil && result as? Bool == true
+            if self.isFaceEffect && !self.scriptIsRunning { self.clear() }
         }
     }
 
@@ -306,6 +369,7 @@ final class OverlayScriptRenderer: NSObject {
         pageReady = false
         pendingSceneData = nil
         sceneUpdateInFlight = false
+        faceUpdateInFlight = false
         webView?.stopLoading()
         guard let pageURL else { return }
         expectedNavigation = webView?.loadFileURL(pageURL, allowingReadAccessTo: pageURL.deletingLastPathComponent())
@@ -351,6 +415,8 @@ extension OverlayScriptRenderer: WKNavigationDelegate {
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard webView === self.webView else { return }
+        scriptIsRunning = false
+        endFaceEffect()
         // The web-content process crashed. The overlay disappears (stale
         // slot) and the page is reloaded so a later script can run.
         frameGeneration = UUID().uuidString

@@ -287,7 +287,7 @@ struct SettingsView: View {
                 disabledText: "Realtime tools are disabled."
             ) {
                 if toolsEnabled {
-                    Text("Ask the agent to remember a local note, show an information card, or draw a three.js animation in the camera. Notes stay in your notebook until you ask to share them; camera visuals expire automatically.")
+                    Text("Ask the agent to remember a local note, show an information card, or draw a three.js animation in the camera. Requested face effects use local tracking only while the effect runs. Notes stay in your notebook until you ask to share them; camera visuals expire automatically.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Toggle("Weather forecasts", isOn: Binding(

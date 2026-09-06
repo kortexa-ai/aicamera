@@ -48,8 +48,11 @@ Implementation and acceptance priorities:
   need provider decisions; see [#59](https://github.com/kortexa-ai/aicamera/issues/59).
 - [x] Add bounded local decimal calculation so the agent can check arithmetic before showing a
   comparison. Report rounding and retain units/assumptions; calculation does not verify live facts.
+- [x] Add requested local face-effect anchors with crop/mirror alignment, a small three.js bridge,
+  and native stale/lost-track suppression. Dense 3D tracking, occlusion, diverse real-person motion,
+  and independent call-client acceptance remain parts of #45.
 - [ ] Add further sourced information providers, spoken translation/external presentation assets, and
-  face-tracked graphics in the staged companion roadmap. Validate new listening/tool interactions
+  richer face-tracked graphics in the staged companion roadmap. Validate new listening/tool interactions
   with live speech after synthetic transport and native UI acceptance.
 
 - [x] Keep saved feature setup separate from runtime quick controls. The menu toolbar controls

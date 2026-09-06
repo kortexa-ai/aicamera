@@ -24,6 +24,7 @@ final class VideoPipelineController: NSObject {
     /// path; a stale or absent overlay never delays a frame.
     private let scriptRenderer: OverlayScriptRenderer?
     private let agentPresentation: AgentPresentationState?
+    private let faceAnchors: FaceAnchorState?
 
     private let session = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -31,10 +32,12 @@ final class VideoPipelineController: NSObject {
     private let analysisQueue = DispatchQueue(label: "ai.kortexa.aicamera.video-analysis", qos: .userInitiated)
     // Deliberate controls must not queue behind JPEG preparation for object/scene inference.
     private let gestureQueue = DispatchQueue(label: "ai.kortexa.aicamera.gestures", qos: .userInitiated)
+    private let faceQueue = DispatchQueue(label: "ai.kortexa.aicamera.face-effects", qos: .userInitiated)
     private let renderer = OverlayRenderer()
     /// Confined to analysisQueue so network inputs never contain rendered private overlays.
     private let analysisRenderer = OverlayRenderer()
     private let gestureDetector = GestureDetector()
+    private let faceDetector = FaceAnchorDetector()
     private let feeder = VirtualCameraFeeder()
 
     private let snapshotLock = NSLock()
@@ -44,6 +47,7 @@ final class VideoPipelineController: NSObject {
     private var lastGestureUptime: TimeInterval = 0
     private var lastNetworkUptime: TimeInterval = 0
     private var gestureInFlight = false
+    private var lastFaceUptime = -Double.infinity
     private var networkInFlight = false
     // Protected by snapshotLock and copied into analysis work to reject late callbacks after stop.
     private var runGeneration: UInt64 = 0
@@ -60,7 +64,8 @@ final class VideoPipelineController: NSObject {
         onFrame: @escaping FrameHandler,
         onError: @escaping ErrorHandler,
         scriptRenderer: OverlayScriptRenderer? = nil,
-        agentPresentation: AgentPresentationState? = nil
+        agentPresentation: AgentPresentationState? = nil,
+        faceAnchors: FaceAnchorState? = nil
     ) {
         self.configuration = configuration
         self.privacyMute = privacyMute
@@ -72,6 +77,7 @@ final class VideoPipelineController: NSObject {
         self.onError = onError
         self.scriptRenderer = scriptRenderer
         self.agentPresentation = agentPresentation
+        self.faceAnchors = faceAnchors
         super.init()
     }
 
@@ -112,6 +118,9 @@ final class VideoPipelineController: NSObject {
             captureQueue.sync {
                 if session.isRunning { session.stopRunning() }
                 gestureInFlight = false
+                if let anchors = faceAnchors, let effect = anchors.requestedGeneration {
+                    anchors.apply(nil, generation: effect, capturedAt: ProcessInfo.processInfo.systemUptime)
+                }
                 networkInFlight = false
             }
         }
@@ -301,7 +310,26 @@ final class VideoPipelineController: NSObject {
             onPreview(image, privacy, features)
         }
         submitGestureIfNeeded(pixelBuffer: input, frameID: frameID, uptime: uptime, generation: generation)
+        submitFaceIfNeeded(pixelBuffer: input, uptime: uptime, generation: generation)
         submitNetworkFrameIfNeeded(pixelBuffer: input, frameID: frameID, uptime: uptime, generation: generation)
+    }
+
+    private func submitFaceIfNeeded(pixelBuffer: CVPixelBuffer, uptime: TimeInterval, generation: UInt64) {
+        guard configuration.overlays.script.enabled, !privacyMute.snapshot.isMuted,
+              let anchors = faceAnchors, let effect = anchors.requestedGeneration,
+              uptime - lastFaceUptime >= 1.0 / 8,
+              let analysis = anchors.beginAnalysis(generation: effect) else { return }
+        lastFaceUptime = uptime
+        let output = CGSize(width: configuration.capture.width, height: configuration.capture.height)
+        let mirrored = configuration.capture.mirrorVideo
+        faceQueue.async { [weak self] in
+            defer { anchors.endAnalysis(analysis) }
+            guard let self, self.isActive(generation: generation), !self.privacyMute.snapshot.isMuted,
+                  anchors.requestedGeneration == effect else { return }
+            let anchor = self.faceDetector.detect(in: pixelBuffer, output: output, mirrored: mirrored)
+            guard self.isActive(generation: generation), !self.privacyMute.snapshot.isMuted else { return }
+            anchors.apply(anchor, generation: effect, capturedAt: uptime)
+        }
     }
 
     private func submitGestureIfNeeded(

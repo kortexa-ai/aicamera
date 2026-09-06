@@ -844,3 +844,29 @@ it does not displace another app's exclusive shortcuts. No physical keystrokes w
 keyboard input was observed. The running installed bundle still passes strict signature validation.
 Production shortcut definitions and capture/system components were unchanged. Live spoken control
 acceptance remains separate.
+
+## Requested local face effects
+
+Full validation passes 232 Swift tests and now includes the native WebKit overlay and blank-frame
+Vision fixtures. Core checks verify camera/canvas aspect-fill and mirror alignment, roll, invalid
+and partial geometry, finite bounds, effect generations, lost/stale tracking, new track IDs after
+reacquisition, bounded geometry-only JSON, and capability/argument/session-prompt contracts.
+
+The shared analysis permit remains held until a retired worker finishes, preventing rapid camera
+or effect restarts from stacking native requests or retained input buffers. Wrong/duplicate
+completion tickets cannot release newer work.
+
+The actual WebKit/native-pixel fixture follows synthetic anchors at two distinct positions, hides
+before tracking and immediately on loss, rejects retired-position pixels on reacquisition, and
+hides stale anchors despite continuing script frames. Normal overlay replacement, failed script
+cleanup, expiry, and Stop end tracking. Existing scene replacement, Clear, script-error recovery,
+frame-acknowledgement liveness, and scene-data checks also pass. This is not an isolated performance
+benchmark.
+
+A fictional portrait generated with the built-in image tool passed native Vision detection at
+1280×720 and 640×480, mirrored and unmirrored. A small animated three.js sun reached native camera
+composition and its saved synthetic PNGs were visually reviewed. The optional portrait and prompt
+are in the ignored build/face-fixtures directory; automatic validation uses no photo asset. No
+camera/microphone was opened, captured media recorded, credentials accessed, or installed app/system
+component changed. Real movement, diverse lighting/glasses, and independent call-client acceptance
+remain separate checks under issue 45.

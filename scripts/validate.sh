@@ -109,6 +109,18 @@ xcrun swiftc -parse-as-library -O \
 "$VALIDATION_TMP/agent-weather" --fixture "$VALIDATION_TMP/synthetic-weather"
 xcrun swiftc -parse-as-library -O \
     -F "$FRAMEWORKS" -framework AICameraCore -Xlinker -rpath -Xlinker "$FRAMEWORKS" \
+    Sources/AICameraApp/OverlayScriptRenderer.swift scripts/validate-overlay-runtime.swift \
+    -o "$VALIDATION_TMP/overlay-runtime"
+"$VALIDATION_TMP/overlay-runtime" "$ROOT/Resources/Overlay/overlay.html"
+xcrun swiftc -parse-as-library -O \
+    -F "$FRAMEWORKS" -framework AICameraCore -Xlinker -rpath -Xlinker "$FRAMEWORKS" \
+    Sources/AICameraApp/FaceAnchorDetector.swift Sources/AICameraApp/OverlayScriptRenderer.swift \
+    Sources/AICameraApp/OverlayRenderer.swift Sources/AICameraApp/AgentCardRenderer.swift \
+    Sources/AICameraApp/AgentStatusRenderer.swift scripts/validate-face-anchors.swift \
+    -o "$VALIDATION_TMP/face-anchors"
+"$VALIDATION_TMP/face-anchors" "$ROOT/Resources/Overlay/overlay.html"
+xcrun swiftc -parse-as-library -O \
+    -F "$FRAMEWORKS" -framework AICameraCore -Xlinker -rpath -Xlinker "$FRAMEWORKS" \
     Sources/AICameraApp/RealtimeConversationSession.swift scripts/validate-realtime-activation.swift \
     -o "$VALIDATION_TMP/realtime-activation"
 "$VALIDATION_TMP/realtime-activation"

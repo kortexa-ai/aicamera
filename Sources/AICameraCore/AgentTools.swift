@@ -8,13 +8,15 @@ public struct AgentToolCapabilities: Equatable, Sendable {
     public var translation: Bool
     public var weather: Bool
     public var calculation: Bool
+    public var faceEffects: Bool
     public init(visuals: Bool = false, notes: Bool = false, conversationControls: Bool = false,
                 cameraState: Bool = false, translation: Bool = false, weather: Bool = false,
-                calculation: Bool = false) {
+                calculation: Bool = false, faceEffects: Bool = false) {
         self.visuals = visuals; self.notes = notes; self.conversationControls = conversationControls
         self.cameraState = cameraState; self.translation = translation
         self.weather = weather
         self.calculation = calculation
+        self.faceEffects = faceEffects
     }
 }
 
@@ -33,8 +35,13 @@ public enum AgentToolCommand: Equatable, Sendable {
     case resetView
     case weatherForecast(AgentWeatherRequest)
     case calculate(String)
+    case faceEffect(script: String, ttlSeconds: Double)
 
     public static func parse(name: String, arguments: String, script: ScriptOverlayConfiguration) -> Self? {
+        if name == "render_face_effect" {
+            guard case let .render(source, ttl) = RealtimeOverlayCommand.parse(name: "render_overlay", arguments: arguments, configuration: script) else { return nil }
+            return .faceEffect(script: source, ttlSeconds: ttl)
+        }
         if let overlay = RealtimeOverlayCommand.parse(name: name, arguments: arguments, configuration: script) {
             return .overlay(overlay)
         }
@@ -240,6 +247,12 @@ public enum AgentToolCatalog {
                 tool("clear_cards", "Remove the information card from the camera. Saved notes are retained.")
             ]
         }
+        if capabilities.visuals && capabilities.faceEffects {
+            result.append(tool("render_face_effect", "Render a bounded three.js effect that follows one locally tracked face. Use only when the user requests a face-following graphic, such as a hat or a sun above their head. This replaces the generated scene and enables local tracking only for its lifetime; missing/stale/multiple/partial faces hide the effect. Requires full-camera mode. Use AICamera.faceAnchor and AICamera.facePosition in onFrame. No network, identity inference, occlusion, or full 3D face mesh.", properties: [
+                "script": string("Same bounded three.js script contract as render_overlay. Read fresh AICamera.faceAnchor in every onFrame callback; hide your group when null."),
+                "ttlSeconds": ["type": "number", "minimum": 1, "maximum": script.maximumTTLSeconds]
+            ], required: ["script"]))
+        }
         return result
     }
 
@@ -281,9 +294,15 @@ public enum AgentToolCatalog {
             text += """
 
             Use show_card for a short readable answer, reminder, definition, number, or comparison. Prefer one concise card, with a source/time footer for verified current facts.
-            Use render_overlay for charming three.js illustrations and animation when useful or requested. Keep faces, captions, and the top status area clear. Fixed-position graphics do not track faces.
+            Use render_overlay for charming three.js illustrations and animation when useful or requested. Keep faces, captions, and the top status area clear. render_overlay is fixed-position and does not enable face tracking.
             A card and a three.js illustration can coexist. Cards expire; clear_cards removes the card and clear_overlay removes the illustration. Neither deletes saved notes.
             For a presentation with the person in a corner, render the full-frame illustration first, then use set_camera_layout with mode inset. The default camera inset is one fifth of frame width in the lower-right corner. Its height preserves aspect ratio. Keep key information out of the selected corner and caption/status areas. Use mode camera alone to reset the view and clear generated graphics. This does not load external image URLs or track a face.
+            """
+        }
+        if capabilities.visuals && capabilities.faceEffects {
+            text += """
+
+            For an explicitly requested face-following hat or similar graphic, use render_face_effect. AICamera.faceAnchor is null when no fresh single face is available, otherwise it has box {x,y,width,height}, center, top, leftEye, rightEye (each {x,y}), and roll (radians). Coordinates use the overlay canvas with origin top-left; top estimates a point above the face. Read it each frame, hide the group when null, and use AICamera.facePosition(point) to get a THREE.Vector3 at z=0. Use the projected box width for scale and face.roll for group.rotation.z. Keep the default camera, avoid covering eyes/captions, and do not claim precise hair placement, occlusion, gaze, identity, or a 3D face mesh. Full-camera mode is required; ask to restore it if a presentation is active. clear_overlay or a normal render_overlay ends tracking. A sourced weather card can coexist with a playful face illustration; the illustration does not establish weather facts.
             """
         }
         return text

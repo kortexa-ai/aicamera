@@ -134,6 +134,14 @@ The opt-in `get_weather_forecast` tool provides sourced U.S. NWS forecasts; see
 are not available through this provider. Instructions
 require the agent to say when it cannot verify current facts and to report tool success honestly.
 
+## Requested face effects
+
+`render_face_effect` activates a bounded local face anchor for an explicitly requested
+face-following graphic. It requires enabled Tools, an active camera, and full-camera layout.
+A successful call waits for one clear face; tracking loss hides the graphic. Clear, expiry, normal
+overlay replacement, privacy mute, and camera shutdown stop or hide the effect. Landmarks stay
+local and are not added to the Realtime conversation. See [face effects](face-effects.md).
+
 ## Local arithmetic
 
 With Tools enabled, `calculate` checks a decimal expression before the agent states or displays a

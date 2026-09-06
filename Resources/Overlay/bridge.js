@@ -54,6 +54,12 @@
   var seq = 0;
   var generation = '';
   var pendingFrame = null;
+  var faceData = null;
+  var faceUpdatedAt = 0;
+  function freshFace() {
+    if (!faceData || performance.now() - faceUpdatedAt + faceData.ageSeconds * 1000 > 350) return null;
+    return faceData;
+  }
   // WebKit's WebGL2 readPixels only accepts an ArrayBufferView destination.
   var pixelView = new Uint8Array(W * H * 4);
 
@@ -68,12 +74,14 @@
   }
 
   function postFrame(renderMs, readMs) {
+    var face = freshFace();
     var t0 = performance.now();
     var b64 = bufToBase64(pixelView.buffer);
     var encMs = performance.now() - t0;
     window.webkit.messageHandlers.frame.postMessage({
       seq: seq,
       generation: generation,
+      faceTrackingID: face ? face.trackingID : null,
       w: W,
       h: H,
       b64: b64,
@@ -155,6 +163,20 @@
   };
   api._setSceneData = function (json) {
     api.sceneData = json;
+  };
+  // Landmarks stay in the isolated local renderer. Expire even if native updates stop.
+  Object.defineProperty(api, 'faceAnchor', { get: freshFace });
+  api._setFaceAnchor = function (value) {
+    faceData = value;
+    faceUpdatedAt = performance.now();
+  };
+  // Project normalized top-left canvas coordinates onto a world-space plane at z.
+  api.facePosition = function (point, z) {
+    z = z === undefined ? 0 : z;
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(z) || Math.abs(z) > 5) return null;
+    var ray = new THREE.Vector3(point.x * 2 - 1, 1 - point.y * 2, 0.5).unproject(camera).sub(camera.position).normalize();
+    if (Math.abs(ray.z) < 0.0001) return null;
+    return camera.position.clone().add(ray.multiplyScalar((z - camera.position.z) / ray.z));
   };
   window.AICamera = api;
   window.addEventListener('error', function (e) { log('PAGE ERROR: ' + e.message); });
