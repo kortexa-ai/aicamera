@@ -15,6 +15,7 @@ enum RealtimeConversationState: String, Sendable {
     case idle = "Agent off"
     case connecting = "Connecting…"
     case listening = "Listening…"
+    case paused = "Agent is not listening"
     case responding = "Responding…"
     case speaking = "Speaking…"
     case failed = "Realtime failed"
@@ -119,6 +120,10 @@ final class AppModel: ObservableObject {
     private var managerCancellables = Set<AnyCancellable>()
     private var lifecycleCancellables = Set<AnyCancellable>()
     private var realtimeSession: (any RealtimeConversationClient)?
+    @Published private(set) var agentListening = AgentListeningPolicy()
+    private let realtimeInputGate = AgentInputGate()
+    private var realtimeListeningTask: Task<Void, Never>?
+    private var realtimeListeningRevision: UInt64 = 0
     private var realtimeEventTask: Task<Void, Never>?
     private var realtimeConnectTask: Task<Void, Never>?
     private var realtimeFinishTask: Task<Void, Never>?
@@ -282,6 +287,7 @@ final class AppModel: ObservableObject {
         case .idle: return .off
         case .connecting: return .connecting
         case .listening: return .listening
+        case .paused: return .paused
         case .responding: return .thinking
         case .speaking: return .speaking
         case .failed: return .failed
@@ -373,6 +379,7 @@ final class AppModel: ObservableObject {
             switch action {
             case .agent: self.toggleRealtimeConversation()
             case .mute: self.setPrivacyMuted(!self.privacyMuted)
+            case .agentInput: self.toggleAgentListening()
             }
         }
         globalShortcuts = shortcuts
@@ -983,6 +990,60 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Pause only agent input. The current reply and the microphone sent to a call keep working.
+    func toggleAgentListening() {
+        guard !privacyMuted, realtimeConversationActive,
+              realtimeConversationState != .connecting, let session = realtimeSession else { return }
+        agentListening.setRequested(!agentListening.requested)
+        realtimeListeningRevision &+= 1
+        let requested = agentListening.requested
+        let generation = realtimeGeneration
+        let previous = realtimeListeningTask
+        if !agentListening.requested { realtimeInputGate.close() }
+        realtimeListeningTask = Task { @MainActor [weak self, weak session] in
+            await previous?.value
+            guard let self, let session, !Task.isCancelled, generation == self.realtimeGeneration,
+                  session === self.realtimeSession else { return }
+            if requested {
+                guard self.agentListening.requested else { return }
+                if self.realtimeConversationState == .paused { self.rearmRealtimeConversation() }
+            } else {
+                do {
+                    try await session.pauseInputAudio()
+                    guard generation == self.realtimeGeneration else { return }
+                    if self.realtimeConversationState == .listening || self.realtimeConversationState == .paused {
+                        self.enterAgentListeningPause()
+                    }
+                } catch {
+                    guard generation == self.realtimeGeneration else { return }
+                    self.lastError = "Agent input could not pause. The agent has been stopped."
+                    self.closeRealtimeTransport(state: .failed, stopSpeech: true)
+                }
+            }
+        }
+    }
+
+    private func attachRealtimeInput(to session: any RealtimeConversationClient) {
+        audioController?.setRealtimeAudioHandler { [weak session, inputGate = realtimeInputGate] data, capturedAt in
+            guard inputGate.admits(capturedAt: capturedAt) else { return }
+            session?.appendInputPCM(data, capturedAt: capturedAt)
+        }
+    }
+
+    private func enterAgentListeningPause() {
+        realtimeInputGate.close()
+        realtimeFinishTask?.cancel()
+        realtimeFinishTask = nil
+        realtimeConversationState = .paused
+        audioController?.setRealtimeAudioHandler(nil)
+        let coordinator = pipeline
+        let generation = realtimeGeneration
+        Task { [weak self] in
+            guard let self, generation == self.realtimeGeneration, !self.agentListening.requested else { return }
+            await coordinator?.setRealtimeTranscriptionActive(false)
+        }
+    }
+
     func startRealtimeConversation() {
         guard canStartRealtimeConversation else {
             lastError = "Realtime conversation is not configured or the microphone is unavailable."
@@ -1025,6 +1086,8 @@ final class AppModel: ObservableObject {
         }
         let coordinator = pipeline
 
+        agentListening.start(mode: conversation.agentListeningMode)
+        realtimeInputGate.close()
         realtimeGeneration &+= 1
         let generation = realtimeGeneration
         realtimeConversationState = .connecting
@@ -1060,9 +1123,7 @@ final class AppModel: ObservableObject {
                         ? .init(value: "Bearer " + secret)
                         : .init(field: endpoint.auth.header, value: endpoint.auth.prefix + secret)
                 )
-                audioController.setRealtimeAudioHandler { [weak session] data, capturedAt in
-                    session?.appendInputPCM(data, capturedAt: capturedAt)
-                }
+                self.attachRealtimeInput(to: session)
                 self.realtimeSession = session
                 self.realtimeEventTask = Task { [weak self, weak session] in
                     guard let self, let session else { return }
@@ -1089,6 +1150,7 @@ final class AppModel: ObservableObject {
                     return
                 }
                 self.realtimeConversationState = .listening
+                self.realtimeInputGate.open()
                 self.realtimeConnectTask = nil
             } catch is CancellationError {
                 return
@@ -1111,6 +1173,11 @@ final class AppModel: ObservableObject {
         reconcileMedia: Bool = true
     ) {
         realtimeGeneration &+= 1
+        realtimeListeningRevision &+= 1
+        realtimeListeningTask?.cancel()
+        realtimeListeningTask = nil
+        agentListening.stop()
+        realtimeInputGate.close()
         realtimeConnectTask?.cancel()
         realtimeConnectTask = nil
         realtimeEventTask?.cancel()
@@ -1153,8 +1220,10 @@ final class AppModel: ObservableObject {
         case .connected:
             break
         case .speechStarted:
-            realtimeConversationState = .listening
+            if agentListening.requested { realtimeConversationState = .listening }
         case .speechStopped:
+            realtimeInputGate.close()
+            agentListening.utteranceEnded()
             realtimeConversationState = .responding
         case let .transcript(source, text, isFinal):
             await pipeline?.submitRealtimeTranscript(source: source, text: text, isFinal: isFinal)
@@ -1206,21 +1275,32 @@ final class AppModel: ObservableObject {
     /// The same server conversation keeps context; input opens only after both reply outputs drain.
     private func rearmRealtimeConversation() {
         guard realtimeMicrophoneRequested, !privacyMuted, let session = realtimeSession else { return }
+        guard agentListening.requested else { enterAgentListeningPause(); return }
         let generation = realtimeGeneration
+        let revision = realtimeListeningRevision
+        // Keep user controls accurate while the asynchronous input transition is pending.
+        realtimeConversationState = .paused
         realtimeFinishTask?.cancel()
         realtimeFinishTask = Task { @MainActor [weak self, weak session] in
             guard let self, let session, generation == self.realtimeGeneration,
                   session === self.realtimeSession else { return }
             self.resetRealtimeAudio(stopPlayback: false)
             do {
+                await self.pipeline?.setRealtimeTranscriptionActive(true)
+                guard !Task.isCancelled, generation == self.realtimeGeneration,
+                      revision == self.realtimeListeningRevision, self.agentListening.requested else { return }
+                self.attachRealtimeInput(to: session)
                 try await session.armConversationAudio()
                 guard !Task.isCancelled, generation == self.realtimeGeneration,
+                      revision == self.realtimeListeningRevision, self.agentListening.requested,
                       self.realtimeMicrophoneRequested, !self.privacyMuted else { return }
                 self.realtimeAcceptingAudio = true
                 self.realtimeConversationState = .listening
+                self.realtimeInputGate.open()
                 self.realtimeFinishTask = nil
             } catch {
-                guard generation == self.realtimeGeneration else { return }
+                guard generation == self.realtimeGeneration, revision == self.realtimeListeningRevision,
+                      !Task.isCancelled else { return }
                 self.lastError = "Realtime: \(error.localizedDescription)"
                 self.closeRealtimeTransport(state: .failed, stopSpeech: true)
             }

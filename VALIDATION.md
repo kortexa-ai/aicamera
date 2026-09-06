@@ -740,3 +740,13 @@ Build 13 was the previously installed and accepted Developer ID build. Build 14 
 A distributable release still needs the planned installer package, clean-machine install/upgrade/rollback/removal checks, and the user-owned reboot that clears retired extension generations.
 
 These operations can change system state or request authorization. They remain manual and approval-gated.
+## Agent listening isolation
+
+The first live-call assistant increment adds a capture admission gate, independent input pause,
+and opt-in one-question mode. Existing configurations retain Conversation mode. Five focused
+core tests cover state and migration, immediate closure, stale samples, paused VAD, and preservation
+of a response deadline. Full local validation passes 187 Swift tests and the existing installer,
+build, and HAL checks. The production WebSocket fixture exercises pause/resume, stale events,
+continued response audio, and tool continuation without a camera, microphone, network, or credential.
+No working host or system component was replaced for these checks. Native UI and live voice
+acceptance for this new input control remain separate from the released 0.2.0 acceptance.

@@ -38,6 +38,22 @@ struct ControlCenterView: View {
 
             FeatureToolbar(model: model)
 
+            if model.realtimeConversationActive {
+                HStack {
+                    Text(model.agentListening.requested ? "Agent listening enabled" : "Agent input paused")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(model.agentListening.requested ? "Pause listening" : "Ask again") {
+                        model.toggleAgentListening()
+                    }
+                    .controlSize(.small)
+                    .disabled(model.realtimeConversationState == .connecting)
+                    .help("Control–Option–Space. Pauses only agent input; your call microphone stays live. An unfinished question is discarded. A current answer keeps playing.")
+                    .accessibilityIdentifier("toggle-agent-listening")
+                }
+            }
+
             GroupBox {
                 VStack(spacing: 8) {
                     DeviceSetupRow(

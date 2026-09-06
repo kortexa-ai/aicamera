@@ -27,7 +27,7 @@ final class AgentStatusRenderer {
         let speed: Double
         let deformation: Double
         switch status {
-        case .off: (speed, deformation) = (0.28, 0.082)
+        case .off, .paused: (speed, deformation) = (0.28, 0.082)
         case .connecting, .thinking: (speed, deformation) = (0.82, 0.12)
         case .listening: (speed, deformation) = (0.48, 0.102)
         case .speaking: (speed, deformation) = (1.28, 0.165)
@@ -77,6 +77,7 @@ final class AgentStatusRenderer {
             title = status == .off ? "Agent off" : status.label
             switch status {
             case .off: hint = "Hold ✌️ to talk"
+            case .paused: hint = "⌃⌥Space to ask"
             case .muted: hint = "Unmute in AI Camera"
             case .failed: hint = "See AI Camera menu"
             default: hint = "Hold ✊ to mute"
@@ -93,7 +94,7 @@ final class AgentStatusRenderer {
     private func palette(_ status: AgentOverlayStatus) -> [NSColor] {
         let values: [(CGFloat, CGFloat, CGFloat)]
         switch status {
-        case .off: values = [(0.65, 0.65, 1), (0.63, 0.25, 0.93), (0.18, 0.42, 0.95)]
+        case .off, .paused: values = [(0.65, 0.65, 1), (0.63, 0.25, 0.93), (0.18, 0.42, 0.95)]
         case .connecting, .thinking: values = [(0.4, 1, 0.88), (0.16, 0.9, 0.92), (0.14, 0.45, 1)]
         case .listening: values = [(0.6, 1, 0.88), (0.27, 0.96, 0.73), (0.23, 0.38, 0.98)]
         case .speaking: values = [(1, 0.73, 0.36), (1, 0.25, 0.55), (0.62, 0.27, 0.98)]

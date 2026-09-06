@@ -6,6 +6,7 @@ public protocol RealtimeConversationClient: AnyObject, Sendable {
     func connect(session: [String: Any]) async throws
     func armOneShotAudio() async throws
     func armConversationAudio() async throws
+    func pauseInputAudio() async throws
     func appendInputPCM(_ data: Data, capturedAt: TimeInterval)
     func completeFunctionCall(callID: String, output: String) async throws
     func requestContinuation(_ response: [String: Any]) async throws
@@ -14,6 +15,7 @@ public protocol RealtimeConversationClient: AnyObject, Sendable {
 
 public extension RealtimeConversationClient {
     func armConversationAudio() async throws { try await armOneShotAudio() }
+    func pauseInputAudio() async throws { throw RealtimeSessionFailure.invalidSession }
 }
 
 public struct RealtimeFunctionCall: Sendable, Equatable {
@@ -71,7 +73,7 @@ public enum RealtimeSessionFailure: String, LocalizedError, Sendable {
 /// Bounded utterances within an explicitly armed conversation. Input stays closed during replies.
 /// The transport owns this value on its serial queue and uses monotonic time.
 public struct RealtimeTurnGate: Sendable {
-    public enum Phase: Equatable, Sendable { case ready, listening, responding, awaitingPlayback, closed }
+    public enum Phase: Equatable, Sendable { case ready, listening, paused, responding, awaitingPlayback, closed }
     public enum Timeout: Equatable, Sendable { case noSpeech, utterance, response }
     public private(set) var phase: Phase = .ready
     public private(set) var deadline: TimeInterval?
@@ -83,7 +85,7 @@ public struct RealtimeTurnGate: Sendable {
 
     @discardableResult
     public mutating func arm(at now: TimeInterval, continuous: Bool = false) -> Bool {
-        guard (phase == .ready || phase == .awaitingPlayback), now.isFinite else { return false }
+        guard (phase == .ready || phase == .paused || phase == .awaitingPlayback), now.isFinite else { return false }
         phase = .listening
         armedAt = now
         deadline = continuous ? nil : now + 10
@@ -137,6 +139,17 @@ public struct RealtimeTurnGate: Sendable {
         armedAt = nil
         deadline = nil
         timeout = nil
+    }
+
+    /// Discard an unfinished utterance, while preserving an answer that is already in progress.
+    @discardableResult
+    public mutating func pauseInput() -> Bool {
+        guard phase == .listening || phase == .ready else { return false }
+        phase = .paused
+        armedAt = nil
+        deadline = nil
+        timeout = nil
+        return true
     }
 }
 

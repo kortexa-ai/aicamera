@@ -15,6 +15,14 @@ tracked in issue 56; broader production lifecycle coverage remains follow-up wor
 
 ## Current product direction
 
+The next product step is a useful live-call companion: explicit control over when the agent
+listens, requested local notes, concise grounded answers, and small readable or playful visuals
+in the outgoing camera. The user must be able to keep talking to another person while the agent
+works. Preserve the current continuous conversation mode and the published release while adding
+an independent input gate and one-question mode. Follow the tool vocabulary and staged design in
+[`docs/agent-roadmap.md`](docs/agent-roadmap.md); implementation work is tracked in #58, with live
+translation/presentation controls in #57 and face-anchored graphics in #45.
+
 The active target is a complete local desktop experience: OpenAI Realtime with an API key or a
 dedicated Codex login, plus in-process transcription, translation, object detection, and gestures.
 Custom service integrations and their normal Settings controls are out of scope for

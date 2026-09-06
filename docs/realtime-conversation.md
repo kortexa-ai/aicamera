@@ -58,6 +58,24 @@ routing rebuilds the media graph and requires explicitly starting the agent agai
 Hold a fist to mute audio, stop the agent, and clear captions. Unmute explicitly in AI Camera;
 victory cannot silently unmute. Receiving apps' own mute buttons are not currently synchronized.
 
+### Keep talking to the other people on the call
+
+**Pause listening** in the popup, or **Control–Option–Space**, closes only the agent's input.
+An answer or tool operation already in progress continues, and the call's microphone stays live.
+Pausing before a question has finished discards that incomplete input. **Ask again** resumes
+listening once the current answer has drained. Audio captured before resuming is rejected.
+
+Settings → AI → Conversation → **Listening** offers **Conversation** (the existing automatic
+rearm behavior) and **One question at a time**. The latter closes agent input when your question
+ends and waits for Ask again after answering. The outgoing status orb then says **Not listening**.
+The agent session retains its context. Configured independent transcription resumes while the
+agent is paused after its reply; it may still use OpenAI if that is your selected transcription
+provider. Agent input pause is separate from AI Camera's audio/caption privacy mute.
+
+The listening shortcut is available without monitoring general keyboard input. If another app
+owns it, the popup reports the conflict and its listening button remains available. These host
+changes have synthetic transport coverage; installed UI/voice acceptance is a separate check.
+
 Independent transcription and legacy response generation pause during Realtime. Partial ASR
 windows and resampler state are discarded at each transition, so audio from a Realtime turn cannot
 be uploaded later in a batch transcription request. Translation of

@@ -529,6 +529,18 @@ waits for asynchronous cleanup.
 
 ## Synthetic Realtime activation and reply output
 
+The activation fixture also covers pausing agent input during listening and during a response,
+discarding an unfinished utterance, rejecting late input/VAD events, preserving the current reply
+and tool continuation, and resuming without admitting samples captured before the new turn.
+`AgentListeningPolicyTests` covers one-question behavior and migration of existing configurations.
+
+For manual listening acceptance, start an agent question while another app uses AI Camera
+Microphone. Pause agent input during the answer: the answer and call microphone must continue.
+After it finishes, speak to the other person; the agent must remain paused. Press Control–Option–Space
+or Ask again and ask a second question. Repeat in One question at a time mode, including a pause
+mid-question (the incomplete input is discarded), quick pause/resume changes, and the existing full
+privacy Mute. The source-release test does not substitute for this live acceptance.
+
 After full validation, exercise the production WebSocket session with an in-memory socket. The
 fixture preserves the public session URL validation and supplies synthetic credentials to the fake
 socket only; it makes no network or Keychain requests:

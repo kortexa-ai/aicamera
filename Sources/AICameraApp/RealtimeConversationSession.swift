@@ -151,6 +151,18 @@ final class RealtimeConversationSession: NSObject, RealtimeConversationClient, @
     func armOneShotAudio() async throws { try await armAudio(continuous: false) }
     func armConversationAudio() async throws { try await armAudio(continuous: true) }
 
+    func pauseInputAudio() async throws {
+        try await onQueueThrowing {
+            guard self.ready, !self.closed else { throw Failure.closed }
+            self.armedAt = nil
+            self.discardQueuedAudioLocked()
+            if self.gate.pauseInput() {
+                self.timeoutWork?.cancel()
+                self.sendLocked(["type": "input_audio_buffer.clear"])
+            }
+        }
+    }
+
     private func armAudio(continuous: Bool) async throws {
         try await onQueueThrowing {
             guard self.ready, !self.closed else { throw Failure.closed }

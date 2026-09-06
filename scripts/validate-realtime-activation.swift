@@ -55,6 +55,7 @@ private final class Events: @unchecked Sendable {
 private struct RealtimeActivationValidation {
     static func main() async throws {
         try await turns()
+        try await agentInputPause()
         try await cancelledConnection()
         print("Passed Realtime activation: unarmed/stale PCM denial, same-session turns, playback boundary, tool continuation, late/duplicate events, cancellation")
     }
@@ -132,6 +133,50 @@ private struct RealtimeActivationValidation {
         do { try await active.armConversationAudio(); throw Failure(message: "Late connect reopened input") }
         catch RealtimeSessionFailure.closed {}
         await active.close()
+    }
+    private static func agentInputPause() async throws {
+        let socket = Socket(), events = Events()
+        let active = session(socket)
+        let consumer = Task { for await event in active.events { events.record(event) } }
+        try await active.connect(session: ["model": "synthetic-fixture"])
+        try await active.armConversationAudio()
+        let firstCapture = ProcessInfo.processInfo.systemUptime
+        active.appendInputPCM(Data(count: 4_800), capturedAt: firstCapture)
+        try await wait { socket.count("input_audio_buffer.append") == 1 }
+        try await active.pauseInputAudio()
+        active.appendInputPCM(Data(count: 4_800), capturedAt: ProcessInfo.processInfo.systemUptime)
+        socket.emit(["type": "input_audio_buffer.speech_started"])
+        socket.emit(["type": "input_audio_buffer.speech_stopped"])
+        socket.emit(audio)
+        socket.emit(done)
+        try await Task.sleep(for: .milliseconds(30))
+        try require(socket.count("input_audio_buffer.append") == 1 && events.count("audio") == 0,
+                    "Paused input or a retired utterance escaped")
+        try await active.armConversationAudio()
+        active.appendInputPCM(Data(count: 4_800), capturedAt: firstCapture)
+        active.appendInputPCM(Data(count: 4_800), capturedAt: ProcessInfo.processInfo.systemUptime)
+        try await wait { socket.count("input_audio_buffer.append") == 2 }
+        socket.emit(["type": "input_audio_buffer.speech_started"])
+        socket.emit(["type": "input_audio_buffer.speech_stopped"])
+        try await wait { events.count("speechStopped") == 1 }
+        try await active.pauseInputAudio()
+        active.appendInputPCM(Data(count: 4_800), capturedAt: ProcessInfo.processInfo.systemUptime)
+        socket.emit(["type": "response.function_call_arguments.done", "call_id": "working", "name": "clear_overlay", "arguments": "{}"])
+        socket.emit(audio)
+        socket.emit(done)
+        try await wait { events.count("done") == 1 }
+        try require(events.count("tool") == 1 && events.count("audio") == 1,
+                    "Agent input pause interrupted the current answer or tools")
+        try await active.completeFunctionCall(callID: "working", output: "{}")
+        try await active.requestContinuation(["tool_choice": "none"])
+        socket.emit(audio)
+        socket.emit(done)
+        try await wait { events.count("done") == 2 }
+        try require(socket.count("input_audio_buffer.append") == 2 && events.count("audio") == 2,
+                    "Tool continuation reopened input or lost the answer")
+        await active.close()
+        await consumer.value
+        try require(events.count("error") == 0, "Pause/resume unexpectedly failed the session")
     }
     private static var audio: [String: Any] { ["type": "response.output_audio.delta", "delta": Data([0, 0, 1, 0]).base64EncodedString()] }
     private static var done: [String: Any] { ["type": "response.done", "response": ["status": "completed"]] }
