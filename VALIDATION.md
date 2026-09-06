@@ -807,3 +807,18 @@ network or model wait; inset setup waits at most three seconds off the media pat
 The main camera renderer alone receives layout state; clean inference uses the original transform.
 Independent virtual-camera client acceptance and real model selection of the layout tool remain
 separate. The installed 0.2.0 host, extension, and HAL were not changed.
+
+## Sourced U.S. forecasts
+
+Full local validation passes 219 Swift tests plus the existing native Realtime, captions,
+compositor, installer, and HAL checks. Weather fixtures verify default-off migration, exact
+host/data grants, strict coarse-coordinate arguments, bounded source/units/times, invalid linked
+URLs, malformed/oversized/stale responses, service/rate-limit failures, one in-flight request,
+cancellation-insensitive late data, expired-cache failure, and expired-period omission.
+
+The production NWS client also completed a public Seattle city-center lookup without credentials
+or location access. Native forecast cards rendered and were visually reviewed at 1280×720 and
+640×480; place, period, units, NWS source, and issuance time were readable. A deterministic tool-turn
+fixture passed lookup → card → response continuation. These checks did not use a live model,
+record or capture media, change installed settings, or replace the published/installed release.
+Spoken tool selection and live-call acceptance remain separate checks.

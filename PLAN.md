@@ -43,7 +43,10 @@ Implementation and acceptance priorities:
 - [x] Add generated-scene presentation with an aspect-preserving camera inset, immediate full-camera
   fallback on missing/expired graphics, and a direct Reset view. External image/deck loading and
   independent call-client acceptance remain follow-up parts of #57.
-- [ ] Add sourced current-information providers, spoken translation/external presentation assets, and
+- [x] Add opt-in U.S. weather forecasts with approximate-location permission, bounded public HTTP,
+  source/issuance/units, and lookup-to-card continuation. Worldwide weather and market data still
+  need provider decisions; see [#59](https://github.com/kortexa-ai/aicamera/issues/59).
+- [ ] Add further sourced information providers, spoken translation/external presentation assets, and
   face-tracked graphics in the staged companion roadmap. Validate new listening/tool interactions
   with live speech after synthetic transport and native UI acceptance.
 

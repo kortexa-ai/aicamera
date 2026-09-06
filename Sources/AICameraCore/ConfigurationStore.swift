@@ -258,7 +258,12 @@ public enum ConfigurationValidator {
             }
         }
         for grant in configuration.privacy.grants {
-            guard endpointIDs.contains(grant.endpointID) else {
+            if grant.endpointID == AgentWeatherPolicy.endpointID {
+                guard !endpointIDs.contains(grant.endpointID), grant.allowedData.isSubset(of: [.approximateLocation]) else {
+                    throw ConfigurationError.invalidText("Weather forecast privacy grant")
+                }
+            }
+            guard endpointIDs.contains(grant.endpointID) || grant.endpointID == AgentWeatherPolicy.endpointID else {
                 throw ConfigurationError.privacyGrantReferencesMissingEndpoint(grant.endpointID)
             }
             guard grantedEndpointIDs.insert(grant.endpointID).inserted else {

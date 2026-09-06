@@ -98,6 +98,7 @@ final class AppModel: ObservableObject {
     let builtinWhisperModelController = BuiltinWhisperModelController()
     let codexAuthController = CodexAuthController()
     let agentNotes = AgentNotesController()
+    private let agentWeather: any WeatherForecastClient = NWSWeatherClient()
     private let agentPresentation = AgentPresentationState()
     @Published private(set) var cameraInsetRequested = false
     private var cameraLayoutID: UUID?
@@ -1164,7 +1165,8 @@ final class AppModel: ObservableObject {
                         visuals: profile.overlays.script.enabled && self.cameraRunGate?.isActive == true,
                         notes: profile.overlays.script.enabled, conversationControls: true,
                         cameraState: profile.overlays.script.enabled,
-                        translation: profile.overlays.script.enabled && self.translationConfigured
+                        translation: profile.overlays.script.enabled && self.translationConfigured,
+                        weather: AgentWeatherPolicy.isAvailable(in: profile)
                     )
                 )
                 try await session.connect(session: request)
@@ -1492,6 +1494,23 @@ final class AppModel: ObservableObject {
             return ["ok": false, "error": "Unknown tool or invalid arguments."]
         }
         switch command {
+        case let .weatherForecast(request):
+            let profile = configurationController.configuration
+            guard AgentWeatherPolicy.isAvailable(in: profile) else {
+                return ["ok": false, "error": "Enable Weather forecasts under Tools in Settings first."]
+            }
+            do {
+                let result = try await agentWeather.forecast(request, privacy: profile.privacy)
+                guard !Task.isCancelled, !privacyMuted,
+                      AgentWeatherPolicy.isAvailable(in: configurationController.configuration) else {
+                    return ["ok": false, "error": "The forecast request was cancelled."]
+                }
+                return result.toolResult
+            } catch {
+                // Do not expose an upstream body or arbitrary error text to the agent.
+                return ["ok": false, "error": (error as? AgentWeatherError)?.localizedDescription
+                        ?? "The forecast lookup could not complete. Try again later."]
+            }
         case .resetView:
             guard configuration.enabled else { return ["ok": false, "error": "Tools are disabled in Settings."] }
             resetAgentView()

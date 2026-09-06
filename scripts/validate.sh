@@ -104,6 +104,11 @@ xcrun swiftc -parse-as-library -O \
 "$VALIDATION_TMP/agent-tools" "$VALIDATION_TMP/synthetic-cards"
 xcrun swiftc -parse-as-library -O \
     -F "$FRAMEWORKS" -framework AICameraCore -Xlinker -rpath -Xlinker "$FRAMEWORKS" \
+    Sources/AICameraApp/AgentCardRenderer.swift scripts/validate-agent-weather.swift \
+    -o "$VALIDATION_TMP/agent-weather"
+"$VALIDATION_TMP/agent-weather" --fixture "$VALIDATION_TMP/synthetic-weather"
+xcrun swiftc -parse-as-library -O \
+    -F "$FRAMEWORKS" -framework AICameraCore -Xlinker -rpath -Xlinker "$FRAMEWORKS" \
     Sources/AICameraApp/RealtimeConversationSession.swift scripts/validate-realtime-activation.swift \
     -o "$VALIDATION_TMP/realtime-activation"
 "$VALIDATION_TMP/realtime-activation"

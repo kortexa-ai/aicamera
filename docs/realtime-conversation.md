@@ -129,7 +129,9 @@ mode. Sleep stops the agent session while independent call media and enabled fea
 The explicit input gate remains the authority; a prompt is not a reliable mute mechanism.
 
 Try “Remember to send Maya the draft,” “Show three short points about this idea,” or “Go to sleep.”
-Current weather and prices require a real lookup provider, which is not yet included. Instructions
+The opt-in `get_weather_forecast` tool provides sourced U.S. NWS forecasts; see
+[weather forecasts](weather-forecasts.md). Current observations, worldwide weather, and market prices
+are not available through this provider. Instructions
 require the agent to say when it cannot verify current facts and to report tool success honestly.
 
 ## Live caption translation controls

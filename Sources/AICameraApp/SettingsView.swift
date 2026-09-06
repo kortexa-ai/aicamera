@@ -290,6 +290,13 @@ struct SettingsView: View {
                     Text("Ask the agent to remember a local note, show an information card, or draw a three.js animation in the camera. Notes stay in your notebook until you ask to share them; camera visuals expire automatically.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Toggle("Weather forecasts", isOn: Binding(
+                        get: { configuration.configuration.overlays.script.weatherForecastEnabled },
+                        set: { enabled in configuration.update { AgentWeatherPolicy.setEnabled(enabled, in: &$0) } }
+                    ))
+                    Text("U.S. forecasts from the National Weather Service. Sends approximate coordinates for the place you ask about; no device location, audio, or notes. No account needed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -634,6 +641,9 @@ struct SettingsView: View {
             Text("Notes you ask to save stay on this Mac. A requested note lookup sends matching text to the active agent. Saving a note does not display it in the camera feed.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if AgentWeatherPolicy.isAvailable(in: configuration.configuration) {
+                Label("Weather forecasts send requested approximate coordinates to api.weather.gov. Forecast results return to your active agent; camera and microphone data are not sent to this service.", systemImage: "network")
+            }
             if activeLocalProcessingDescriptions.isEmpty && configuredDataRoutes.isEmpty {
                 Text("No AI features are currently processing camera or microphone data.")
             } else {

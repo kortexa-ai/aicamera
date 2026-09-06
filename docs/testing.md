@@ -709,3 +709,34 @@ corner. Verify it in an independent virtual-camera client, keep speaking to a fr
 input paused, and use Reset view. Confirm native captions and call audio continue. Repeat Clear,
 expiry, and Tools off. This check is distinct from the synthetic compositor fixture and requires
 an installed candidate; no system-extension update should be needed for the host-only change.
+
+## Sourced weather forecasts
+
+The full validation includes deterministic weather parsing, permission, cancellation, cache, and
+lookup-to-card continuation tests. Its native weather fixture renders synthetic forecasts at
+1280×720 and 640×480 with the production card renderer. It does not send HTTP requests or access
+location, credentials, camera, or microphone.
+
+An optional public-data probe uses only the Seattle city center and the production NWS client.
+After the validation build, compile and run:
+
+```sh
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug -framework AICameraCore \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  Sources/AICameraApp/AgentCardRenderer.swift scripts/validate-agent-weather.swift \
+  -o /tmp/aicamera-weather-validation
+/tmp/aicamera-weather-validation --fixture /tmp/aicamera-weather-images
+/tmp/aicamera-weather-validation --live /tmp/aicamera-weather-images
+```
+
+The output includes bounded result JSON and native PNG cards. These are public/synthetic data,
+not captured media. `--live` is separate from automatic validation and performs no model request.
+Verify readable place, period, temperature/unit, source, and issuance time. Provider outages are
+valid failures; do not replace unavailable facts with fixture data in a live result.
+
+For installed voice acceptance, enable Weather forecasts under Tools and ask for a named U.S.
+place and units. Confirm lookup → readable sourced card → short answer while agent input is
+paused and independent call audio continues. Test a missing place, unsupported location, service
+failure, and Stop during lookup. Disable weather and confirm it is no longer offered or usable.
+The published release and installed system components need not change for synthetic/HTTP checks.

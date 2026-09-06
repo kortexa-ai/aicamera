@@ -382,6 +382,8 @@ public struct TranslationConfiguration: Codable, Equatable, Sendable {
 /// Bounds for model-rendered overlay scripts (three.js scenes in a hidden WKWebView).
 public struct ScriptOverlayConfiguration: Codable, Equatable, Sendable {
     public var enabled: Bool
+    /// Explicit opt-in to the built-in public forecast service; does not grant media access.
+    public var weatherForecastEnabled: Bool
     public var maxScriptBytes: Int
     public var maximumFps: Int
     public var defaultTTLSeconds: Double
@@ -396,14 +398,27 @@ public struct ScriptOverlayConfiguration: Codable, Equatable, Sendable {
         maximumFps: Int = 30,
         defaultTTLSeconds: Double = 30,
         maximumTTLSeconds: Double = 60,
-        allowSceneData: Bool = false
+        allowSceneData: Bool = false,
+        weatherForecastEnabled: Bool = false
     ) {
         self.enabled = enabled
+        self.weatherForecastEnabled = weatherForecastEnabled
         self.maxScriptBytes = maxScriptBytes
         self.maximumFps = maximumFps
         self.defaultTTLSeconds = defaultTTLSeconds
         self.maximumTTLSeconds = maximumTTLSeconds
         self.allowSceneData = allowSceneData
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try values.decode(Bool.self, forKey: .enabled)
+        maxScriptBytes = try values.decode(Int.self, forKey: .maxScriptBytes)
+        maximumFps = try values.decode(Int.self, forKey: .maximumFps)
+        defaultTTLSeconds = try values.decode(Double.self, forKey: .defaultTTLSeconds)
+        maximumTTLSeconds = try values.decode(Double.self, forKey: .maximumTTLSeconds)
+        allowSceneData = try values.decode(Bool.self, forKey: .allowSceneData)
+        weatherForecastEnabled = try values.decodeIfPresent(Bool.self, forKey: .weatherForecastEnabled) ?? false
     }
 }
 
@@ -462,6 +477,7 @@ public enum NetworkPrivacyMode: String, Codable, CaseIterable, Sendable {
 }
 
 public enum MediaDataClass: String, Codable, CaseIterable, Hashable, Sendable {
+    case approximateLocation
     case rawAudio
     case rawFrame
     case transcript

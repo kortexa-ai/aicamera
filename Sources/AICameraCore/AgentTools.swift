@@ -6,10 +6,12 @@ public struct AgentToolCapabilities: Equatable, Sendable {
     public var conversationControls: Bool
     public var cameraState: Bool
     public var translation: Bool
+    public var weather: Bool
     public init(visuals: Bool = false, notes: Bool = false, conversationControls: Bool = false,
-                cameraState: Bool = false, translation: Bool = false) {
+                cameraState: Bool = false, translation: Bool = false, weather: Bool = false) {
         self.visuals = visuals; self.notes = notes; self.conversationControls = conversationControls
         self.cameraState = cameraState; self.translation = translation
+        self.weather = weather
     }
 }
 
@@ -26,6 +28,7 @@ public enum AgentToolCommand: Equatable, Sendable {
     case setTranslation(AgentTranslationRequest)
     case cameraInset(AgentCameraInsetRequest)
     case resetView
+    case weatherForecast(AgentWeatherRequest)
 
     public static func parse(name: String, arguments: String, script: ScriptOverlayConfiguration) -> Self? {
         if let overlay = RealtimeOverlayCommand.parse(name: name, arguments: arguments, configuration: script) {
@@ -35,6 +38,17 @@ public enum AgentToolCommand: Equatable, Sendable {
               let value = try? JSONDecoder().decode(JSONValue.self, from: data),
               case let .object(object) = value else { return nil }
         switch name {
+        case "get_weather_forecast":
+            guard Set(object.keys).isSubset(of: ["latitude", "longitude", "units"]),
+                  let latitude = object["latitude"]?.numberValue,
+                  let longitude = object["longitude"]?.numberValue else { return nil }
+            let units: AgentWeatherUnits
+            if let raw = object["units"] {
+                guard let name = raw.stringValue, let value = AgentWeatherUnits(rawValue: name) else { return nil }
+                units = value
+            } else { units = .celsius }
+            guard let request = AgentWeatherRequest(latitude: latitude, longitude: longitude, units: units) else { return nil }
+            return .weatherForecast(request)
         case "wait_for_user": return object.isEmpty ? .waitForUser : nil
         case "sleep_agent": return object.isEmpty ? .sleep : nil
         case "clear_cards": return object.isEmpty ? .clearCards : nil
@@ -171,6 +185,13 @@ public enum AgentToolCatalog {
                      properties: ["id": string("Exact note UUID.")], required: ["id"])
             ]
         }
+        if capabilities.weather {
+            result.append(tool("get_weather_forecast", "Look up a U.S. National Weather Service forecast for an explicitly requested public place. Coordinates are rounded to two decimals. Returns up to four upcoming periods with the provider's nearby city/state, source URL, issuance/retrieval times, and units. Not current observations or worldwide weather. No device-location lookup. If the place is missing or coordinates are uncertain, ask a short clarification; do not infer a home address from notes.", properties: [
+                "latitude": ["type": "number", "minimum": -90, "maximum": 90, "description": "Approximate latitude of the requested public place."],
+                "longitude": ["type": "number", "minimum": -180, "maximum": 180, "description": "Approximate longitude of the requested public place."],
+                "units": ["type": "string", "enum": AgentWeatherUnits.allCases.map(\.rawValue), "description": "Temperature units; default celsius."]
+            ], required: ["latitude", "longitude"]))
+        }
         if capabilities.cameraState {
             result.append(tool("get_camera_state", "Read AI Camera's current translation, agent-listening, and privacy-mute state. Does not read saved notes, credentials, endpoints, or media."))
         }
@@ -229,6 +250,9 @@ public enum AgentToolCatalog {
             Use save_note only when the user asks you to remember something. Summarize the requested note faithfully. A brief 'Saved' is enough; do not unnecessarily repeat private contents aloud.
             Saved notes remain local until a requested note lookup returns them to this conversation. Saving or looking up a note does not publish it. Only display or read note contents to the call when the user asks.
             """
+        }
+        if capabilities.weather {
+            text += "\nUse get_weather_forecast for U.S. forecast requests, then show a concise sourced card if visual tools are available. Ask which place when it is not explicit. Use approximate coordinates of a public place, never device location or an address inferred from notes. Check the returned nearCity/state against the requested place; if they do not match, clarify rather than claim the forecast is for the requested city. Label predictions as forecasts, preserve temperature units and period, and include NWS plus the issuance time on a card. The service does not provide live stock prices, current weather observations, or worldwide coverage. A failed lookup is not permission to invent data."
         }
         if capabilities.cameraState {
             text += "\nUse get_camera_state when the current feature state matters. Never infer that a configured feature is currently on."
