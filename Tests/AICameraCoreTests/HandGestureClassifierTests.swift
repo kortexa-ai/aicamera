@@ -2,6 +2,55 @@ import XCTest
 @testable import AICameraCore
 
 final class HandGestureClassifierTests: XCTestCase {
+    func testCompactFistWinsOverThumbIndexContactAcrossHandOrientations() {
+        for offset in [0.0, 0.04, 0.08] {
+            var fist = hand(extended: [false, false, false, false])
+            let index = fist[.indexTip]!
+            fist[.thumbTip] = .init(x: index.x + offset, y: index.y)
+            for angle in [0.0, Double.pi / 2, .pi, .pi * 1.5] {
+                for scale in [0.65, 1.0, 1.3] {
+                    for mirror in [-1.0, 1.0] {
+                        let transformed = fist.mapValues { point in
+                            let x = (point.x - 0.5) * scale * mirror
+                            let y = (point.y - 0.25) * scale
+                            return NormalizedPoint(x: 0.5 + x * cos(angle) - y * sin(angle),
+                                                   y: 0.5 + x * sin(angle) + y * cos(angle))
+                        }
+                        XCTAssertEqual(HandGestureClassifier.classify(transformed), .closedFist)
+                    }
+                }
+            }
+        }
+    }
+
+    func testTuckedThumbFistMutesAnActivatedAgentOnce() {
+        let victory = hand(extended: [true, true, false, false])
+        var fist = hand(extended: [false, false, false, false])
+        fist[.thumbTip] = fist[.indexTip]
+        var gate = GestureControlGate()
+        let actions = (0...28).compactMap { index -> GestureControlAction? in
+            let pose = index < 12 ? victory : fist
+            let kind = HandGestureClassifier.classify(pose)!
+            let time = 10 + Double(index) * 0.125
+            return gate.observe([.init(kind: kind, confidence: 0.95)], capturedAt: time, now: time)
+        }
+        XCTAssertEqual(actions, [.startAgent, .mute])
+    }
+
+    func testCurledIndexPinchWithOtherFingersExtendedIsPreserved() {
+        var pinch = hand(extended: [false, true, true, true])
+        pinch[.thumbTip] = pinch[.indexTip]
+        XCTAssertEqual(HandGestureClassifier.classify(pinch), .pinch)
+    }
+
+    func testThumbIndexContactOutsideCompactPalmRemainsPinch() {
+        var pinch = hand(extended: [false, false, false, false])
+        pinch[.indexTip] = .init(x: 0.4, y: 0.8)
+        pinch[.indexPIP] = .init(x: 0.4, y: 0.85)
+        pinch[.thumbTip] = pinch[.indexTip]
+        XCTAssertEqual(HandGestureClassifier.classify(pinch), .pinch)
+    }
+
     func testPartlyOccludedFoldedJointDoesNotBlockAnOtherwiseClearHeldVictory() {
         let confidences = Array(repeating: 0.95, count: 12) + [0.4, 0.45]
         let confidence = HandGestureClassifier.observationConfidence(confidences)

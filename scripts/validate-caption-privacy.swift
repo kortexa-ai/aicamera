@@ -136,14 +136,30 @@ private struct CaptionPrivacyValidation {
             }, onSnapshotWithPrivacy: { results.record($0, $1) }, onError: { results.error($0) })
         await pipeline.started()
         let confidence = HandGestureClassifier.observationConfidence(Array(repeating: 0.95, count: 12) + [0.4, 0.45])
+        let fist = HandGestureClassifier.classify(tuckedThumbFist()) ?? .unknown
+        try require(fist == .closedFist, "Tucked-thumb fist was swallowed by pinch classification")
         for index in 0...22 {
-            await pipeline.submit(gestures: [.init(kind: index < 12 ? .victory : .closedFist, confidence: confidence)],
+            await pipeline.submit(gestures: [.init(kind: index < 12 ? .victory : fist, confidence: confidence)],
                 frameID: .init(rawValue: UInt64(index + 1)), capturedAt: ProcessInfo.processInfo.systemUptime)
             try await Task.sleep(for: .milliseconds(100))
         }
         try require(results.actions == [.startAgent, .mute], "Realtime camera controls did not deliver exactly one start and mute")
         try require(gate.snapshot.isMuted, "Realtime gesture mute was not delivered")
         await pipeline.stop()
+    }
+    private static func tuckedThumbFist() -> [HandJoint: NormalizedPoint] {
+        var points: [HandJoint: NormalizedPoint] = [.wrist: .init(x: 0.5, y: 0.25)]
+        let fingers: [(HandJoint, HandJoint, HandJoint, Double)] = [
+            (.indexTip, .indexPIP, .indexMCP, 0.4), (.middleTip, .middlePIP, .middleMCP, 0.48),
+            (.ringTip, .ringPIP, .ringMCP, 0.56), (.littleTip, .littlePIP, .littleMCP, 0.64)
+        ]
+        for (tip, pip, mcp, x) in fingers {
+            points[tip] = .init(x: x + 0.02, y: 0.42)
+            points[pip] = .init(x: x, y: 0.6)
+            points[mcp] = .init(x: x, y: 0.48)
+        }
+        points[.thumbTip] = points[.indexTip]
+        return points
     }
     private static func wait(_ condition: () async -> Bool) async throws {
         let deadline = ProcessInfo.processInfo.systemUptime + 3

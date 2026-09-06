@@ -44,6 +44,8 @@ layer is independent of model-generated overlays and is never included in clean 
 Hand confidence averages the required usable landmarks, so a single partly hidden folded joint
 does not veto an otherwise clear pose. Activation still requires 80% aggregate confidence, a
 continuous 0.8-second hold, fresh observations, and release before repeating the same control.
+Compact four-finger flexion takes priority over thumb–index contact: a thumb tucked against the
+index finger is still a closed fist. Pinches outside that compact fist shape remain pinches.
 Hand inference uses its own bounded queue so image preparation cannot delay it.
 
 One server conversation retains context across utterances. Input closes during response generation

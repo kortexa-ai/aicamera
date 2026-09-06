@@ -1,5 +1,13 @@
 # Validation record
 
+## Build 44: closed-fist mute takes precedence over pinch
+
+- The new regressions reproduce the previous failure: 72 compact closed-fist variants with thumb–index proximity (three thumb offsets, four rotations, three scales, mirrored/unmirrored hands) classify as pinch, and the held victory → fist sequence emits no mute. All these checks pass after compact four-finger flexion is tested before thumb–index contact.
+- All 175 Swift tests and the full unsigned build/script/metadata/HAL validation pass. Pinches with an extended index, a curled index and other fingers extended, or thumb–index contact outside the compact palm remain pinches.
+- The native caption-privacy harness now sends the actual classification of a synthetic tucked-thumb fist through the Realtime-enabled coordinator, checks exactly one start and mute, and verifies muted speech handling. It passes without capture, credentials, network, or model weights.
+- Protected signed Release installation and relaunch pass. Strict nested signatures verify for source and installed bundles; both bundle versions and the protected generation marker report 44. No camera extension or audio driver was installed or activated.
+- Franci confirmed physical victory activation in build 43. Physical closed-fist acceptance after this correction remains a separate check; no user media was recorded to develop the fix.
+
 ## Build 43: outgoing agent status and usable held gestures
 
 - Full `scripts/validate.sh` passes 171 Swift tests, the unsigned four-target build, metadata/script checks, and the HAL harness. Native caption privacy also verifies exactly one victory start and fist mute through the real coordinator with Realtime enabled.

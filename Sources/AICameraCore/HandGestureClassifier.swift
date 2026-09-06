@@ -34,13 +34,21 @@ public enum HandGestureClassifier {
         let palmScale = distance(wrist, middle.mcp)
         guard palmScale.isFinite, palmScale >= 0.025 else { return nil }
 
-        if distance(thumb, index.tip) <= palmScale * 0.42 {
-            return .pinch
-        }
-
-        let extended = [index, middle, ring, little].map { finger in
+        let fingers = [index, middle, ring, little]
+        let extended = fingers.map { finger in
             distance(wrist, finger.tip) > distance(wrist, finger.pip) + palmScale * 0.16
                 && distance(finger.mcp, finger.tip) > distance(finger.mcp, finger.pip) * 1.35
+        }
+
+        // A tucked thumb naturally touches the index finger in a closed fist. Recognize
+        // compact four-finger flexion first so that contact cannot swallow the mute gesture.
+        if extended.allSatisfy({ !$0 }),
+           fingers.allSatisfy({ distance(wrist, $0.tip) <= palmScale * 1.75 }) {
+            return .closedFist
+        }
+
+        if distance(thumb, index.tip) <= palmScale * 0.42 {
+            return .pinch
         }
 
         switch extended {
@@ -50,11 +58,6 @@ public enum HandGestureClassifier {
             return .pointing
         case [true, true, true, true]:
             return .openPalm
-        case [false, false, false, false]:
-            let maximumTipDistance = [index, middle, ring, little]
-                .map { distance(wrist, $0.tip) }
-                .max() ?? .infinity
-            return maximumTipDistance <= palmScale * 1.75 ? .closedFist : .unknown
         default:
             return .unknown
         }
