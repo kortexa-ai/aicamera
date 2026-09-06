@@ -75,12 +75,82 @@ struct AgentToolsValidation {
                 .write(to: directory.appendingPathComponent("\(width)-captions-and-card.png"))
             presentation.clear()
             precondition(presentation.cards(at: 101).isEmpty)
+
+            // Distinct camera quadrants reveal mirroring, cropping, and vertical-orientation mistakes.
+            let bounds = CGRect(x: 0, y: 0, width: width, height: height)
+            let cameraPattern = CIImage(color: CIColor(red: 0.85, green: 0.18, blue: 0.2)).cropped(to: bounds)
+            let green = CIImage(color: CIColor(red: 0.15, green: 0.75, blue: 0.3))
+                .cropped(to: CGRect(x: width / 2, y: 0, width: width / 2, height: height))
+            let yellow = CIImage(color: CIColor(red: 0.95, green: 0.75, blue: 0.15))
+                .cropped(to: CGRect(x: 0, y: height / 2, width: width / 2, height: height / 2))
+            CIContext().render(yellow.composited(over: green).composited(over: cameraPattern), to: frame)
+            var generated: CVPixelBuffer?
+            precondition(CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA,
+                [kCVPixelBufferCGImageCompatibilityKey: true, kCVPixelBufferCGBitmapContextCompatibilityKey: true] as CFDictionary,
+                &generated) == kCVReturnSuccess)
+            let generatedScene = generated!
+            CIContext().render(CIImage(color: CIColor(red: 0.08, green: 0.12, blue: 0.35)).cropped(to: bounds), to: generatedScene)
+            overlays.enabled = false
+            for mirror in [false, true] {
+                capture.mirrorVideo = mirror
+                let clean = renderer.render(input: frame, capture: capture, overlay: overlays, snapshot: .init())!
+                let cleanBytes = bytes(clean)
+                for position in AgentCardPosition.allCases {
+                    let request = AgentCameraInsetRequest(position: position, ttlSeconds: 5)!
+                    presentation.showCameraInset(request, at: 100)
+                    let inset = renderer.render(input: frame, capture: capture, overlay: overlays, snapshot: .init(),
+                        scriptOverlay: generatedScene, cameraLayout: presentation.cameraLayout(at: 101))!
+                    let rectangle = request.frame(in: bounds.size)!
+                    for x in [0.25, 0.75] {
+                        for y in [0.25, 0.75] {
+                            let expected = pixel(clean, x: Int(Double(width) * x), y: Int(Double(height) * y))
+                            let actual = pixel(inset, x: Int(rectangle.minX + rectangle.width * x),
+                                               y: Int(rectangle.minY + rectangle.height * y))
+                            precondition(zip(expected, actual).allSatisfy { abs(Int($0) - Int($1)) <= 2 },
+                                         "Inset changed camera orientation or colors")
+                        }
+                    }
+                    precondition(pixel(inset, x: width / 2, y: 50) == pixel(generatedScene, x: width / 2, y: 50),
+                                 "Presentation did not fill the frame")
+                    let card = presentation.show(.init(title: "Presentation", body: "A synthetic card stays clear of the camera.", position: position), at: 100)!
+                    let withCard = renderer.render(input: frame, capture: capture, overlay: overlays, snapshot: .init(),
+                        scriptOverlay: generatedScene, cards: [card], cameraLayout: presentation.cameraLayout(at: 101))!
+                    precondition(changedPixels(withCard, inset, in: rectangle) == 0, "Information card obscured the camera inset")
+                    if !mirror && position == .lowerRight {
+                        let representation = NSBitmapImageRep(data: renderer.previewImage(from: withCard)!.tiffRepresentation!)!
+                        try representation.representation(using: .png, properties: [:])!
+                            .write(to: directory.appendingPathComponent("\(width)-presentation-and-card.png"))
+                    }
+                    var debugOverlays = overlays
+                    debugOverlays.enabled = true; debugOverlays.showStatus = false
+                    debugOverlays.showDetectionBoxes = true; debugOverlays.showGestureLabels = true
+                    let debugScene = SceneSnapshot(detections: [.init(label: "Fixture", confidence: 0.9,
+                        boundingBox: .init(x: 0.2, y: 0.2, width: 0.3, height: 0.3))],
+                        gestures: [.init(kind: .victory, confidence: 0.9, location: .init(x: 0.5, y: 0.5))])
+                    let annotated = renderer.render(input: frame, capture: capture, overlay: debugOverlays, snapshot: debugScene,
+                        scriptOverlay: generatedScene, cameraLayout: presentation.cameraLayout(at: 101))!
+                    let changedInside = changedPixels(annotated, inset, in: rectangle.integral)
+                    precondition(changedInside > 10, "Camera annotations did not follow the inset")
+                    precondition(changedInside == changedPixels(annotated, inset, in: bounds), "Camera annotations escaped the inset")
+                    precondition(bytes(renderer.render(input: frame, capture: capture, overlay: overlays, snapshot: .init(),
+                        cameraLayout: presentation.cameraLayout(at: 101))!) == cleanBytes, "Missing scene failed to restore full camera")
+                    precondition(bytes(renderer.render(input: frame, capture: capture, overlay: overlays, snapshot: .init(),
+                        scriptOverlay: generatedScene, cameraLayout: presentation.cameraLayout(at: 105))!) == cleanBytes,
+                        "Expired inset retained its scene before timer cleanup")
+                    if !mirror {
+                        let representation = NSBitmapImageRep(data: renderer.previewImage(from: inset)!.tiffRepresentation!)!
+                        try representation.representation(using: .png, properties: [:])!
+                            .write(to: directory.appendingPathComponent("\(width)-inset-\(position.rawValue).png"))
+                    }
+                }
+            }
+            presentation.reset()
         }
         try await notes.delete(id: saved.id)
         precondition(notes.notes.isEmpty)
         let reopened = try await AgentNoteStore(fileURL: notesURL).all()
         precondition(reopened.isEmpty)
-        print("Passed local note UI state, native card pixels at two resolutions, all styles/positions, expiry, clearing, caption space, and clean baseline. Synthetic images: \(directory.path)")
+        print("Passed local note UI state, native cards, inset/mirrored camera pixels, missing/expired scene fallback, caption space, and clean baseline at two resolutions. Synthetic images: \(directory.path)")
     }
 
     static func bytes(_ buffer: CVPixelBuffer) -> Data {
@@ -88,5 +158,28 @@ struct AgentToolsValidation {
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         return Data(bytes: CVPixelBufferGetBaseAddress(buffer)!,
                     count: CVPixelBufferGetBytesPerRow(buffer) * CVPixelBufferGetHeight(buffer))
+    }
+
+    static func pixel(_ buffer: CVPixelBuffer, x: Int, y: Int) -> [UInt8] {
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        let offset = y * CVPixelBufferGetBytesPerRow(buffer) + x * 4
+        let base = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt8.self)
+        return Array(UnsafeBufferPointer(start: base + offset, count: 4))
+    }
+
+    static func changedPixels(_ a: CVPixelBuffer, _ b: CVPixelBuffer, in rect: CGRect) -> Int {
+        CVPixelBufferLockBaseAddress(a, .readOnly); CVPixelBufferLockBaseAddress(b, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(a, .readOnly); CVPixelBufferUnlockBaseAddress(b, .readOnly) }
+        let left = CVPixelBufferGetBaseAddress(a)!.assumingMemoryBound(to: UInt32.self)
+        let right = CVPixelBufferGetBaseAddress(b)!.assumingMemoryBound(to: UInt32.self)
+        let leftStride = CVPixelBufferGetBytesPerRow(a) / 4, rightStride = CVPixelBufferGetBytesPerRow(b) / 4
+        var count = 0
+        for y in Int(rect.minY)..<Int(rect.maxY) {
+            for x in Int(rect.minX)..<Int(rect.maxX) {
+                if left[y * leftStride + x] != right[y * rightStride + x] { count += 1 }
+            }
+        }
+        return count
     }
 }

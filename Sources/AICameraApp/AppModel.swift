@@ -99,6 +99,9 @@ final class AppModel: ObservableObject {
     let codexAuthController = CodexAuthController()
     let agentNotes = AgentNotesController()
     private let agentPresentation = AgentPresentationState()
+    @Published private(set) var cameraInsetRequested = false
+    private var cameraLayoutID: UUID?
+    private var cameraLayoutTask: Task<Void, Never>?
 
     private var pipeline: PipelineCoordinator?
     private var videoController: VideoPipelineController?
@@ -1489,6 +1492,43 @@ final class AppModel: ObservableObject {
             return ["ok": false, "error": "Unknown tool or invalid arguments."]
         }
         switch command {
+        case .resetView:
+            guard configuration.enabled else { return ["ok": false, "error": "Tools are disabled in Settings."] }
+            resetAgentView()
+            return ["ok": true, "cameraLayout": "camera"]
+        case let .cameraInset(request):
+            guard configuration.enabled, cameraRunGate?.isActive == true, let renderer = scriptRenderer else {
+                return ["ok": false, "error": "Presentation requires enabled Tools and an active camera."]
+            }
+            let capture = configurationController.configuration.capture
+            guard let insetFrame = request.frame(in: CGSize(width: capture.width, height: capture.height)) else {
+                return ["ok": false, "error": "The camera output is too small for an inset with readable captions."]
+            }
+            // Tool work can wait for the renderer; capture keeps publishing the normal camera.
+            let generation = realtimeGeneration
+            let deadline = ProcessInfo.processInfo.systemUptime + 3
+            while renderer.latestFreshOverlay() == nil, !Task.isCancelled, generation == realtimeGeneration,
+                  ProcessInfo.processInfo.systemUptime < deadline {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            guard !Task.isCancelled, generation == realtimeGeneration, !privacyMuted,
+                  cameraRunGate?.isActive == true, renderer === scriptRenderer,
+                  configurationController.configuration.overlays.script.enabled else {
+                return ["ok": false, "error": "The presentation request was cancelled."]
+            }
+            guard renderer.latestFreshOverlay() != nil, let inset = agentPresentation.showCameraInset(request) else {
+                return ["ok": false, "error": "Render a scene first, then request the camera inset."]
+            }
+            cameraLayoutTask?.cancel()
+            cameraLayoutID = inset.id
+            cameraInsetRequested = true
+            cameraLayoutTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(request.ttlSeconds))
+                guard !Task.isCancelled, let self, self.cameraLayoutID == inset.id else { return }
+                self.clearOverlayScript()
+            }
+            return ["ok": true, "cameraLayout": "inset", "position": request.position.rawValue,
+                    "widthFraction": insetFrame.width / CGFloat(capture.width), "ttlSeconds": request.ttlSeconds]
         case .cameraState:
             guard configuration.enabled else { return ["ok": false, "error": "Tools are disabled in Settings."] }
             return cameraToolState()
@@ -1555,7 +1595,8 @@ final class AppModel: ObservableObject {
             "modelReady": builtinTranslationModelController.isReady,
             "sourceLanguage": translation.sourceLanguage, "targetLanguage": translation.targetLanguage,
             "output": "captions"
-        ], "privacyMuted": privacyMuted, "agentListeningRequested": agentListening.requested]
+        ], "privacyMuted": privacyMuted, "agentListeningRequested": agentListening.requested,
+            "cameraLayout": agentPresentation.cameraInset() != nil && scriptRenderer?.latestFreshOverlay() != nil ? "inset" : "camera"]
     }
 
     private func applyRealtimeOverlay(_ command: RealtimeOverlayCommand) -> [String: Any] {
@@ -1571,7 +1612,7 @@ final class AppModel: ObservableObject {
             overlayScriptLog = "Realtime overlay active"
             return ["ok": true, "width": 640, "height": 360, "ttlSeconds": ttl]
         case .clear:
-            renderer.clear()
+            clearOverlayScript()
             overlayScriptLog = "Overlay cleared by Realtime"
             return ["ok": true]
         }
@@ -1610,9 +1651,10 @@ final class AppModel: ObservableObject {
     }
 
     private func stopScriptRenderer() {
-        agentPresentation.clear()
         scriptRenderer?.stop()
         scriptRenderer = nil
+        resetCameraLayout()
+        agentPresentation.clear()
     }
 
     /// Dev/acceptance entry point: run a pasted overlay script on the live
@@ -1632,7 +1674,21 @@ final class AppModel: ObservableObject {
 
     func clearOverlayScript() {
         scriptRenderer?.clear()
+        resetCameraLayout()
         overlayScriptLog = "Overlay cleared."
+    }
+
+    func resetAgentView() {
+        clearOverlayScript()
+        agentPresentation.reset()
+    }
+
+    private func resetCameraLayout() {
+        cameraLayoutTask?.cancel()
+        cameraLayoutTask = nil
+        cameraLayoutID = nil
+        agentPresentation.clearCameraInset()
+        cameraInsetRequested = false
     }
 
     private func pushSceneData(to snapshot: SceneSnapshot) {

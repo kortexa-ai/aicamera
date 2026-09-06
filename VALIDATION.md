@@ -790,3 +790,20 @@ one translation worker runs. Turning translation off retains original captions a
 translation inference. Existing partial/final, source separation, normal completion, cancellation,
 listening, card, installer, and HAL checks also pass. No captured input, credentials, or model
 inference were needed. Actual voice invocation and installed-host acceptance remain separate.
+
+## Generated-scene presentation
+
+Full validation passes 207 Swift tests and the native compositor/transport/caption/HAL fixtures.
+Synthetic presentation checks cover four inset corners, mirrored and unmirrored camera quadrants,
+preserved aspect ratio, caption/status margins, and pixel-identical full-camera fallback when
+scene frames are missing or a layout expires while scene pixels still exist. Both 1280×720 and
+640×480 were exercised. Visual review confirmed the inset orientation, bounds, and thin frame.
+The host rejects output sizes without adequate caption-free inset space.
+Additional native checks verify transformed/clipped object and gesture annotations and card
+placement that leaves all inset camera pixels intact.
+
+Reset view, Clear, and shutdown cancel the layout's bounded cleanup task. The renderer performs no
+network or model wait; inset setup waits at most three seconds off the media path for scene pixels.
+The main camera renderer alone receives layout state; clean inference uses the original transform.
+Independent virtual-camera client acceptance and real model selection of the layout tool remain
+separate. The installed 0.2.0 host, extension, and HAL were not changed.

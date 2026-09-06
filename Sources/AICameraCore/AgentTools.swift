@@ -24,6 +24,8 @@ public enum AgentToolCommand: Equatable, Sendable {
     case sleep
     case cameraState
     case setTranslation(AgentTranslationRequest)
+    case cameraInset(AgentCameraInsetRequest)
+    case resetView
 
     public static func parse(name: String, arguments: String, script: ScriptOverlayConfiguration) -> Self? {
         if let overlay = RealtimeOverlayCommand.parse(name: name, arguments: arguments, configuration: script) {
@@ -37,6 +39,23 @@ public enum AgentToolCommand: Equatable, Sendable {
         case "sleep_agent": return object.isEmpty ? .sleep : nil
         case "clear_cards": return object.isEmpty ? .clearCards : nil
         case "get_camera_state": return object.isEmpty ? .cameraState : nil
+        case "set_camera_layout":
+            guard Set(object.keys).isSubset(of: ["mode", "position", "widthFraction", "ttlSeconds"]),
+                  let mode = object["mode"]?.stringValue else { return nil }
+            if mode == "camera" { return Set(object.keys) == ["mode"] ? .resetView : nil }
+            guard mode == "inset" else { return nil }
+            let position: AgentCardPosition
+            if let raw = object["position"] {
+                guard let text = raw.stringValue, let value = AgentCardPosition(rawValue: text) else { return nil }; position = value
+            } else { position = .lowerRight }
+            let width: Double
+            if let raw = object["widthFraction"] { guard let value = raw.numberValue else { return nil }; width = value }
+            else { width = 0.2 }
+            let ttl: Double
+            if let raw = object["ttlSeconds"] { guard let value = raw.numberValue else { return nil }; ttl = value }
+            else { ttl = 30 }
+            guard let request = AgentCameraInsetRequest(position: position, widthFraction: width, ttlSeconds: ttl) else { return nil }
+            return .cameraInset(request)
         case "set_translation":
             guard Set(object.keys).isSubset(of: ["enabled", "targetLanguage"]) else { return nil }
             let enabled: Bool?
@@ -169,7 +188,13 @@ public enum AgentToolCatalog {
                     "ttlSeconds": ["type": "number", "minimum": 1, "maximum": script.maximumTTLSeconds]
                 ], required: ["script"]),
                 tool("clear_overlay", "Remove the generated three.js camera overlay; leaves the information card alone."),
-                tool("show_card", "Show one small readable card in the outgoing camera, replacing the previous card. Use short plain text. Current facts require an actual source; never invent a current price or forecast. This is visible to other call participants.", properties: [
+                tool("set_camera_layout", "Put the live camera in a corner over an existing generated scene, or return to the normal camera. Render the illustration with render_overlay first. Inset preserves aspect ratio and falls back to the normal camera if scene frames are missing. camera mode clears generated graphics/cards and restores full camera; saved notes remain.", properties: [
+                    "mode": ["type": "string", "enum": ["camera", "inset"]],
+                    "position": ["type": "string", "enum": AgentCardPosition.allCases.map(\.rawValue)],
+                    "widthFraction": ["type": "number", "minimum": 0.15, "maximum": 0.5, "description": "Fraction of frame width, default 0.2; height preserves aspect ratio."],
+                    "ttlSeconds": ["type": "number", "minimum": 1, "maximum": 300]
+                ], required: ["mode"]),
+                tool("show_card", "Show one small readable card in the outgoing camera, replacing the previous card. The host may move it to the opposite side of a camera inset to keep the person visible. Use short plain text. Current facts require an actual source; never invent a current price or forecast. This is visible to other call participants.", properties: [
                     "title": string("Short title, at most 160 UTF-8 bytes."),
                     "body": string("Essential answer or user-requested text, at most 1,200 UTF-8 bytes; prefer 1–3 short lines."),
                     "source": string("Optional concise provenance and timestamp, at most 240 UTF-8 bytes. Do not invent a citation."),
@@ -217,6 +242,7 @@ public enum AgentToolCatalog {
             Use show_card for a short readable answer, reminder, definition, number, or comparison. Prefer one concise card, with a source/time footer for verified current facts.
             Use render_overlay for charming three.js illustrations and animation when useful or requested. Keep faces, captions, and the top status area clear. Fixed-position graphics do not track faces.
             A card and a three.js illustration can coexist. Cards expire; clear_cards removes the card and clear_overlay removes the illustration. Neither deletes saved notes.
+            For a presentation with the person in a corner, render the full-frame illustration first, then use set_camera_layout with mode inset. The default camera inset is one fifth of frame width in the lower-right corner. Its height preserves aspect ratio. Keep key information out of the selected corner and caption/status areas. Use mode camera alone to reset the view and clear generated graphics. This does not load external image URLs or track a face.
             """
         }
         return text

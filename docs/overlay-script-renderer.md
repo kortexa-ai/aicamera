@@ -31,6 +31,12 @@ is upscaled to the selected camera output size.
 
 ## Lifetime and bounds
 
+Presentation mode reuses these same scene pixels. `set_camera_layout` can put the live camera
+above them in an aspect-preserving inset, with status/caption margins and a bounded lifetime.
+The compositor restores full camera when graphics are missing or expire. Reset view clears the
+scene and card without deleting saved notes. This mode affects Preview and the virtual-camera
+feeder only; the clean inference renderer always keeps its original full-camera transform.
+
 Only one script is active. Native admission checks UTF-8 byte size (default 64 KiB), finite TTL,
 and the configured TTL range (default 30 seconds, maximum 60). A replacement immediately clears
 old pixels and loads a fresh document. That releases previous script globals, timers, callbacks,

@@ -154,6 +154,11 @@ struct ControlCenterView: View {
                 Button("Preview") { presentWindow("preview") }
                 Text("·").foregroundStyle(.tertiary).accessibilityHidden(true)
                 Button("Notes") { presentWindow("notes") }
+                if model.cameraInsetRequested {
+                    Text("·").foregroundStyle(.tertiary).accessibilityHidden(true)
+                    Button("Reset view", action: model.resetAgentView)
+                        .help("Return to the full camera and clear generated graphics. Saved notes are kept.")
+                }
                 Spacer()
                 Button("About") { presentWindow("about") }
                 Text("·").foregroundStyle(.tertiary).accessibilityHidden(true)

@@ -285,7 +285,8 @@ final class VideoPipelineController: NSObject {
             overlay: configuration.overlays,
             snapshot: currentSnapshot(),
             scriptOverlay: scriptOverlay,
-            cards: !privacy.isMuted && configuration.overlays.script.enabled ? (agentPresentation?.cards() ?? []) : []
+            cards: !privacy.isMuted && configuration.overlays.script.enabled ? (agentPresentation?.cards() ?? []) : [],
+            cameraLayout: !privacy.isMuted && configuration.overlays.script.enabled ? (agentPresentation?.cameraLayout() ?? .camera) : .camera
         ) else { return }
 
         guard privacyMute.isCurrent(privacy), runtimeFeatures.snapshot == features else { return }

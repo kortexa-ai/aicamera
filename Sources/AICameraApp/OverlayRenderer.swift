@@ -23,10 +23,12 @@ final class OverlayRenderer {
         overlay: OverlayConfiguration,
         snapshot: SceneSnapshot,
         scriptOverlay: CVPixelBuffer? = nil,
-        cards: [AgentCard] = []
+        cards: [AgentCard] = [],
+        cameraLayout: AgentCameraLayout = .camera
     ) -> CVPixelBuffer? {
         guard let output = outputBuffer(width: capture.width, height: capture.height) else { return nil }
         let target = CGRect(x: 0, y: 0, width: capture.width, height: capture.height)
+        var cameraFrame = target
         var image = CIImage(cvPixelBuffer: input)
         let source = image.extent
         let scale = max(target.width / source.width, target.height / source.height)
@@ -37,13 +39,30 @@ final class OverlayRenderer {
         if capture.mirrorVideo {
             image = image.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: target.width, ty: 0))
         }
-        // The script overlay sits above the camera frame but below the
-        // native labels, so status and transcript stay readable.
-        if let scriptOverlay {
-            image = Self.composite(scriptOverlay: scriptOverlay, over: image, into: target)
+        // Presentation mode keeps the camera above the scene. Missing/expired graphics immediately
+        // restore the full camera; labels are always drawn last and clean inference never uses this layout.
+        switch cameraLayout {
+        case .camera:
+            if let scriptOverlay { image = Self.composite(scriptOverlay: scriptOverlay, over: image, into: target) }
+        case let .inset(request):
+            if let scriptOverlay, let frame = request.frame(in: target.size) {
+                cameraFrame = frame
+                let rectangle = CGRect(x: frame.minX, y: target.height - frame.maxY, width: frame.width, height: frame.height)
+                let camera = image.cropped(to: target)
+                    .transformed(by: CGAffineTransform(scaleX: rectangle.width / target.width, y: rectangle.height / target.height))
+                    .transformed(by: CGAffineTransform(translationX: rectangle.minX, y: rectangle.minY))
+                let matte = CIImage(color: CIColor(red: 0.055, green: 0.07, blue: 0.10)).cropped(to: target)
+                let scene = Self.composite(scriptOverlay: scriptOverlay, over: matte, into: target)
+                let border = CIImage(color: CIColor(red: 0.8, green: 0.83, blue: 0.9, alpha: 0.8))
+                    .cropped(to: rectangle.insetBy(dx: -2, dy: -2))
+                image = camera.composited(over: border).composited(over: scene)
+            }
+        case .expired: break
         }
         ciContext.render(image, to: output, bounds: target, colorSpace: CGColorSpaceCreateDeviceRGB())
-        if overlay.enabled || !cards.isEmpty { draw(snapshot: snapshot, configuration: overlay, cards: cards, into: output) }
+        if overlay.enabled || !cards.isEmpty {
+            draw(snapshot: snapshot, configuration: overlay, cards: cards, cameraFrame: cameraFrame, into: output)
+        }
         return output
     }
 
@@ -118,7 +137,7 @@ final class OverlayRenderer {
         return buffer
     }
 
-    private func draw(snapshot: SceneSnapshot, configuration: OverlayConfiguration, cards: [AgentCard], into buffer: CVPixelBuffer) {
+    private func draw(snapshot: SceneSnapshot, configuration: OverlayConfiguration, cards: [AgentCard], cameraFrame: CGRect, into buffer: CVPixelBuffer) {
         CVPixelBufferLockBaseAddress(buffer, [])
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
         let width = CGFloat(CVPixelBufferGetWidth(buffer))
@@ -139,30 +158,47 @@ final class OverlayRenderer {
         let hasAgentCaption = configuration.enabled && configuration.showAgentResponse
             && !(snapshot.agentResponse ?? "").isEmpty
         for card in cards.prefix(1) {
-            cardRenderer.draw(card, width: width, height: height, hasAgentCaption: hasAgentCaption, context: context)
+            var visible = card
+            if cameraFrame.width < width {
+                let cameraOnRight = cameraFrame.midX > width / 2
+                let cardOnRight = card.content.position == .upperRight || card.content.position == .lowerRight
+                if cameraOnRight == cardOnRight {
+                    let upper = card.content.position == .upperLeft || card.content.position == .upperRight
+                    visible = card.positioned(cameraOnRight ? (upper ? .upperLeft : .lowerLeft) : (upper ? .upperRight : .lowerRight))
+                }
+            }
+            cardRenderer.draw(visible, width: width, height: height, hasAgentCaption: hasAgentCaption, context: context)
         }
         guard configuration.enabled else { context.restoreGState(); return }
         let accent = color(hex: configuration.accentHex) ?? NSColor.systemMint
         context.setStrokeColor(accent.cgColor)
         context.setLineWidth(max(2, width / 500))
 
+        context.saveGState()
+        context.clip(to: cameraFrame)
         if configuration.showDetectionBoxes {
             for detection in snapshot.detections {
                 let box = CGRect(
-                    x: detection.boundingBox.x * width,
-                    y: detection.boundingBox.y * height,
-                    width: detection.boundingBox.width * width,
-                    height: detection.boundingBox.height * height
+                    x: cameraFrame.minX + CGFloat(detection.boundingBox.x) * cameraFrame.width,
+                    y: cameraFrame.minY + CGFloat(detection.boundingBox.y) * cameraFrame.height,
+                    width: CGFloat(detection.boundingBox.width) * cameraFrame.width,
+                    height: CGFloat(detection.boundingBox.height) * cameraFrame.height
                 )
                 context.stroke(box)
                 let depth = detection.depthMeters.map { String(format: " · %.1f m", $0) } ?? ""
-                drawLabel("\(detection.label) \(Int(detection.confidence * 100))%\(depth)", at: CGPoint(x: box.minX, y: max(4, box.minY - 25)), accent: accent, context: context)
+                drawLabel("\(detection.label) \(Int(detection.confidence * 100))%\(depth)",
+                          at: CGPoint(x: box.minX, y: max(cameraFrame.minY + 4, box.minY - 25)),
+                          accent: accent, context: context, maximumWidth: min(520, cameraFrame.width))
             }
         }
         if configuration.showGestureLabels, let gesture = snapshot.gestures.first {
-            let location = gesture.location.map { CGPoint(x: $0.x * width, y: $0.y * height) } ?? CGPoint(x: 16, y: 54)
-            drawLabel("Gesture: \(gesture.kind.rawValue)", at: location, accent: accent, context: context)
+            let location = gesture.location.map {
+                CGPoint(x: cameraFrame.minX + CGFloat($0.x) * cameraFrame.width, y: cameraFrame.minY + CGFloat($0.y) * cameraFrame.height)
+            } ?? CGPoint(x: cameraFrame.minX + 16, y: cameraFrame.minY + 54)
+            drawLabel("Gesture: \(gesture.kind.rawValue)", at: location, accent: accent,
+                      context: context, maximumWidth: min(520, cameraFrame.width))
         }
+        context.restoreGState()
         // Leave room for floating client chrome (including QuickTime's Movie Recording title bar).
         let topInset = max(56, height * 0.1)
         if configuration.showStatus {

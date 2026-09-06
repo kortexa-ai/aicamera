@@ -694,3 +694,18 @@ It creates only a temporary synthetic notebook, discards received audio, capture
 never plays a response. Both `codex` and `api-key` reads forbid Keychain interaction. An unavailable
 credential stops the check; do not retry with UI enabled during unattended work. This verifies a
 provider contract, not real-world addressed-speech recognition or installed-app behavior.
+
+The native card fixture also checks presentation layout. Synthetic camera quadrants are composited
+above a generated background in every corner, with mirroring both off and on, at 1280×720 and
+640×480. It compares corresponding camera pixels to catch vertical flips, stretching, or crop
+errors. Missing graphics and expired layout with still-fresh scene pixels must both reproduce the
+full-camera baseline immediately. Core tests cover geometry limits, caption margins, strict layout
+arguments, lifetime, and independent card clearing.
+The same fixture verifies that object/gesture annotations stay within the inset and that a card
+requested on the camera's side moves away without changing any camera pixels.
+
+For installed acceptance, ask the agent to draw a scene, then put the camera in the lower-right
+corner. Verify it in an independent virtual-camera client, keep speaking to a friend with agent
+input paused, and use Reset view. Confirm native captions and call audio continue. Repeat Clear,
+expiry, and Tools off. This check is distinct from the synthetic compositor fixture and requires
+an installed candidate; no system-extension update should be needed for the host-only change.

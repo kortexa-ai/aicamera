@@ -39,8 +39,11 @@ Implementation and acceptance priorities:
   from camera presentation and preserve the published 0.2.0 package while these develop on main.
 - [x] Add typed state/translation tools and live language updates shared with Settings. Keep
   caption on/off aligned with the quick toolbar and reject prior-language completions without
-  restarting the active conversation. Spoken translation and presentation layout remain #57.
-- [ ] Add sourced current-information providers, spoken translation/presentation layout, and
+  restarting the active conversation. Spoken translation remains #57.
+- [x] Add generated-scene presentation with an aspect-preserving camera inset, immediate full-camera
+  fallback on missing/expired graphics, and a direct Reset view. External image/deck loading and
+  independent call-client acceptance remain follow-up parts of #57.
+- [ ] Add sourced current-information providers, spoken translation/external presentation assets, and
   face-tracked graphics in the staged companion roadmap. Validate new listening/tool interactions
   with live speech after synthetic transport and native UI acceptance.
 

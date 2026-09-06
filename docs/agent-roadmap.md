@@ -23,10 +23,11 @@ tools whose capabilities are available in the current session.
 
 The current host implementation provides `save_note`, `list_notes`, `delete_note`, `show_card`,
 `clear_cards`, `render_overlay`, `clear_overlay`, `wait_for_user`, `sleep_agent`, `get_camera_state`,
-and `set_translation`. Notes require enabled Tools; visual tools also require an active camera,
+`set_translation`, and `set_camera_layout`. Notes require enabled Tools; visual tools also require an active camera,
 and translation control requires configured caption translation. Independent input pause and
 one-question mode are available on `main`. Current-information lookup, spoken translation,
-presentation layout, timers, calculation, and face anchors below remain planned capabilities.
+external image/slide assets, timers, calculation, and face anchors below remain planned capabilities.
+The current presentation mode uses the existing generated three.js scene with a bounded camera inset.
 
 | Job | Tool family | Example |
 | --- | --- | --- |

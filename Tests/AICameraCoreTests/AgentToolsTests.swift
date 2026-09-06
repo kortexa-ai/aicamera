@@ -42,7 +42,7 @@ final class AgentToolsTests: XCTestCase {
         let notes = AgentToolCatalog.definitions(capabilities: .init(notes: true), script: script)
         XCTAssertEqual(notes.compactMap { $0["name"] as? String }, ["save_note", "list_notes", "delete_note"])
         let all = AgentToolCatalog.definitions(capabilities: .init(visuals: true, notes: true, conversationControls: true), script: script)
-        XCTAssertEqual(all.count, 9)
+        XCTAssertEqual(all.count, 10)
         XCTAssertTrue(JSONSerialization.isValidJSONObject(all))
         for tool in all {
             let schema = try XCTUnwrap(tool["parameters"] as? [String: Any])

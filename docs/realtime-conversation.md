@@ -165,6 +165,32 @@ TTL, script size, replacement behavior, and scene-data permission. Scripts canno
 canvas or fetch external assets. The existing CSP, navigation restrictions, non-persistent WebKit
 store, TTL, fresh-frame expiry, and crash handling remain required. Tools receive no raw frames.
 
+## Presentation and camera inset
+
+After `render_overlay` has produced a scene, `set_camera_layout` with `mode: "inset"` uses that
+scene as a full-frame presentation and places the live camera above it. The default is lower-right
+at one fifth of the frame **width**, with height preserving aspect ratio. Position accepts the
+four card-corner names; width fraction is 0.15–0.5, constrained further when needed to reserve
+status and caption space. The result reports the effective width fraction. Layout lifetime is
+1–300 seconds, default 30. Very small output sizes without usable caption-free space are rejected.
+
+The executor waits at most three seconds for an existing renderer frame before accepting inset
+mode. Capture never waits. If a scene frame becomes stale/missing, or the layout expires, the
+compositor immediately shows the normal camera. Expiration suppresses even a still-fresh scene
+until the cleanup task clears it, preventing a full-frame graphic from hiding the restored camera.
+Returning scene frames may restore a still-live inset; graphics are always below the live camera.
+Object boxes and gesture labels follow the camera transform and are clipped to its inset. A card
+on the same side moves to the opposite side so it cannot cover the live camera.
+
+`set_camera_layout` with only `mode: "camera"`, or **Reset view** in the popup while an inset is
+requested, clears generated graphics/cards and restores the full camera. Saved notes and native
+captions remain. `clear_overlay` also restores full camera while retaining a separate card.
+Privacy mute and Tools/camera shutdown retire the layout. Clean inference frames remain full-size
+camera images with no scene, inset, cards, or status labels.
+
+This provides generated-scene presentation. Loading arbitrary external image URLs or a slide deck
+is not implemented, and the camera inset does not perform face tracking.
+
 ## Dedicated Codex login
 
 The installed official Codex CLI owns an isolated device-login, refresh, and sign-out lifecycle
