@@ -1,5 +1,6 @@
 import AICameraCore
 import Combine
+import Darwin
 import Foundation
 
 @MainActor
@@ -7,13 +8,15 @@ final class BuiltinWhisperModelController: ObservableObject {
     enum State: Equatable { case notDownloaded, downloading, ready, failed(String) }
     @Published private(set) var states: [BuiltinWhisperModel: State] = [:]
     @Published private(set) var progress: ModelDownloadProgress?
+    let availableModels: [BuiltinWhisperModel]
     private let directory: URL
     private var task: Task<Void, Never>?
     private var downloadingModel: BuiltinWhisperModel?
     private var generation: UInt64 = 0
     private var clients: [BuiltinWhisperModel: BuiltinWhisperClient] = [:]
 
-    init() {
+    init(processorBrand: String? = nil) {
+        availableModels = BuiltinWhisperModel.availableModels(processorBrand: processorBrand ?? Self.processorBrand)
         directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("AI Camera/Models", isDirectory: true)
         for model in BuiltinWhisperModel.allCases {
@@ -22,12 +25,14 @@ final class BuiltinWhisperModelController: ObservableObject {
     }
 
     func state(for model: BuiltinWhisperModel) -> State { states[model] ?? .notDownloaded }
-    func isReady(_ model: BuiltinWhisperModel) -> Bool { state(for: model) == .ready }
+    func isReady(_ model: BuiltinWhisperModel) -> Bool {
+        availableModels.contains(model) && state(for: model) == .ready
+    }
     var hasActiveDownload: Bool { task != nil }
     func fileURL(for model: BuiltinWhisperModel) -> URL { directory.appendingPathComponent(model.fileName) }
 
     func download(_ model: BuiltinWhisperModel) {
-        guard task == nil, !isReady(model) else { return }
+        guard availableModels.contains(model), task == nil, !isReady(model) else { return }
         generation &+= 1
         let generation = generation
         downloadingModel = model
@@ -85,5 +90,14 @@ final class BuiltinWhisperModelController: ObservableObject {
         let client = BuiltinWhisperClient(modelURL: fileURL(for: model))
         clients[model] = client
         return client
+    }
+
+    private static var processorBrand: String {
+        var size = 0
+        guard sysctlbyname("machdep.cpu.brand_string", nil, &size, nil, 0) == 0,
+              size > 0, size <= 256 else { return "" }
+        var bytes = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("machdep.cpu.brand_string", &bytes, &size, nil, 0) == 0 else { return "" }
+        return String(cString: bytes)
     }
 }

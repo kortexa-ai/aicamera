@@ -229,7 +229,10 @@ xcrun swiftc -parse-as-library -O \
 /tmp/aicamera-local-whisper-validation /tmp/aicamera-whisper-jfk.wav base
 ```
 
-After downloading Small, repeat the last command with `small-q5_1`. The harness checks the fixture's
+After downloading Small, repeat the last command with `small-q5_1`. On an M4 Pro/Max/Ultra or M5
+Mac, download Large and repeat with `large-v3-q5_0`. Large uses the full Large v3 architecture with
+Q5 weights (1,081,140,203 bytes), not Turbo. All artifacts have pinned revisions, lengths, and SHA-256.
+The harness checks the fixture's
 SHA-256 before use, then verifies English/auto recognition, silence, cancellation, recovery, cached
 client identity, coexistence with translation, latency, and peak resident memory. It never reads
 Keychain or downloads a model implicitly. The automated suite covers WAV bounds, old profile
@@ -410,3 +413,21 @@ must still publish its final translation, a later turn must work, and canceled e
 not create caption work. All four combinations of Show transcript and Show agent
 response are checked, along with interleaved sources and independent translated finals. The real-model
 pass publishes synthetic English sentences as Chinese user and AI captions through the coordinator. No media, network, or credentials are accessed.
+
+### Camera publication recovery and Whisper tier acceptance
+
+- Confirm Base, Small, and Large each show a distinct description on an M4 Pro/Max/Ultra or M5 Mac.
+  Earlier chips, base M4, and unknown hardware offer Base and Small only. Unsupported saved Large
+  choices cannot download or start an inference client; Settings offers Base as an unsaved draft.
+- Whisper and translation use the same Local model row layout: named green check and trash when
+  ready, Download when absent, progress and Cancel during a download, and retry with error text.
+  Removing the selected active Whisper model must still disable transcription and translation.
+- An enabled extension with no camera must show all of its recovery message in the compact popup.
+  A reboot instruction is reserved for an explicit pending-reboot state. In General Settings,
+  Open Camera Extensions leads to the system-managed Media Extensions controls.
+- For an enabled camera absent from both the app and QuickTime, inspect registration and launchd
+  logs before changing system state. A replacement can be accepted by SystemExtensions while its
+  CoreMediaIO job fails to start during removal of the old job. Approval and device publication
+  are separate checks. With operator authorization, use the normal extension update or system
+  off/on controls, then verify publication in a fresh camera client. Never delete OS-managed
+  extension directories or automatically reboot as part of validation.

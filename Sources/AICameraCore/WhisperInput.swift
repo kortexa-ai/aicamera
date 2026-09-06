@@ -3,18 +3,55 @@ import Foundation
 public enum BuiltinWhisperModel: String, Codable, CaseIterable, Identifiable, Sendable {
     case base
     case small = "small-q5_1"
+    case large = "large-v3-q5_0"
 
     public var id: String { rawValue }
-    public var name: String { self == .base ? "Whisper Base" : "Whisper Small" }
-    public var downloadSize: String { self == .base ? "148 MB" : "190 MB" }
-    public var summary: String { self == .base ? "Faster, lower memory use" : "Higher accuracy, quantized weights" }
+    public var name: String {
+        switch self {
+        case .base: "Whisper Base"
+        case .small: "Whisper Small"
+        case .large: "Whisper Large"
+        }
+    }
+    public var downloadSize: String {
+        switch self {
+        case .base: "148 MB"
+        case .small: "190 MB"
+        case .large: "1.08 GB"
+        }
+    }
+    public var summary: String {
+        switch self {
+        case .base: "Fastest, with the lowest memory use."
+        case .small: "Balances speed and accuracy, with a compact download."
+        case .large: "Highest accuracy, with more processing and memory use. Large v3, quantized."
+        }
+    }
+
+    /// Product eligibility: base M4 and earlier chips keep the two lighter choices.
+    /// Unknown hardware fails closed; future chip generations need an explicit policy update.
+    public static func availableModels(processorBrand: String) -> [Self] {
+        let chip = processorBrand.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        let supportsLarge = ["Apple M4 Pro", "Apple M4 Max", "Apple M4 Ultra",
+                             "Apple M5", "Apple M5 Pro", "Apple M5 Max", "Apple M5 Ultra"].contains(chip)
+        return supportsLarge ? [.base, .small, .large] : [.base, .small]
+    }
     public var fileName: String { "ggml-\(rawValue).bin" }
     public var artifact: ModelArtifact {
         let revision = "5359861c739e955e79d9a303bcbc70fb988958b1"
-        let bytes: Int64 = self == .base ? 147_951_465 : 190_085_487
-        let hash = self == .base
-            ? "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"
-            : "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb"
+        let bytes: Int64
+        let hash: String
+        switch self {
+        case .base:
+            bytes = 147_951_465
+            hash = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"
+        case .small:
+            bytes = 190_085_487
+            hash = "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb"
+        case .large:
+            bytes = 1_081_140_203
+            hash = "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1"
+        }
         return .init(
             url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/\(revision)/\(fileName)")!,
             sha256: hash, maximumBytes: bytes, expectedBytes: bytes

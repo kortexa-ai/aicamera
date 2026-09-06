@@ -363,7 +363,7 @@ struct SettingsView: View {
             }
             if transcriptionProvider == .whisper {
                 Picker("Model", selection: $transcriptionWhisperModel) {
-                    ForEach(BuiltinWhisperModel.allCases) { Text("\($0.name) · \($0.downloadSize)").tag($0) }
+                    ForEach(builtinWhisper.availableModels) { Text("\($0.name) · \($0.downloadSize)").tag($0) }
                 }
                 .disabled(builtinWhisper.hasActiveDownload)
                 Text(transcriptionWhisperModel.summary).font(.caption).foregroundStyle(.secondary)
@@ -420,37 +420,51 @@ struct SettingsView: View {
     @ViewBuilder private var whisperModelControls: some View {
         switch builtinWhisper.state(for: transcriptionWhisperModel) {
         case .notDownloaded:
-            Button("Download \(transcriptionWhisperModel.name) · \(transcriptionWhisperModel.downloadSize)") {
-                builtinWhisper.download(transcriptionWhisperModel)
-            }.disabled(builtinWhisper.hasActiveDownload)
+            LabeledContent("Local model") {
+                Button("Download \(transcriptionWhisperModel.name) · \(transcriptionWhisperModel.downloadSize)") {
+                    builtinWhisper.download(transcriptionWhisperModel)
+                }.disabled(builtinWhisper.hasActiveDownload)
+            }
         case .downloading:
-            HStack {
-                if let fraction = builtinWhisper.progress?.fraction {
-                    ProgressView(value: fraction).frame(width: 130)
-                    Text(fraction, format: .percent.precision(.fractionLength(0)))
-                } else { ProgressView().controlSize(.small) }
-                Button("Cancel Download") { builtinWhisper.cancelDownload(transcriptionWhisperModel) }
+            LabeledContent("Local model") {
+                HStack(spacing: 8) {
+                    ProgressView(value: builtinWhisper.progress?.fraction).frame(width: 100)
+                    if let fraction = builtinWhisper.progress?.fraction {
+                        Text(fraction, format: .percent.precision(.fractionLength(0)))
+                    } else { Text("Starting download…").foregroundStyle(.secondary) }
+                    Button("Cancel") { builtinWhisper.cancelDownload(transcriptionWhisperModel) }
+                        .controlSize(.small)
+                }
             }
         case .ready:
-            HStack {
-                Label("Ready · \(transcriptionWhisperModel.downloadSize) on disk", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                Button("Remove Model", role: .destructive) {
-                    if configuration.configuration.pipeline.conversation.transcriptionProvider == .whisper,
-                       configuration.configuration.pipeline.conversation.transcriptionWhisperModel == transcriptionWhisperModel {
-                        configuration.update { profile in
-                            profile.pipeline.conversation.transcriptionEnabled = false
-                            profile.pipeline.translation.enabled = false
-                            profile.overlays.showTranscript = false
+            LabeledContent("Local model") {
+                HStack(spacing: 8) {
+                    Label(transcriptionWhisperModel.name, systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Button(role: .destructive) {
+                        if configuration.configuration.pipeline.conversation.transcriptionProvider == .whisper,
+                           configuration.configuration.pipeline.conversation.transcriptionWhisperModel == transcriptionWhisperModel {
+                            configuration.update { profile in
+                                profile.pipeline.conversation.transcriptionEnabled = false
+                                profile.pipeline.translation.enabled = false
+                                profile.overlays.showTranscript = false
+                            }
                         }
+                        builtinWhisper.remove(transcriptionWhisperModel)
+                    } label: {
+                        Image(systemName: "trash")
                     }
-                    builtinWhisper.remove(transcriptionWhisperModel)
+                    .buttonStyle(.borderless)
+                    .help("Remove downloaded model")
+                    .accessibilityLabel("Remove \(transcriptionWhisperModel.name)")
                 }
             }
         case let .failed(message):
+            LabeledContent("Local model") {
+                Button("Try Download Again") { builtinWhisper.download(transcriptionWhisperModel) }
+                    .disabled(builtinWhisper.hasActiveDownload)
+            }
             Text(message).font(.caption).foregroundStyle(.red)
-            Button("Try Download Again") { builtinWhisper.download(transcriptionWhisperModel) }
-                .disabled(builtinWhisper.hasActiveDownload)
         }
     }
 
@@ -677,7 +691,8 @@ struct SettingsView: View {
     private func syncTranscriptionDraft() {
         let conversation = configuration.configuration.pipeline.conversation
         transcriptionProvider = conversation.transcriptionProvider
-        transcriptionWhisperModel = conversation.transcriptionWhisperModel
+        transcriptionWhisperModel = builtinWhisper.availableModels.contains(conversation.transcriptionWhisperModel)
+            ? conversation.transcriptionWhisperModel : .base
         transcriptionCredentialSummary = AppSecretResolver().maskedSecret(account: ConfigurationController.openAICredentialAccount)
         let remote = transcriptionEndpoint ?? endpoint(withID: ConfigurationController.openAITranscriptionEndpointID)
         transcriptionModel = remote?.model ?? ConfigurationController.defaultTranscriptionModel

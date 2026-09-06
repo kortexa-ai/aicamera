@@ -163,15 +163,21 @@ struct ControlCenterView: View {
                     if model.cameraExtensionManager.status == .needsApproval {
                         Text("Enable AI Camera in System Settings → General → Login Items & Extensions → Media Extensions. Settings should open automatically.")
                             .font(.caption2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .foregroundStyle(.secondary)
                     } else if model.cameraExtensionManager.status == .pendingReboot {
                         Text("Restart Mac to complete the camera extension change.")
                             .font(.caption2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .foregroundStyle(.secondary)
                     } else if model.cameraExtensionManager.status == .active,
                               !model.cameraVirtualDeviceAvailable {
-                        Text("The extension is active, but macOS is not publishing AI Camera. Restart Mac to finish extension cleanup, then check again.")
+                        Text("The extension is enabled, but its camera is unavailable. Open Media Extensions in System Settings to turn AI Camera off and on, then reopen your camera app.")
                             .font(.caption2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .foregroundStyle(.orange)
                     }
                 }

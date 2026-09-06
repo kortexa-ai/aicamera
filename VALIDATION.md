@@ -1,5 +1,32 @@
 # Validation record
 
+## Build 37: camera recovery and local model selection
+
+- Full `scripts/validate.sh`: 153 Swift tests, all four unsigned Xcode targets, metadata/script
+  checks, and the HAL harness pass. No system component was installed by validation.
+- Signed Release source and `/Applications/AI Camera.app` both report build 37 and pass strict
+  nested signature verification. The protected installation generation marker reports 37.
+- Installed Settings shows Base/Small/Large on M4 Pro, distinct tier descriptions, and matching
+  Whisper/HY-MT2 Local model rows with green name/check/trash controls. Large download exposes
+  progress and Cancel; Save stays disabled until the model is verified and ready.
+- Hardware policy tests cover eligible M4 variants and M5 chips, base M4, older Apple chips,
+  Intel, malformed names, and unknown hardware. Existing Base/Small saved values are unchanged.
+- Native controller checks also pass actual M4 Pro detection and unsupported-hardware
+  download/client refusal. Large completed its verified Settings download and the public JFK
+  fixture checks: English 2.02 s and auto-detect 2.25 s for 11 s of audio; cancellation returned
+  in 0.001 s. Silence, recovery, cached clients, and HY-MT2 coexistence pass with a combined
+  peak resident footprint of 2.91 GB. The active Base setting was preserved. These fixture
+  measurements are not guarantees for arbitrary speech or simultaneous camera processing.
+- Read-only September 5 registration logs explain the missing camera: during replacement,
+  launchd rejected the new CoreMediaIO job with error 37 (operation already in progress), then
+  removed the old job. SystemExtensions still reported the replacement activated/enabled.
+  The named service was absent, consistent with the user's QuickTime observation. No reboot,
+  launchd reset, extension activation, or HAL change was performed for this diagnosis.
+- Obsolete generated DerivedData trees, exported app bundles, four archives, six build 13/14
+  distribution ZIPs, and old Debug app copies were removed at the user's request. Finder's
+  bundle-identifier query returns only the installed app and the two current build products.
+  Settings, model weights, local signing configuration, and OS-managed extension records remain.
+
 ## Build 36 Talk cancellation and final captions
 
 Date: 2026-09-05

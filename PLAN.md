@@ -27,7 +27,8 @@ Implementation and acceptance priorities:
   and repeated user-heard responses with normal playback pass. Tools and captions remain in the speech matrix.
   Subscription coverage of Realtime usage remains unverified.
 - [x] Implement embedded Whisper with explicit verified model downloads, progress, cancellation,
-  removal, a local provider choice, and measured in-process transcription.
+  removal, a local provider choice, and measured in-process transcription. Offer Base, Small, and
+  Large v3 with distinct speed/accuracy descriptions; Large is limited to M4 Pro/Max/Ultra and M5 chips.
 - [x] Correct local translation Unicode handling, model/client reuse, cancellation, output limits,
   and late download completion; verify synthetic native output, recovery, and latency.
 - [x] Reuse local detector workers, keep model loading off the UI thread, preserve cancellation,
@@ -44,6 +45,10 @@ Implementation and acceptance priorities:
   and extension/device acceptance are deferred at the user's request; do not activate components.
 
 ## Current status
+
+- Build 37 aligns Whisper and translation model controls, adds hardware-gated Whisper Large v3,
+  and wraps camera extension recovery guidance. An enabled-but-unpublished camera no longer
+  implies a required reboot; only an explicit pending-reboot activation result requests one.
 
 - Build 36 cancels pending caption translations on Talk Stop/failure while the camera pipeline
   stays active, and preserves final translation after normal completion. Retired tool-result errors
