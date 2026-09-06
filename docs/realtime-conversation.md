@@ -190,6 +190,9 @@ off” changes only the quick control. Changing a selected language alone leaves
 alone. Enabling requires a ready model. These tools neither download/enable an unconfigured
 feature nor unmute AI Camera. Their output is captions, not spoken translation.
 
+The remaining voice-output work has a separate [spoken-translation design](spoken-translation-design.md)
+covering original/translated audio, independent agent input, local monitoring, and output ownership.
+
 Source/target language changes from Settings or the agent reuse the live media graph and keep
 the Realtime session connected. The runtime caption generation changes immediately, retires
 older translated results, and keeps one active/latest-pending translation worker. Every other

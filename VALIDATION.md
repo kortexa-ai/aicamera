@@ -891,3 +891,17 @@ Pixel comparisons verify stable caching within a second, changed text across rev
 and expiry restoring the baseline, and reserved status/caption space. Synthetic start/finished
 images were visually reviewed. No capture device, credential, installed app, or system component
 was used or changed. Live spoken selection and independent-client control checks remain separate.
+
+## Local spoken-output feasibility
+
+The optional fixed-text native system-speech probe completed for en-US and es-ES without playback
+or saved audio. English produced 48,604 frames in 190 bounded buffers; Spanish produced 36,525
+frames in 143 buffers. Both were finite 22,050 Hz mono float PCM with nonzero samples and a normal
+completion marker. The probe excludes personal voices, accepts no user text/audio, and bounds
+duration, format, sample values, and callback count. It reads no credentials or capture devices.
+
+These results establish buffer production on this Mac, not translation quality, provider access,
+resampling, or local/virtual microphone routing. The spoken-translation design records those
+separate acceptance steps and the required source/error/output-ownership changes. Current app
+audio routes and the installed release remain unchanged.
+Full local validation still passes all 236 Swift tests and native fixtures.

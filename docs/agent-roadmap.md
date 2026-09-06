@@ -31,6 +31,8 @@ one-question mode are available on `main`. U.S. weather forecasts use the public
 explicit approximate-location permission; see [weather forecasts](weather-forecasts.md). Market
 quotes and worldwide weather, spoken translation,
 external image/slide assets and richer face tracking remain planned capabilities.
+The [spoken-translation design](spoken-translation-design.md) defines the separate interpreter
+input and audio-output work before exposing a voice-translation tool.
 Quiet native countdowns share the transient card slot and need no model work after starting.
 Requested face effects now use a bounded local 2D anchor; see [face effects](face-effects.md).
 The current presentation mode uses the existing generated three.js scene with a bounded camera inset.

@@ -761,6 +761,24 @@ owns Control–Option–L too, the fixture must fail; do not quit the user's app
 This establishes native registration/event routing, not a live spoken Pause listening/Ask again
 cycle. Keep the latter in the installed-candidate acceptance matrix.
 
+## Local spoken-output feasibility
+
+This optional native probe needs available non-personal English and Spanish system voices. It
+uses two fixed synthetic sentences, requests in-memory speech buffers, checks finite bounded PCM
+and completion, then discards the data. It never plays or saves audio, opens a capture device,
+requests personal-voice access, or reads credentials. Missing voices are a failed prerequisite;
+the probe does not download them. It is separate from the portable full-validation suite.
+
+```sh
+xcrun swiftc -parse-as-library -O scripts/validate-local-speech.swift \
+  -o /tmp/aicamera-local-speech-validation
+/tmp/aicamera-local-speech-validation
+```
+
+This establishes local buffer-synthesis feasibility only. Format conversion, translation meaning,
+speech ownership, and actual local/virtual output routing follow the
+[spoken-translation acceptance order](spoken-translation-design.md#acceptance-order).
+
 ## Quiet timer regression
 
 Core presentation/tool tests cover whole-second duration and label bounds, exact tick/finish/expiry
