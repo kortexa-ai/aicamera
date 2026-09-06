@@ -833,3 +833,14 @@ Repeating fractions and tiny values report per-operation rounding to 12 decimal 
 calculation → existing information card → response continuation fixture preserves the input
 assumptions. No code-evaluation engine, network, media capture, account, installed settings, or
 system-component change was involved. Actual spoken tool selection remains provider acceptance.
+
+## Native agent-input shortcut routing
+
+The updated native shortcut fixture passes alongside the running installed 0.2.0 build 53.
+Control–Option–Space registers, routes to agentInput, suppresses repeats while held, and works after
+release and unregister/re-register. Synthetic event routing also retains the agent/mute actions
+and ignores unknown identifiers. The explicit fixture mode tolerates A/M registration conflicts;
+it does not displace another app's exclusive shortcuts. No physical keystrokes were sent and no
+keyboard input was observed. The running installed bundle still passes strict signature validation.
+Production shortcut definitions and capture/system components were unchanged. Live spoken control
+acceptance remains separate.

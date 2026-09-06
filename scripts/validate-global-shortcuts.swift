@@ -17,7 +17,23 @@ struct ShortcutValidation {
         var actions: [GlobalShortcuts.Action] = []
         let shortcuts = GlobalShortcuts { actions.append($0) }
         defer { shortcuts.unregister() }
-        guard shortcuts.register() == nil else { throw Failure("Hotkeys unavailable for synthetic validation") }
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        guard arguments.isEmpty || arguments == ["--allow-agent-mute-conflicts"] else {
+            throw Failure("Usage: validate-global-shortcuts [--allow-agent-mute-conflicts]")
+        }
+        let allowExistingApp = !arguments.isEmpty
+        func register() throws {
+            if let message = shortcuts.register() {
+                // Older installed releases own A/M but have no agent-input shortcut. Their
+                // exclusive registrations remain untouched; Space must succeed in this mode.
+                guard allowExistingApp, message.contains("could not be registered"),
+                      message.contains(GlobalShortcuts.Action.agent.label) || message.contains(GlobalShortcuts.Action.mute.label),
+                      !message.contains(GlobalShortcuts.Action.agentInput.label) else {
+                    throw Failure("Hotkeys unavailable for synthetic validation: \(message)")
+                }
+            }
+        }
+        try register()
         func send(_ id: UInt32, released: Bool = false, signature: OSType = 0x41494341) throws {
             var event: EventRef?
             guard CreateEvent(nil, OSType(kEventClassKeyboard),
@@ -38,17 +54,22 @@ struct ShortcutValidation {
         try send(1, released: true)
         try send(2)
         try send(2, released: true)
+        try send(3)
+        try send(3)
+        try send(3, released: true)
+        try send(3)
+        try send(3, released: true)
         try send(99)
         try send(1, signature: 0)
-        guard actions == [.agent, .agent, .mute] else { throw Failure("Wrong action or repeated hotkey delivery") }
+        guard actions == [.agent, .agent, .mute, .agentInput, .agentInput] else { throw Failure("Wrong action or repeated hotkey delivery") }
         shortcuts.unregister()
-        try send(2)
-        guard actions.count == 3 else { throw Failure("Unregistered handler remained active") }
-        guard shortcuts.register() == nil else { throw Failure("Hotkeys were not released") }
-        try send(2)
-        try send(2, released: true)
-        guard actions.count == 4 else { throw Failure("Re-registration did not deliver") }
-        print("Global shortcuts passed: registration, action routing, held-key suppression, unknown IDs, unregister/re-register; no keyboard input observed")
+        try send(3)
+        guard actions.count == 5 else { throw Failure("Unregistered handler remained active") }
+        try register()
+        try send(3)
+        try send(3, released: true)
+        guard actions == [.agent, .agent, .mute, .agentInput, .agentInput, .agentInput] else { throw Failure("Re-registration did not deliver") }
+        print("Global shortcuts passed: agent/mute/input action routing, held-key suppression, unknown IDs, unregister/re-register; no keyboard input observed or physical keystrokes sent. \(allowExistingApp ? "A/M conflicts allowed; Space registration required." : "All three shortcut registrations required.")")
     }
     struct Failure: Error { let message: String; init(_ message: String) { self.message = message } }
 }

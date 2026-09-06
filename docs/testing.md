@@ -740,3 +740,23 @@ place and units. Confirm lookup → readable sourced card → short answer while
 paused and independent call audio continues. Test a missing place, unsupported location, service
 failure, and Stop during lookup. Disable weather and confirm it is no longer offered or usable.
 The published release and installed system components need not change for synthetic/HTTP checks.
+
+### Agent-only input shortcut
+
+The native shortcut fixture checks agent start/stop, privacy mute, and agent-only listening action
+routing, held-key suppression, release, unknown events, and unregister/re-register. It sends Carbon
+hotkey events only to its own application event target. It does not inject physical keystrokes,
+read keyboard input, or activate media capture.
+
+```sh
+xcrun swiftc -parse-as-library -O Sources/AICameraApp/GlobalShortcuts.swift \
+  scripts/validate-global-shortcuts.swift -o /tmp/aicamera-shortcut-validation
+/tmp/aicamera-shortcut-validation --allow-agent-mute-conflicts
+```
+
+The explicit conflict mode is for testing alongside an older installed release that already owns
+Control–Option–A/M. Those exclusive registrations are left alone; Control–Option–Space must still
+register successfully. Without the flag, all three shortcuts must register. If another process
+owns Space too, the fixture must fail; do not quit the user's app merely to get a green result.
+This establishes native registration/event routing, not a live spoken Pause listening/Ask again
+cycle. Keep the latter in the installed-candidate acceptance matrix.
