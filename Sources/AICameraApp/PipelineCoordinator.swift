@@ -28,6 +28,10 @@ actor PipelineCoordinator {
 
     private let configuration: AICameraConfiguration
     private let scene = SceneState()
+    private let runtimeFeatures: RuntimeFeatureState
+    private var synchronizedCaptionGeneration: UInt64
+    private var synchronizedGestureGeneration: UInt64
+    private let onSnapshotWithFeatures: (@Sendable (SceneSnapshot, PrivacyMuteState.Snapshot, RuntimeFeatureState.Snapshot) -> Void)?
     private let privacyMute: PrivacyMuteState
     private let onGestureControl: @Sendable (GestureControlAction) -> Void
     private let onGestureControlWithTimestamp: (@Sendable (GestureControlAction, TimeInterval) -> Void)?
@@ -53,7 +57,7 @@ actor PipelineCoordinator {
     private var realtimeTranscriptionActive = false
     private var realtimeTranscriptRevisions: [RealtimeTranscriptSource: UInt64] = [:]
     private var realtimeTranslationTask: Task<Void, Never>?
-    private var pendingRealtimeTranslation: (event: TranscriptEvent, source: RealtimeTranscriptSource, revision: UInt64, privacy: PrivacyMuteState.Snapshot)?
+    private var pendingRealtimeTranslation: (event: TranscriptEvent, source: RealtimeTranscriptSource, revision: UInt64, privacy: PrivacyMuteState.Snapshot, features: RuntimeFeatureState.Snapshot)?
     private var conversationTask: Task<Void, Never>?
     private var pendingConversationInput: ConversationInput?
     private var conversationGeneration: UInt64 = 0
@@ -66,6 +70,8 @@ actor PipelineCoordinator {
         configuration: AICameraConfiguration,
         secrets: any SecretResolver,
         privacyMute: PrivacyMuteState = PrivacyMuteState(),
+        runtimeFeatures: RuntimeFeatureState = RuntimeFeatureState(),
+        onSnapshotWithFeatures: (@Sendable (SceneSnapshot, PrivacyMuteState.Snapshot, RuntimeFeatureState.Snapshot) -> Void)? = nil,
         onGestureControl: @escaping @Sendable (GestureControlAction) -> Void = { _ in },
         onGestureControlWithTimestamp: (@Sendable (GestureControlAction, TimeInterval) -> Void)? = nil,
         builtinDetectionClient: (any DetectionClient)? = nil,
@@ -79,6 +85,10 @@ actor PipelineCoordinator {
     ) {
         self.configuration = configuration
         self.privacyMute = privacyMute
+        self.runtimeFeatures = runtimeFeatures
+        self.synchronizedCaptionGeneration = runtimeFeatures.snapshot.captionGeneration
+        self.synchronizedGestureGeneration = runtimeFeatures.snapshot.gestureGeneration
+        self.onSnapshotWithFeatures = onSnapshotWithFeatures
         self.onGestureControl = onGestureControl
         self.onGestureControlWithTimestamp = onGestureControlWithTimestamp
         self.factory = AdapterFactory(
@@ -148,25 +158,29 @@ actor PipelineCoordinator {
 
     func submitRealtimeTranscript(source: RealtimeTranscriptSource, text: String, isFinal: Bool) async {
         let privacy = privacyMute.snapshot
-        let visible = source == .local ? configuration.overlays.showTranscript : configuration.overlays.showAgentResponse
+        let features = runtimeFeatures.snapshot
+        let visible = source == .local
+            ? configuration.overlays.showTranscript && features.needsTranscription
+            : configuration.overlays.showAgentResponse
         guard isRunning, !Task.isCancelled, visible, privacyMute.permitsSpeech(privacy) else { return }
         realtimeTranscriptRevisions[source, default: 0] &+= 1
         let revision = realtimeTranscriptRevisions[source, default: 0]
         let event = TranscriptEvent(text: text, mode: isFinal ? .final : .partial)
-        await applyRealtimeCaption(event, source: source, privacy: privacy)
+        await applyRealtimeCaption(event, source: source, privacy: privacy, features: features)
         guard isRunning, !Task.isCancelled, revision == realtimeTranscriptRevisions[source],
-              isFinal, configuration.pipeline.translation.enabled else { return }
+              isFinal, configuration.pipeline.translation.enabled, features.translation,
+              runtimeFeatures.permitsCaptions(from: features) else { return }
         // Translation must not hold the Realtime event consumer while PCM/control events arrive.
         // Retain one running translation and replace the single pending finalized transcript.
-        pendingRealtimeTranslation = (event, source, revision, privacy)
+        pendingRealtimeTranslation = (event, source, revision, privacy, features)
         startRealtimeTranslationIfNeeded()
     }
 
-    private func applyRealtimeCaption(_ event: TranscriptEvent, source: RealtimeTranscriptSource, privacy: PrivacyMuteState.Snapshot) async {
-        guard privacyMute.permitsSpeech(privacy) else { return }
+    private func applyRealtimeCaption(_ event: TranscriptEvent, source: RealtimeTranscriptSource, privacy: PrivacyMuteState.Snapshot, features: RuntimeFeatureState.Snapshot) async {
+        guard privacyMute.permitsSpeech(privacy), runtimeFeatures.permitsCaptions(from: features) else { return }
         switch source {
-        case .local: await scene.applyTranscript(event, privacyGeneration: privacy.generation)
-        case .remote: await scene.applyAgentResponse(event.text, privacyGeneration: privacy.generation)
+        case .local: await scene.applyTranscript(event, privacyGeneration: privacy.generation, featureGeneration: features.captionGeneration)
+        case .remote: await scene.applyAgentResponse(event.text, privacyGeneration: privacy.generation, featureGeneration: features.captionGeneration)
         }
         await publish()
     }
@@ -189,26 +203,31 @@ actor PipelineCoordinator {
             guard let self else { return }
             let privacy = pending.privacy
             let displayed = self.privacyMute.permitsSpeech(privacy)
-                ? await self.translated(pending.event) : pending.event
-            await self.finishRealtimeTranslation(displayed, source: pending.source, revision: pending.revision, privacy: privacy)
+                ? await self.translated(pending.event, features: pending.features) : pending.event
+            await self.finishRealtimeTranslation(displayed, source: pending.source, revision: pending.revision, privacy: privacy, features: pending.features)
         }
     }
 
-    private func finishRealtimeTranslation(_ event: TranscriptEvent, source: RealtimeTranscriptSource, revision: UInt64, privacy: PrivacyMuteState.Snapshot) async {
-        if isRunning, !Task.isCancelled, privacyMute.permitsSpeech(privacy), revision == realtimeTranscriptRevisions[source] {
-            await applyRealtimeCaption(event, source: source, privacy: privacy)
+    private func finishRealtimeTranslation(_ event: TranscriptEvent, source: RealtimeTranscriptSource, revision: UInt64, privacy: PrivacyMuteState.Snapshot, features: RuntimeFeatureState.Snapshot) async {
+        if isRunning, !Task.isCancelled, runtimeFeatures.permitsCaptions(from: features), privacyMute.permitsSpeech(privacy), revision == realtimeTranscriptRevisions[source] {
+            await applyRealtimeCaption(event, source: source, privacy: privacy, features: features)
         }
         realtimeTranslationTask = nil
         startRealtimeTranslationIfNeeded()
     }
 
     func submit(gestures: [GestureObservation], frameID: FrameID, capturedAt: TimeInterval = ProcessInfo.processInfo.systemUptime) async {
-        guard isRunning else { return }
+        guard isRunning, runtimeFeatures.permitsGesture(capturedAt: capturedAt) else { return }
+        let features = runtimeFeatures.snapshot
+        if synchronizedGestureGeneration != features.gestureGeneration {
+            resetGestureControls()
+            synchronizedGestureGeneration = features.gestureGeneration
+        }
         if let action = gestureControls.observe(gestures, capturedAt: capturedAt, now: ProcessInfo.processInfo.systemUptime) {
             if let onGestureControlWithTimestamp { onGestureControlWithTimestamp(action, capturedAt) }
             else { onGestureControl(action) }
         }
-        _ = await scene.applyGestures(gestures, frameID: frameID)
+        _ = await scene.applyGestures(gestures, frameID: frameID, featureGeneration: features.gestureGeneration)
         await publish()
 
         let conversation = configuration.pipeline.conversation
@@ -230,7 +249,9 @@ actor PipelineCoordinator {
     func submit(utterance: AudioUtterance) {
         let privacy = privacyMute.snapshot
         let conversation = configuration.pipeline.conversation
-        guard isRunning, privacyMute.permitsSpeech(privacy), conversation.transcriptionEnabled, !realtimeTranscriptionActive else { return }
+        guard isRunning, runtimeFeatures.snapshot.needsTranscription,
+              utterance.endedAtUptime >= runtimeFeatures.snapshot.captionsChangedAt,
+              privacyMute.permitsSpeech(privacy), conversation.transcriptionEnabled, !realtimeTranscriptionActive else { return }
         if transcriptionTask != nil {
             if conversation.activationMode == .alwaysListening || pendingUtterance == nil {
                 // Always-listening favors the latest ambient window. Wake mode preserves the first
@@ -270,7 +291,7 @@ actor PipelineCoordinator {
         pendingConversationInput = nil
         _ = await stopSpeech(nil)
         guard generation == conversationGeneration else { return true }
-        await scene.applyAgentResponse(nil)
+        await scene.applyAgentResponse(nil, featureGeneration: runtimeFeatures.snapshot.captionGeneration)
         await publish()
         return true
     }
@@ -451,6 +472,9 @@ actor PipelineCoordinator {
     private func runTranscription(utterance: AudioUtterance, privacy: PrivacyMuteState.Snapshot) async {
         guard privacyMute.permitsSpeech(privacy) else { return }
         let conversation = configuration.pipeline.conversation
+        let features = runtimeFeatures.snapshot
+        guard !Task.isCancelled, features.needsTranscription,
+              utterance.endedAtUptime >= features.captionsChangedAt else { return }
         do {
             let (client, configuredLanguage) = try transcriptionSetup()
             let language = configuredLanguage == "auto" ? nil : configuredLanguage
@@ -460,10 +484,11 @@ actor PipelineCoordinator {
             ))
             try Task.checkCancellation()
             guard !transcript.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            let displayedTranscript = await translated(transcript)
+            let displayedTranscript = await translated(transcript, features: features)
             try Task.checkCancellation()
-            guard isRunning, !realtimeTranscriptionActive, privacyMute.permitsSpeech(privacy) else { return }
-            await scene.applyTranscript(displayedTranscript, privacyGeneration: privacy.generation)
+            guard isRunning, !realtimeTranscriptionActive, privacyMute.permitsSpeech(privacy),
+                  runtimeFeatures.permitsCaptions(from: features) else { return }
+            await scene.applyTranscript(displayedTranscript, privacyGeneration: privacy.generation, featureGeneration: features.captionGeneration)
             await publish()
             if !Task.isCancelled, privacyMute.permitsSpeech(privacy),
                conversation.enabled, !conversation.realtimeEnabled, let command = agentCommand(
@@ -476,6 +501,7 @@ actor PipelineCoordinator {
         } catch is CancellationError {
             return
         } catch {
+            guard !Task.isCancelled, runtimeFeatures.permitsCaptions(from: features) else { return }
             onError("transcription: \(error.localizedDescription)")
         }
     }
@@ -499,9 +525,9 @@ actor PipelineCoordinator {
         return (try factory.transcription(for: endpoint), endpoint.options["language"]?.stringValue)
     }
 
-    private func translated(_ transcript: TranscriptEvent) async -> TranscriptEvent {
+    private func translated(_ transcript: TranscriptEvent, features: RuntimeFeatureState.Snapshot) async -> TranscriptEvent {
         let translation = configuration.pipeline.translation
-        guard translation.enabled, transcript.mode == .final, let builtinTranslationClient else {
+        guard translation.enabled, features.translation, runtimeFeatures.permitsCaptions(from: features), transcript.mode == .final, let builtinTranslationClient else {
             return transcript
         }
         do {
@@ -519,6 +545,7 @@ actor PipelineCoordinator {
         } catch is CancellationError {
             return transcript
         } catch {
+            guard !Task.isCancelled, runtimeFeatures.permitsCaptions(from: features) else { return transcript }
             onError("translation: \(error.localizedDescription)")
             return transcript
         }
@@ -563,7 +590,7 @@ actor PipelineCoordinator {
             ))
             try Task.checkCancellation()
             guard privacyMute.permitsSpeech(privacy) else { return }
-            await scene.applyAgentResponse(response, privacyGeneration: privacy.generation)
+            await scene.applyAgentResponse(response, privacyGeneration: privacy.generation, featureGeneration: runtimeFeatures.snapshot.captionGeneration)
             await publish()
             await synthesize(response, privacy: privacy)
         } catch is CancellationError {
@@ -682,15 +709,39 @@ actor PipelineCoordinator {
 
     private func publish() async {
         let privacy = privacyMute.snapshot
-        let snapshot = await scene.current(privacyGeneration: privacy.generation)
+        let features = runtimeFeatures.snapshot
+        let snapshot = await scene.current(privacyGeneration: privacy.generation,
+                                           captionGeneration: features.captionGeneration,
+                                           gestureGeneration: features.gestureGeneration)
         guard isRunning, privacyMute.isCurrent(privacy) else { return }
         var visible = privacyMute.filtered(snapshot, from: privacy)
-        visible.gestureControl = gestureControls.feedback
-        if let onSnapshotWithPrivacy { onSnapshotWithPrivacy(visible, privacy) }
+        visible.gestureControl = features.gestures ? gestureControls.feedback : nil
+        visible = runtimeFeatures.filtered(visible, from: features)
+        if let onSnapshotWithFeatures { onSnapshotWithFeatures(visible, privacy, features) }
+        else if let onSnapshotWithPrivacy { onSnapshotWithPrivacy(visible, privacy) }
         else { onSnapshot(visible) }
     }
 
     func resetGestureControls() { gestureControls = GestureControlGate() }
+
+    func synchronizeRuntimeFeatures() async {
+        let features = runtimeFeatures.snapshot
+        if synchronizedGestureGeneration != features.gestureGeneration {
+            synchronizedGestureGeneration = features.gestureGeneration
+            resetGestureControls()
+            lastObservedGestureKind = nil
+        }
+        if synchronizedCaptionGeneration != features.captionGeneration {
+            synchronizedCaptionGeneration = features.captionGeneration
+            cancelRealtimeCaptions()
+            transcriptionTask?.cancel()
+            // Keep ownership until completion, even for a cancellation-insensitive provider.
+            // Fresh capture can replace one pending utterance without overlapping ASR calls.
+            pendingUtterance = nil
+            await scene.clearSpeech()
+        }
+        await publish()
+    }
 
     /// Called for both edges so unmute also discards work admitted before the privacy boundary.
     func synchronizePrivacy(_ privacy: PrivacyMuteState.Snapshot) async {

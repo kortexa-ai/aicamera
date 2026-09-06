@@ -602,3 +602,29 @@ remain unchanged and the menu must show Camera Ready, without an extension Updat
 that an independent client can still select the virtual camera. Do not activate/deactivate a component
 as part of this check. A real component change still requires a component build-version increment
 and separate operator-approved replacement acceptance.
+
+## Quick toolbar and standalone windows
+
+Use the signed installed host; leave the camera extension and HAL driver unchanged.
+
+1. Launch to the menu bar with no standalone window. Confirm the compact popup has five quick
+   controls, a dot with a descriptive tooltip/VoiceOver label, and Preview left / About + Quit right.
+2. Open Preview, resize it, then open Settings and About. Repeat the footer actions and confirm
+   one window per kind. Close them in different orders: the Dock icon must remain until the last
+   standalone window closes. Reopen each kind and repeat. Command-Q closes a window, not the host; its three-second reminder uses the canonical app icon.
+3. Opening Preview must not acquire either input. Start camera/microphone tests explicitly. Closing
+   Preview must release those test inputs. When QuickTime uses the virtual devices, Preview shows
+   the same processed video and disables local tests; closing Preview must leave the call running.
+4. During a synthetic caption/gesture sequence, toggle Transcribe/Translate/Gestures and confirm
+   configuration stays enabled. Translate alone must still work; both caption switches off must stop
+   independent ASR. Gesture Off/On must require a new full gesture hold. Object detection continues.
+5. With another app focused and the popup closed, Control–Option–M mutes/unmutes AI Camera and
+   Control–Option–A starts/stops the agent. Holding a shortcut must toggle once. Mute clears all
+   captions and agent audio; unmuting never automatically starts a conversation.
+6. Verify readiness-dot states: green ready/idle, red active capture, yellow when idle setup needs
+   attention. Check status details remain available through hover and accessibility.
+
+`scripts/validate-quick-controls.swift` exercises the real coordinator with cancellation-insensitive
+synthetic ASR/translation clients; `scripts/validate-global-shortcuts.swift` exercises native hotkey
+registration and synthetic Carbon events without capturing keyboard input. Unit tests cover runtime
+caption/gesture generations, dependency policy, and stale scene writes across actor hops.

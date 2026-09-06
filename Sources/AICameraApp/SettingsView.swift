@@ -52,7 +52,7 @@ struct SettingsView: View {
                 .tag(AICameraSettingsPage.maintenance)
         }
         .frame(width: 740, height: 540)
-        .background(SettingsWindowLifecycle())
+        .background(AppWindowLifecycle())
         .onDisappear { cancelConnectionTest() }
     }
 
@@ -1355,65 +1355,5 @@ private extension EndpointConfiguration {
     var hostDisplayName: String {
         if EndpointLocation.isLoopback(baseURL) { return "a local service on this Mac" }
         return baseURL.host ?? baseURL.absoluteString
-    }
-}
-
-private struct SettingsWindowLifecycle: NSViewRepresentable {
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeNSView(context: Context) -> WindowTrackingView {
-        let view = WindowTrackingView()
-        view.onWindowChange = { window in context.coordinator.attach(to: window) }
-        return view
-    }
-
-    func updateNSView(_ nsView: WindowTrackingView, context: Context) {}
-
-    static func dismantleNSView(_ nsView: WindowTrackingView, coordinator: Coordinator) {
-        coordinator.detach()
-    }
-
-    final class Coordinator {
-        private weak var window: NSWindow?
-        private var closeObserver: NSObjectProtocol?
-
-        func attach(to window: NSWindow?) {
-            guard let window, self.window !== window else { return }
-            detach(hideDock: false)
-            self.window = window
-            AppLifecycleCoordinator.shared.settingsDidOpen(window)
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-            closeObserver = NotificationCenter.default.addObserver(
-                forName: NSWindow.willCloseNotification,
-                object: window,
-                queue: .main
-            ) { [weak self] _ in
-                self?.detach()
-            }
-        }
-
-        func detach(hideDock: Bool = true) {
-            if let closeObserver {
-                NotificationCenter.default.removeObserver(closeObserver)
-                self.closeObserver = nil
-            }
-            if let window {
-                AppLifecycleCoordinator.shared.settingsDidClose(window)
-            }
-            window = nil
-            if hideDock {
-                DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
-            }
-        }
-    }
-}
-
-private final class WindowTrackingView: NSView {
-    var onWindowChange: ((NSWindow?) -> Void)?
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        onWindowChange?(window)
     }
 }

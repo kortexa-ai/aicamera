@@ -11,13 +11,24 @@ struct AICameraApp: App {
         }
         .menuBarExtraStyle(.window)
 
+        Window("AI Camera Preview", id: "preview") {
+            PreviewView(model: model)
+        }
+        .defaultSize(width: 900, height: 620)
+        .windowResizability(.contentMinSize)
+
+        Window("About AI Camera", id: "about") {
+            AboutView()
+        }
+        .windowResizability(.contentSize)
+
         Settings {
             SettingsView(model: model)
         }
         .commands {
             CommandGroup(replacing: .appTermination) {
-                Button("Close Settings") {
-                    AppLifecycleCoordinator.shared.handleSettingsQuitCommand()
+                Button("Close Window") {
+                    AppLifecycleCoordinator.shared.handleWindowQuitCommand()
                 }
                 .keyboardShortcut("q")
             }

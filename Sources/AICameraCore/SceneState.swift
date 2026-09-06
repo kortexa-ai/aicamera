@@ -12,6 +12,9 @@ public actor SceneState {
     private var visionDate: Date?
     private var transcriptDate: Date?
     private var agentResponseDate: Date?
+    private var transcriptFeatureGeneration: UInt64 = 0
+    private var agentFeatureGeneration: UInt64 = 0
+    private var gestureFeatureGeneration: UInt64 = 0
     private var transcriptPrivacyGeneration: UInt64 = 0
     private var agentPrivacyGeneration: UInt64 = 0
 
@@ -19,10 +22,13 @@ public actor SceneState {
 
     public func current() -> SceneSnapshot { snapshot }
 
-    public func current(privacyGeneration: UInt64) -> SceneSnapshot {
+    public func current(privacyGeneration: UInt64, captionGeneration: UInt64 = 0, gestureGeneration: UInt64 = 0) -> SceneSnapshot {
         var visible = snapshot
         if transcriptPrivacyGeneration != privacyGeneration { visible.transcript = nil }
         if agentPrivacyGeneration != privacyGeneration { visible.agentResponse = nil }
+        if transcriptFeatureGeneration != captionGeneration { visible.transcript = nil }
+        if agentFeatureGeneration != captionGeneration { visible.agentResponse = nil }
+        if gestureFeatureGeneration != gestureGeneration { visible.gestures = [] }
         return visible
     }
 
@@ -63,9 +69,12 @@ public actor SceneState {
     public func applyGestures(
         _ gestures: [GestureObservation],
         frameID: FrameID,
+        featureGeneration: UInt64 = 0,
         at date: Date = Date()
     ) -> Bool {
         guard gestureFrameID == nil || frameID >= gestureFrameID! else { return false }
+        guard featureGeneration >= gestureFeatureGeneration else { return false }
+        gestureFeatureGeneration = featureGeneration
         gestureFrameID = frameID
         gestureDate = date
         snapshot.gestures = gestures.prefix(AICameraContentLimits.gestures).map { gesture in
@@ -96,7 +105,9 @@ public actor SceneState {
         return true
     }
 
-    public func applyTranscript(_ event: TranscriptEvent, at date: Date = Date(), privacyGeneration: UInt64 = 0) {
+    public func applyTranscript(_ event: TranscriptEvent, at date: Date = Date(), privacyGeneration: UInt64 = 0, featureGeneration: UInt64 = 0) {
+        guard featureGeneration >= transcriptFeatureGeneration else { return }
+        transcriptFeatureGeneration = featureGeneration
         transcriptPrivacyGeneration = privacyGeneration
         var event = event
         event.text = event.text.aicameraLimited(to: AICameraContentLimits.transcriptCharacters)
@@ -104,7 +115,9 @@ public actor SceneState {
         transcriptDate = date
     }
 
-    public func applyAgentResponse(_ response: String?, at date: Date = Date(), privacyGeneration: UInt64 = 0) {
+    public func applyAgentResponse(_ response: String?, at date: Date = Date(), privacyGeneration: UInt64 = 0, featureGeneration: UInt64 = 0) {
+        guard featureGeneration >= agentFeatureGeneration else { return }
+        agentFeatureGeneration = featureGeneration
         agentPrivacyGeneration = privacyGeneration
         snapshot.agentResponse = response?.aicameraLimited(to: AICameraContentLimits.agentCharacters)
         agentResponseDate = response == nil ? nil : date

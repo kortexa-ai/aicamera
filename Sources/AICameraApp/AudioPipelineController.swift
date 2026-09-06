@@ -35,6 +35,8 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
     private let configuration: CaptureConfiguration
     private let privacyMute: PrivacyMuteState
     private let utteranceSeconds: Double
+    private let runtimeFeatures: RuntimeFeatureState
+    private var asrFeatureGeneration: UInt64 = 0
     private let transcriptionEnabled: Bool
     private let onUtterance: UtteranceHandler
     private let onBargeIn: BargeInHandler
@@ -111,6 +113,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         privacyMute: PrivacyMuteState = PrivacyMuteState(),
         utteranceSeconds: Double,
         transcriptionEnabled: Bool,
+        runtimeFeatures: RuntimeFeatureState = RuntimeFeatureState(),
         onUtterance: @escaping UtteranceHandler,
         onBargeIn: @escaping BargeInHandler,
         onError: @escaping ErrorHandler
@@ -119,6 +122,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         self.privacyMute = privacyMute
         self.utteranceSeconds = min(30, max(0.5, utteranceSeconds.isFinite ? utteranceSeconds : 3))
         self.transcriptionEnabled = transcriptionEnabled
+        self.runtimeFeatures = runtimeFeatures
         self.onUtterance = onUtterance
         self.onBargeIn = onBargeIn
         self.onError = onError
@@ -685,7 +689,15 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
 
         deliverRealtimePCM(mixed, capturedAt: capturedAt)
 
-        guard realtimeAudioHandler == nil, transcriptionEnabled,
+        let features = runtimeFeatures.snapshot
+        if asrFeatureGeneration != features.captionGeneration {
+            asrFeatureGeneration = features.captionGeneration
+            asrPCM.removeAll(keepingCapacity: true)
+            asrConverter = realtimeAudioHandler == nil && transcriptionEnabled && features.needsTranscription
+                ? AVAudioConverter(from: mixFormat, to: asrFormat) : nil
+        }
+        guard features.needsTranscription, capturedAt >= features.captionsChangedAt,
+              realtimeAudioHandler == nil, transcriptionEnabled,
               let asrConverter,
               let asrBuffer = Self.convert(mixed, using: asrConverter, to: asrFormat),
               let samples = asrBuffer.floatChannelData?[0] else { return }

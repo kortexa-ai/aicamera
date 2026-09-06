@@ -37,6 +37,13 @@ private final class PipelineRunGate: @unchecked Sendable {
 @MainActor
 final class AppModel: ObservableObject {
     private static let privacyMuteKey = "privacyMicrophoneMuted"
+    private let runtimeFeatures = RuntimeFeatureState()
+    private var currentSnapshotFeatures = RuntimeFeatureState().snapshot
+    @Published private(set) var transcriptionRequested = UserDefaults.standard.object(forKey: "quickTranscription") as? Bool ?? true
+    @Published private(set) var translationRequested = UserDefaults.standard.object(forKey: "quickTranslation") as? Bool ?? true
+    @Published private(set) var gesturesRequested = UserDefaults.standard.object(forKey: "quickGestures") as? Bool ?? true
+    @Published private(set) var shortcutError: String?
+    private var globalShortcuts: GlobalShortcuts?
     private let privacyMute: PrivacyMuteState
     @Published private(set) var privacyMuted: Bool
     private var privacyTransitionPending = false
@@ -177,6 +184,80 @@ final class AppModel: ObservableObject {
         configurationController.configuration.overlays.script.enabled
     }
 
+    var transcriptionConfigured: Bool { configurationController.configuration.pipeline.conversation.transcriptionEnabled }
+    var translationConfigured: Bool {
+        configurationController.configuration.pipeline.translation.enabled
+            && (transcriptionConfigured || realtimeConversationEnabled)
+    }
+    var gesturesConfigured: Bool {
+        configurationController.configuration.pipeline.videoStages.contains { $0.enabled && $0.kind == .handGesture }
+    }
+    var transcriptionActive: Bool { transcriptionConfigured && transcriptionRequested }
+    var translationActive: Bool { translationConfigured && translationRequested }
+    var gesturesActive: Bool { gesturesConfigured && gesturesRequested }
+
+    var readiness: CameraReadiness {
+        let configuration = configurationController.configuration
+        let whisperMissing = transcriptionConfigured && configuration.pipeline.conversation.transcriptionProvider == .whisper
+            && !builtinWhisperModelController.isReady(configuration.pipeline.conversation.transcriptionWhisperModel)
+        let attention = currentError != nil || shortcutError != nil || !configurationController.isConfigurationUsable
+            || !cameraVirtualDeviceIsReady || audioDriverManager.status != .installed
+            || cameraAuthorization != .authorized || microphoneAuthorization != .authorized
+            || !cameraSourceAvailable || !microphoneSourceAvailable || whisperMissing
+            || (translationConfigured && !builtinTranslationModelController.isReady)
+        return .resolve(needsAttention: attention, isInUse: cameraIsActive || microphoneIsActive)
+    }
+
+    var readinessDescription: String {
+        switch readiness {
+        case .needsAttention: return "Needs attention — check device setup and Settings"
+        case .ready: return "Ready"
+        case .inUse: return privacyMuted ? "Camera in use · microphone muted" : statusText
+        }
+    }
+
+    func toggleTranscription() {
+        guard transcriptionConfigured else { return }
+        transcriptionRequested.toggle()
+        UserDefaults.standard.set(transcriptionRequested, forKey: "quickTranscription")
+        synchronizeRuntimeFeatures()
+    }
+
+    func toggleTranslation() {
+        guard translationConfigured else { return }
+        translationRequested.toggle()
+        UserDefaults.standard.set(translationRequested, forKey: "quickTranslation")
+        synchronizeRuntimeFeatures()
+    }
+
+    func toggleGestures() {
+        guard gesturesConfigured else { return }
+        gesturesRequested.toggle()
+        UserDefaults.standard.set(gesturesRequested, forKey: "quickGestures")
+        synchronizeRuntimeFeatures()
+    }
+
+    private func synchronizeRuntimeFeatures() {
+        let previous = runtimeFeatures.snapshot
+        let features = runtimeFeatures.set(transcription: transcriptionActive,
+                                           translation: translationActive, gestures: gesturesActive)
+        guard features != previous else { return }
+        currentSnapshot = runtimeFeatures.filtered(currentSnapshot, from: currentSnapshotFeatures)
+        previewImage = nil
+        publishAgentStatus()
+        pushSceneData(to: currentSnapshot)
+        let coordinator = pipeline
+        Task { await coordinator?.synchronizeRuntimeFeatures() }
+    }
+
+    func stopLocalTests() {
+        guard cameraTestActive || microphoneTestActive else { return }
+        cameraTestActive = false
+        microphoneTestActive = false
+        microphoneInputLevel = 0
+        reconcileDemand()
+    }
+
     var realtimeConversationEnabled: Bool {
         let conversation = configurationController.configuration.pipeline.conversation
         return conversation.enabled && conversation.realtimeEnabled && conversation.realtimeEndpointID != nil
@@ -209,7 +290,7 @@ final class AppModel: ObservableObject {
 
     private func publishAgentStatus() {
         currentSnapshot.agentStatus = agentOverlayStatus
-        videoController?.update(snapshot: currentSnapshot, privacy: privacyMute.snapshot)
+        videoController?.update(snapshot: currentSnapshot, privacy: privacyMute.snapshot, features: currentSnapshotFeatures)
     }
 
     var isPurePassthrough: Bool {
@@ -235,6 +316,12 @@ final class AppModel: ObservableObject {
             }
             .store(in: &managerCancellables)
 
+        builtinWhisperModelController.objectWillChange
+            .merge(with: builtinTranslationModelController.objectWillChange)
+            .merge(with: builtinVisionModelController.objectWillChange)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &managerCancellables)
+
         demandMonitor.$snapshot
             .removeDuplicates()
             .sink { [weak self] _ in
@@ -254,6 +341,7 @@ final class AppModel: ObservableObject {
                 self?.cameraLaneError = nil
                 self?.microphoneLaneError = nil
                 self?.refreshResolvedSources()
+                self?.synchronizeRuntimeFeatures()
                 self?.beginStop()
             }
             .store(in: &lifecycleCancellables)
@@ -279,6 +367,16 @@ final class AppModel: ObservableObject {
             await self?.prepareForTermination()
         }
 
+        synchronizeRuntimeFeatures()
+        let shortcuts = GlobalShortcuts { [weak self] action in
+            guard let self, !self.isTerminating else { return }
+            switch action {
+            case .agent: self.toggleRealtimeConversation()
+            case .mute: self.setPrivacyMuted(!self.privacyMuted)
+            }
+        }
+        globalShortcuts = shortcuts
+        shortcutError = shortcuts.register()
         refreshDevicesAndDrivers()
         reconcileDemand()
     }
@@ -535,7 +633,7 @@ final class AppModel: ObservableObject {
         currentSnapshot.transcript = nil
         currentSnapshot.agentResponse = nil
         previewImage = nil
-        videoController?.update(snapshot: currentSnapshot, privacy: privacy)
+        videoController?.update(snapshot: currentSnapshot, privacy: privacy, features: currentSnapshotFeatures)
         clearOverlayScript()
         pushSceneData(to: currentSnapshot)
         reconcileDemand()
@@ -645,12 +743,14 @@ final class AppModel: ObservableObject {
         let video = VideoPipelineController(
             configuration: configuration,
             privacyMute: privacyGate,
-            onPreview: { [weak self] image, privacy in
+            runtimeFeatures: runtimeFeatures,
+            onPreview: { [weak self] image, privacy, features in
                 guard pipelineGate.isActive, laneGate.isActive else { return }
                 let sendableImage = SendableImage(value: image)
                 Task { @MainActor [weak model = self, sendableImage] in
-                    guard pipelineGate.isActive, laneGate.isActive, privacyGate.isCurrent(privacy) else { return }
-                    model?.previewImage = sendableImage.value
+                    guard pipelineGate.isActive, laneGate.isActive, privacyGate.isCurrent(privacy),
+                          let model, model.runtimeFeatures.snapshot == features else { return }
+                    model.previewImage = sendableImage.value
                 }
             },
             onGestures: { observations, frameID, capturedAt in
@@ -719,6 +819,7 @@ final class AppModel: ObservableObject {
             transcriptionEnabled: configuration.pipeline.conversation.transcriptionEnabled
                 && (configuration.pipeline.conversation.transcriptionProvider == .whisper
                     || configuration.pipeline.conversation.transcriptionEndpointID != nil),
+            runtimeFeatures: runtimeFeatures,
             onUtterance: { utterance in
                 guard pipelineGate.isActive, laneGate.isActive else { return }
                 Task {
@@ -771,10 +872,24 @@ final class AppModel: ObservableObject {
             configuration: configuration,
             secrets: AppSecretResolver(),
             privacyMute: privacyMute,
+            runtimeFeatures: runtimeFeatures,
+            onSnapshotWithFeatures: { [weak self] snapshot, privacy, features in
+                guard gate.isActive else { return }
+                Task { @MainActor [weak model = self] in
+                    guard gate.isActive, let model, model.privacyMute.isCurrent(privacy) else { return }
+                    model.currentSnapshot = model.runtimeFeatures.filtered(snapshot, from: features)
+                    model.currentSnapshotFeatures = features
+                    model.currentSnapshot.agentStatus = model.agentOverlayStatus
+                    if model.cameraRunGate?.isActive == true {
+                        model.videoController?.update(snapshot: model.currentSnapshot, privacy: privacy, features: features)
+                        model.pushSceneData(to: model.currentSnapshot)
+                    }
+                }
+            },
             onGestureControlWithTimestamp: { [weak self] action, capturedAt in
                 Task { @MainActor [weak model = self] in
                     guard gate.isActive, let model, model.cameraRunGate?.isActive == true,
-                          capturedAt >= model.cameraStartedAt,
+                          capturedAt >= model.cameraStartedAt, model.runtimeFeatures.permitsGesture(capturedAt: capturedAt),
                           ProcessInfo.processInfo.systemUptime - capturedAt <= 0.5 else { return }
                     switch action {
                     case .mute: model.setPrivacyMuted(true)
@@ -796,18 +911,6 @@ final class AppModel: ObservableObject {
             builtinTranscriptionClient: configuration.pipeline.conversation.transcriptionProvider == .whisper
                 ? builtinWhisperModelController.makeTranscriptionClient(model: configuration.pipeline.conversation.transcriptionWhisperModel)
                 : nil,
-            onSnapshotWithPrivacy: { [weak self] snapshot, privacy in
-                guard gate.isActive else { return }
-                Task { @MainActor [weak model = self] in
-                    guard gate.isActive, let model, model.privacyMute.isCurrent(privacy) else { return }
-                    model.currentSnapshot = snapshot
-                    model.currentSnapshot.agentStatus = model.agentOverlayStatus
-                    if model.cameraRunGate?.isActive == true {
-                        model.videoController?.update(snapshot: model.currentSnapshot, privacy: privacy)
-                        model.pushSceneData(to: snapshot)
-                    }
-                }
-            },
             onSpeechWithPrivacy: { [weak self] event, privacy in
                 guard gate.isActive else { return false }
                 return await withCheckedContinuation { continuation in
@@ -1519,6 +1622,7 @@ final class AppModel: ObservableObject {
     }
 
     func prepareForTermination() async {
+        globalShortcuts?.unregister()
         guard !isTerminating else { return }
         isTerminating = true
         // Close admission immediately without changing the saved user mute preference.

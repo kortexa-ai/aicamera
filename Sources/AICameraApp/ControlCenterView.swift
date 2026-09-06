@@ -5,11 +5,13 @@ import SwiftUI
 struct ControlCenterView: View {
     @ObservedObject var model: AppModel
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Image(nsImage: NSApplication.shared.applicationIconImage)
+                Image(nsImage: AppIconArtwork.image)
                     .resizable()
                     .frame(width: 28, height: 28)
                     .accessibilityHidden(true)
@@ -19,129 +21,24 @@ struct ControlCenterView: View {
                 Circle()
                     .fill(statusColor)
                     .frame(width: 9, height: 9)
-                Text(model.statusText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack {
-                Button {
-                    model.setPrivacyMuted(!model.privacyMuted)
-                } label: {
-                    Label(model.privacyMuted ? "Unmute" : "Mute", systemImage: model.privacyMuted ? "mic.slash.fill" : "mic.fill")
+                    .help(model.readinessDescription)
+                    .accessibilityLabel(model.readinessDescription)
+                Button(action: { presentSettings() }) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 14))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
-                Text(model.privacyMuted ? "Microphone muted · captions hidden" : "Hold a fist to mute audio and captions")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .help("Protects audio when the call uses AI Camera Microphone. Unmute here explicitly.")
-
-            ZStack {
-                Color.black
-                if let image = model.previewImage {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                } else {
-                    VStack(spacing: 6) {
-                        Image(systemName: model.cameraIsActive ? "camera.fill" : "camera")
-                            .font(.largeTitle)
-                        Text(previewMessage)
-                            .font(.caption)
-                    }
-                    .foregroundStyle(.white.opacity(0.6))
-                }
-            }
-            // The popup has a fixed 420-point width and 14-point padding.
-            // Keep an explicit 16:9 height so flexible preview images cannot
-            // collapse this view during the transition from the placeholder.
-            .frame(maxWidth: .infinity)
-            .frame(height: 220.5)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-
-            HStack(spacing: 8) {
-                Button(action: model.toggleCameraTest) {
-                    Label(
-                        model.cameraTestActive ? "Stop testing" : "Test camera",
-                        systemImage: model.cameraTestActive ? "stop.fill" : "video.fill"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .disabled(!model.cameraTestActive && !model.canStartCameraTest)
-                .tint(model.cameraTestActive ? .red : .accentColor)
-                .help("Test the resolved camera while both virtual devices are idle.")
-                .accessibilityLabel(
-                    model.cameraTestActive ? "Stop camera testing" : "Test camera"
-                )
-
-                Button(action: model.toggleMicrophoneTest) {
-                    Label(
-                        model.microphoneTestActive ? "Stop testing" : "Test microphone",
-                        systemImage: model.microphoneTestActive ? "stop.fill" : "mic.fill"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .disabled(!model.microphoneTestActive && !model.canStartMicrophoneTest)
-                .tint(model.microphoneTestActive ? .red : .accentColor)
-                .help("Test the resolved microphone while both virtual devices are idle.")
-                .accessibilityLabel(
-                    model.microphoneTestActive ? "Stop microphone testing" : "Test microphone"
-                )
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            if model.realtimeConversationEnabled {
-                Button(action: model.toggleRealtimeConversation) {
-                    Label(
-                        model.realtimeConversationActive
-                            ? "Stop agent — \(model.realtimeConversationState.rawValue)"
-                            : (model.privacyMuted ? "Agent muted" : "Start agent"),
-                        systemImage: model.realtimeConversationActive ? "stop.fill" : "waveform.and.mic"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(model.realtimeConversationActive ? .red : .accentColor)
-                .disabled(!model.realtimeConversationActive && !model.canStartRealtimeConversation)
-                .help("Hold a victory sign to start the agent. It stays active between replies; hold a fist to mute audio and captions.")
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Settings")
+                .accessibilityLabel("Settings")
+                .accessibilityIdentifier("open-settings")
             }
 
-            #if DEBUG
-            if model.cameraTestActive, model.scriptOverlayEnabled {
-                GroupBox("Overlay script") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        TextField(
-                            "three.js script — try: AICamera.onFrame(dt => { AICamera.scene.rotation.y += dt })",
-                            text: $model.overlayScriptDraft,
-                            axis: .vertical
-                        )
-                        .font(.system(.caption2, design: .monospaced))
-                        .lineLimit(3...8)
-                        HStack {
-                            Button("Render") { model.loadOverlayScript(model.overlayScriptDraft) }
-                                .controlSize(.small)
-                            Button("Clear") { model.clearOverlayScript() }
-                                .controlSize(.small)
-                            Spacer()
-                        }
-                        if let log = model.overlayScriptLog {
-                            Text(log)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                    }
-                }
-            }
+            FeatureToolbar(model: model)
 
-            #endif
-
-            if model.microphoneTestActive {
-                InputLevelMeter(level: model.microphoneInputLevel)
-            }
-
-            GroupBox("Virtual devices") {
+            GroupBox {
                 VStack(spacing: 8) {
                     DeviceSetupRow(
                         title: "Camera",
@@ -218,20 +115,6 @@ struct ControlCenterView: View {
                 )
             }
 
-            Divider()
-
-            HStack {
-                Label(processingLabel, systemImage: processingIcon)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                Spacer()
-                Button(action: { presentSettings() }) {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .controlSize(.small)
-                .accessibilityIdentifier("open-settings")
-            }
-
             if let error = panelError {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(error)
@@ -251,11 +134,14 @@ struct ControlCenterView: View {
             }
 
             Divider()
-            HStack {
+            HStack(spacing: 4) {
+                Button("Preview") { presentWindow("preview") }
                 Spacer()
+                Button("About") { presentWindow("about") }
+                Text("·").foregroundStyle(.tertiary).accessibilityHidden(true)
                 Button("Quit") { AppLifecycleCoordinator.shared.quit() }
-                    .controlSize(.small)
             }
+            .buttonStyle(FooterActionStyle())
         }
         .padding(14)
         .frame(width: 420)
@@ -268,34 +154,17 @@ struct ControlCenterView: View {
     }
 
     private var statusColor: Color {
-        if model.currentError != nil || !model.configurationController.isConfigurationUsable {
-            return .red
+        switch model.readiness {
+        case .needsAttention: return .yellow
+        case .ready: return .green
+        case .inUse: return .red
         }
-        if model.isRunning { return .green }
-        if setupNeedsAttention
-            || model.cameraSourceWarning != nil
-            || model.microphoneSourceWarning != nil
-            || (model.cameraExtensionManager.status.isInstalled && model.cameraAuthorization == .denied)
-            || (model.audioDriverManager.status.isInstalled && model.microphoneAuthorization == .denied) {
-            return .orange
-        }
-        return .secondary
     }
 
-    private var previewMessage: String {
-        if model.cameraTestActive { return "Starting camera test…" }
-        if model.demandMonitor.cameraRequested { return "Starting camera…" }
-        if !model.cameraExtensionManager.status.isInstalled { return "Install the virtual camera to begin" }
-        return "Waiting for a camera client"
-    }
-
-    private var setupNeedsAttention: Bool {
-        (!model.cameraExtensionManager.status.isInstalled && !model.audioDriverManager.status.isInstalled)
-            || model.cameraExtensionManager.status == .needsApproval
-            || model.cameraExtensionManager.status == .pendingReboot
-            || model.cameraExtensionManager.status == .updateAvailable
-            || model.audioDriverManager.status == .updateAvailable
-            || model.audioDriverManager.status == .installedNeedsReload
+    private func presentWindow(_ id: String) {
+        dismiss()
+        openWindow(id: id)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private var cameraActionTitle: String? {
@@ -323,15 +192,6 @@ struct ControlCenterView: View {
         }
     }
 
-    private var processingLabel: String {
-        if model.hasConfiguredAIFeatures { return "AI processing configured" }
-        return model.isPurePassthrough ? "Pure passthrough" : "AI off — local effects configured"
-    }
-
-    private var processingIcon: String {
-        model.hasConfiguredAIFeatures ? "sparkles" : "arrow.left.arrow.right"
-    }
-
     private func permissionActionTitle(_ status: AVAuthorizationStatus) -> String? {
         switch status {
         case .notDetermined: return "Allow"
@@ -355,6 +215,7 @@ struct ControlCenterView: View {
         lane: AICameraSettingsLane? = nil
     ) {
         if let page { model.selectSettings(page: page, lane: lane) }
+        dismiss()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         openSettings()
@@ -419,7 +280,7 @@ private struct DeviceSetupRow: View {
     }
 }
 
-private struct InputLevelMeter: View {
+struct InputLevelMeter: View {
     let level: Float
 
     var body: some View {
@@ -478,6 +339,28 @@ struct DeviceStatusRow: View {
                     .controlSize(.small)
                     .disabled(busy)
             }
+        }
+    }
+}
+
+private struct FooterActionStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        FooterActionLabel(configuration: configuration)
+    }
+
+    private struct FooterActionLabel: View {
+        let configuration: ButtonStyle.Configuration
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .font(.caption)
+                .foregroundStyle(hovering ? .primary : .secondary)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 3)
+                .contentShape(Rectangle())
+                .opacity(configuration.isPressed ? 0.6 : 1)
+                .onHover { hovering = $0 }
         }
     }
 }

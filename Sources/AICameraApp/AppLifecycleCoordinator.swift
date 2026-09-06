@@ -21,19 +21,25 @@ final class AppLifecycleCoordinator {
 
     var prepareForTermination: (@MainActor () async -> Void)?
 
-    private weak var settingsWindow: NSWindow?
+    private let windows = NSHashTable<NSWindow>.weakObjects()
     private var reminderDismissal: DispatchWorkItem?
     private lazy var reminderPanel = makeReminderPanel()
 
     private init() {}
 
-    func settingsDidOpen(_ window: NSWindow) {
-        settingsWindow = window
+    func windowDidOpen(_ window: NSWindow) {
+        guard !windows.contains(window) else { return }
+        windows.add(window)
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
-    func settingsDidClose(_ window: NSWindow) {
-        guard settingsWindow === window else { return }
-        settingsWindow = nil
+    func windowDidClose(_ window: NSWindow) {
+        windows.remove(window)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.windows.allObjects.isEmpty else { return }
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 
     func quit() {
@@ -45,14 +51,15 @@ final class AppLifecycleCoordinator {
                       inModes: [.default])
     }
 
-    func handleSettingsQuitCommand() {
-        guard let settingsWindow, settingsWindow.isVisible else {
+    func handleWindowQuitCommand() {
+        let visible = windows.allObjects.filter { $0.isVisible || $0.isMiniaturized }
+        guard let window = visible.first(where: { $0.isKeyWindow }) ?? visible.first else {
             quit()
             return
         }
 
-        let screen = settingsWindow.screen
-        settingsWindow.performClose(nil)
+        let screen = window.screen
+        window.performClose(nil)
         showQuitReminder(on: screen)
     }
 
@@ -115,11 +122,9 @@ private struct QuitReminderView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "camera.fill")
-                .font(.title2)
-                .foregroundStyle(.tint)
-                .frame(width: 34, height: 34)
-                .background(.tint.opacity(0.12), in: Circle())
+            Image(nsImage: AppIconArtwork.image)
+                .resizable()
+                .frame(width: 40, height: 40)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {

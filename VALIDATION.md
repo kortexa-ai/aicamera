@@ -1,5 +1,41 @@
 # Validation record
 
+## Build 51: quick controls and a simpler desktop UI
+
+- Full local validation passes: 182 Swift tests, twenty rendered-installer metadata cases,
+  unsigned app/framework/extension/driver builds, plist/entitlement checks, and the HAL harness.
+- Seven runtime-control unit tests cover translation's transcription dependency, independent
+  caption/gesture generations, Off/On stale-result rejection, actor-hop scene writes, and readiness.
+  The real coordinator passes synthetic cancellation-insensitive ASR/translation, bounded queued
+  admission, late-error suppression, independent agent captions, disabled gestures, and mute priority.
+  A prior variant fails the new overlapping-ASR regression; the corrected implementation passes.
+  The existing native caption-privacy harness also passes.
+- Native hotkey fixtures pass registration, action mapping, held-key suppression, unknown events,
+  unregister/re-register, without observing keyboard input. In the signed host, Control–Option–M
+  worked with Finder focused, and Control–Option–A reached Listening and then stopped the agent,
+  releasing its microphone. No new keyboard-monitoring authorization was requested.
+- Installed UI inspection verifies the five quick controls, header cog/readiness dot, plain footer
+  actions, and absence of redundant processing/device headings. The large resizable Preview is
+  flush with its top/side edges and has no idle/footer prose. About retains product artwork,
+  purpose/link, version, and license. In-app artwork loads the bundled icon without Finder badges.
+- Preview camera/microphone tests and the live level meter work. Closing Preview releases local
+  tests. With QuickTime using AI Camera and AI Camera Microphone, Preview displays processed video
+  and disables local tests. Pausing all three optional quick features and closing Preview leave
+  both external media lanes active. No Movie Recording recording was started or saved.
+- Settings, Preview, and About share Dock visibility. Closing Settings/About while Preview remains
+  keeps the Dock icon; closing the final standalone window returns to accessory mode. Command-Q
+  from About closes that window, shows the canonical-logo reminder, and keeps the host running.
+  The reminder retains its timeout and explicit Quit action.
+- Protected installation leaves source, installed host, and the generation marker at build 51.
+  Strict nested signature checks pass and the installed Release has no debug entitlement.
+  Camera extension 44 retains its CodeDirectory hash and unchanged system-extension registration
+  roster across these host updates; the embedded audio driver stays at 12. No system component
+  was installed or activated. The user confirmed that updates no longer require extension reapproval.
+- Final quick states are restored to Transcribe/Translate/Gestures on, Mute off, and Agent off.
+  The intermittent pre-existing empty local translation warning is tracked in issue 55; its source
+  text was not retained and its root cause is not yet established.
+
+
 ## Build 45: host updates preserve the enabled camera extension
 
 - All 175 Swift tests and full build/script/metadata/HAL validation pass. Twenty additional temporary-plist cases execute the actual rendered installer metadata guards, including different valid host/component versions and rejection of missing, malformed, or altered versions. The camera target must declare both its own build and marketing version.

@@ -8,6 +8,31 @@ restarts its processing with new immutable settings; media callbacks never wait 
 
 Settings import/export and custom endpoints are hidden for this product phase.
 
+## Quick controls and windows
+
+The menu toolbar pauses **Transcribe**, **Translate**, and **Gestures** without changing their
+saved enable switches, models, or languages. These quick states are remembered across launches.
+A feature must first be enabled in Settings. With Translate on, translation uses transcription
+even if original-language captions are paused; translated captions take precedence. With both
+caption controls off, independent ASR stops. Pausing gestures disables recognition, labels, and
+gesture actions without stopping a running agent or camera feed.
+
+**Agent** starts or stops the live conversation; it always starts off after launch. **Mute**
+silences AI Camera Microphone, stops the agent, and hides all speech captions. Unmute is explicit
+and never restarts the agent. Mute protects a call's audio when it uses AI Camera Microphone.
+Global **Control–Option–A** toggles the agent and **Control–Option–M** toggles mute while other
+apps have focus. These use registered hotkeys without requesting keyboard-monitoring permission.
+If registration fails, the menu reports the unavailable shortcut; the toolbar still works.
+
+The cog at the top right opens Settings; the footer uses plain text actions. The header dot is yellow when setup needs attention, green when ready, and red while the camera
+or microphone is active. Hover or VoiceOver gives its meaning; device rows retain setup details.
+
+**Preview** in the footer opens one reusable, resizable window with a larger processed camera
+view flush with the top and side edges, with local test buttons below it. Opening it does not start capture. Closing it ends local tests;
+external call demand and separately activated agent demand continue. **About** opens a small
+product/version window. Settings, Preview, and About keep the Dock icon visible until the last
+standalone window closes. Command-Q closes a standalone window; Quit in the menu stops the app.
+
 ## General
 
 Choose the camera and microphone, camera size and frame rate, mirroring, microphone gain, and
@@ -17,7 +42,7 @@ are specific to each Mac.
 
 Virtual-device installation and maintenance are separate from local testing. They can require
 macOS approval. The host starts physical capture only for matching virtual-device demand or an
-explicit local test; Talk can temporarily acquire the selected microphone for one utterance.
+explicit local test; activating the agent can independently acquire the selected microphone.
 
 ## Conversation
 
@@ -33,27 +58,29 @@ Realtime access and subscription coverage depend on the account; the app does no
 Realtime audio usage is included in a subscription.
 
 **Test Connection** checks the saved credential and selected model without acquiring the microphone
-or generating a spoken response. **Talk** in the menu popup sends one utterance from the selected
-microphone and plays the reply through the current speakers/headphones. Stop, silence, and bounded
-deadlines end the session. The public WebSocket transport uses 24 kHz mono PCM; host conversion
+or generating a spoken response. **Agent** in the menu toolbar starts a conversation using the selected
+microphone and plays replies through speakers/headphones and AI Camera Microphone when a call
+uses it. The session stays active between replies until stopped or muted. The public WebSocket transport uses 24 kHz mono PCM; host conversion
 preserves duration at the audio device's rate. Raw camera frames are not sent by Conversation.
 
 ## Transcription and translation
 
-Transcription works independently of Conversation. Choose **OpenAI** or **Local Whisper**, select
+Transcription works independently of Conversation. Choose **OpenAI** or **Whisper**, select
 a model and language, then save. The active-provider label reflects the saved route; editing the
 picker does not switch providers until saved. OpenAI requires an API key. Whisper runs in process
 and needs neither a credential nor an audio endpoint.
 
-Download Whisper Base (148 MB) or Small (190 MB) explicitly. Downloads have progress, cancellation,
+Choose the Base, Small, or hardware-supported Large size and explicitly download its model.
+Each size describes its accuracy/speed tradeoff and download size. Downloads have progress, cancellation,
 integrity verification, and removal. Removing the selected active model disables its transcription
 lane. Setup remains available while the feature is off.
 
 Enable **Translate** after downloading the local HY-MT2 model and enabling Transcription. Select
 the source and target languages. Translation processes finalized text outside media callbacks.
-Disabling Transcription also disables translation and transcript display. During Talk, the Realtime
+Disabling Transcription in Settings also disables translation and transcript display. The quick
+Transcribe control is separate and leaves Translate available. During an agent conversation, the Realtime
 transcript replaces batch ASR, avoiding duplicate audio uploads; independent ASR resumes with new
-capture windows after the turn. See [embedded model details](local-models.md).
+capture windows after the conversation stops. See [embedded model details](local-models.md).
 
 ## Vision and gestures
 

@@ -6,12 +6,14 @@ import CoreVideo
 import Foundation
 
 final class VideoPipelineController: NSObject {
-    typealias PreviewHandler = @Sendable (NSImage, PrivacyMuteState.Snapshot) -> Void
+    typealias PreviewHandler = @Sendable (NSImage, PrivacyMuteState.Snapshot, RuntimeFeatureState.Snapshot) -> Void
     typealias GestureHandler = @Sendable ([GestureObservation], FrameID, TimeInterval) -> Void
     typealias FrameHandler = @Sendable (FrameAnalysisPacket) -> Void
     typealias ErrorHandler = @Sendable (String) -> Void
 
     private let configuration: AICameraConfiguration
+    private let runtimeFeatures: RuntimeFeatureState
+    private var snapshotFeatures = RuntimeFeatureState().snapshot
     private let privacyMute: PrivacyMuteState
     private var snapshotPrivacy = PrivacyMuteState().snapshot
     private let onPreview: PreviewHandler
@@ -51,6 +53,7 @@ final class VideoPipelineController: NSObject {
     init(
         configuration: AICameraConfiguration,
         privacyMute: PrivacyMuteState = PrivacyMuteState(),
+        runtimeFeatures: RuntimeFeatureState = RuntimeFeatureState(),
         onPreview: @escaping PreviewHandler,
         onGestures: @escaping GestureHandler,
         onFrame: @escaping FrameHandler,
@@ -59,6 +62,8 @@ final class VideoPipelineController: NSObject {
     ) {
         self.configuration = configuration
         self.privacyMute = privacyMute
+        self.runtimeFeatures = runtimeFeatures
+        self.snapshotFeatures = runtimeFeatures.snapshot
         self.onPreview = onPreview
         self.onGestures = onGestures
         self.onFrame = onFrame
@@ -112,10 +117,11 @@ final class VideoPipelineController: NSObject {
         return feeder.stop()
     }
 
-    func update(snapshot: SceneSnapshot, privacy: PrivacyMuteState.Snapshot) {
+    func update(snapshot: SceneSnapshot, privacy: PrivacyMuteState.Snapshot, features: RuntimeFeatureState.Snapshot) {
         snapshotLock.lock()
         self.snapshot = snapshot
         self.snapshotPrivacy = privacy
+        self.snapshotFeatures = features
         snapshotLock.unlock()
     }
 
@@ -255,13 +261,14 @@ final class VideoPipelineController: NSObject {
     private func currentSnapshot() -> SceneSnapshot {
         snapshotLock.lock()
         defer { snapshotLock.unlock() }
-        return privacyMute.filtered(snapshot, from: snapshotPrivacy)
+        return runtimeFeatures.filtered(privacyMute.filtered(snapshot, from: snapshotPrivacy), from: snapshotFeatures)
     }
 
     private func process(_ sampleBuffer: CMSampleBuffer) {
         guard let generation = currentGeneration(),
               let input = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let privacy = privacyMute.snapshot
+        let features = runtimeFeatures.snapshot
         frameCounter &+= 1
         let frameID = FrameID(rawValue: frameCounter)
         // The inference path below always uses the clean renderer; only the
@@ -277,7 +284,7 @@ final class VideoPipelineController: NSObject {
             scriptOverlay: scriptOverlay
         ) else { return }
 
-        guard privacyMute.isCurrent(privacy) else { return }
+        guard privacyMute.isCurrent(privacy), runtimeFeatures.snapshot == features else { return }
         if feeder.isRunning, let outgoing = makeSampleBuffer(pixelBuffer: output, source: sampleBuffer) {
             do { _ = try feeder.enqueue(outgoing) }
             catch { onError("Virtual camera feed: \(error.localizedDescription)") }
@@ -286,7 +293,7 @@ final class VideoPipelineController: NSObject {
         let uptime = ProcessInfo.processInfo.systemUptime
         if uptime - lastPreviewUptime >= 1 / 12, let image = renderer.previewImage(from: output) {
             lastPreviewUptime = uptime
-            onPreview(image, privacy)
+            onPreview(image, privacy, features)
         }
         submitGestureIfNeeded(pixelBuffer: input, frameID: frameID, uptime: uptime, generation: generation)
         submitNetworkFrameIfNeeded(pixelBuffer: input, frameID: frameID, uptime: uptime, generation: generation)
@@ -298,7 +305,8 @@ final class VideoPipelineController: NSObject {
         uptime: TimeInterval,
         generation: UInt64
     ) {
-        guard let stage = configuration.pipeline.videoStages.first(where: { $0.enabled && $0.kind == .handGesture }),
+        guard runtimeFeatures.permitsGesture(capturedAt: uptime),
+              let stage = configuration.pipeline.videoStages.first(where: { $0.enabled && $0.kind == .handGesture }),
               !gestureInFlight,
               uptime - lastGestureUptime >= 1 / stage.maximumRateHz else { return }
         gestureInFlight = true
@@ -307,9 +315,9 @@ final class VideoPipelineController: NSObject {
         gestureQueue.async { [weak self] in
             guard let self, self.isActive(generation: generation) else { return }
             let observations = self.gestureDetector.detect(in: pixelBuffer, mirrored: mirrored)
-            guard self.isActive(generation: generation) else { return }
-            self.onGestures(observations, frameID, uptime)
             self.captureQueue.async { [weak self] in self?.gestureInFlight = false }
+            guard self.isActive(generation: generation), self.runtimeFeatures.permitsGesture(capturedAt: uptime) else { return }
+            self.onGestures(observations, frameID, uptime)
         }
     }
 

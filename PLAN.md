@@ -15,6 +15,12 @@ are historical roadmap context.
 
 Implementation and acceptance priorities:
 
+- [x] Keep saved feature setup separate from runtime quick controls. The menu toolbar controls
+  mute, original captions, translation, agent activation, and gestures. Global Control–Option–A/M
+  toggle agent/mute; late results cannot cross quick-control generations. Preview and local tests
+  live in a dedicated larger window; Preview/About/Settings share Dock lifecycle. The footer has
+  Preview on the left and About/Quit on the right, with an accessible readiness/activity dot above.
+
 - [x] Make explicit agent activation available through held victory or the menu while a call is
   active. Keep one server conversation across turns, close input during replies, and send replies
   to local speakers/headphones plus the virtual microphone when selected by a call. Fist engages
@@ -134,23 +140,28 @@ Items inside a section are not priority ordered. Work must continue to satisfy t
 
 - [x] Improve first-install and update guidance for enabling the media extension. Detect approval state, give an explicit step-by-step path, and always offer to open the relevant System Settings/Preferences page when macOS permits it.
 - [x] Create a production app icon and use the same canonical asset in Finder, Login Items, Extensions, the popup header, Dock, App Switcher, and Settings. The app icon shown inside the popup must not drift from the bundled application icon.
-- [ ] Use the canonical production icon in the planned About window when that window is implemented.
+- [x] Use the canonical production icon in the reusable About window.
 - [x] Derive a clear monochrome macOS template image for the menu-bar/system-tray item from the same visual identity. Verify the tray glyph and full-color app icon look like one product at standard and Retina sizes.
 - [x] Keep the menu-bar host accessory-only, but show its production icon in the Dock and App Switcher while Settings is open; return to accessory-only behavior when Settings closes.
-- [x] Treat **Command-Q** from an open Settings window as **Close Window** so the camera service remains available. Show a compact three-second reminder with an explicit **Quit** action; deliberate Quit actions must still terminate immediately.
+- [x] Treat **Command-Q** from Settings, Preview, or About as **Close Window** so the camera service remains available. Show a compact three-second reminder with the canonical app icon and an explicit **Quit** action; deliberate Quit actions must still terminate immediately.
 - [ ] Add a quick status indicator to the menu-bar icon for **attention needed**, **idle**, **camera in use**, **microphone in use**, and **error**. Define an unambiguous combined camera-and-microphone state.
 - [ ] Add GitHub release update checks for production/release builds only. Development builds must not poll for updates, and update checks must not install anything without an explicit user action.
 
 ### Control center layout and visual design
 
-- [ ] Move the camera and microphone test actions into their matching virtual-device rows, right aligned. Use visible labels **Test** and **Stop**, no icon, and the same restrained plain-text/hover treatment as **Quit**. Keep full accessible labels such as **Test camera** and **Stop microphone testing**, preserve external-client priority and disabled-state rules, and do not displace required **Install**, **Update**, **Open Settings**, or **Repair** actions. Show **Test** only when that lane is locally testable and keep **Stop** available for the full life of its active test.
-- [ ] Show the processed camera preview only during an explicit local camera test. Make it span the popup's available content width and derive its height from the selected output dimensions so 4:3 and 16:9 formats keep their aspect ratio without stretching. Verify camera-only and simultaneous local camera-plus-microphone layouts.
-- [ ] On any external camera or microphone takeover, immediately hide and clear the popup preview, release stale preview-image UI state, and reserve no empty preview space. Reopening the popup during camera-only, microphone-only, and combined external demand must expose no prior or current frame; the bounded output, feeder, and explicitly enabled inference pixel paths may continue independently.
-- [ ] Place the live microphone level meter in the local-test media area below the optional camera preview and above the device-row test actions. Keep it visible during a microphone test even when the camera preview is absent, and retain the existing bounded 10 Hz UI read with no added capture-callback work. Any external takeover must immediately clear and hide the meter so the popup never exposes an external-session level.
-- [ ] Add a full-width camera/AI/media-themed header banner with its own color palette, a dark readability gradient, and a compact high-contrast product title. Use a fixed banner height and clip it inside the popup rather than changing layout as status changes.
-- [ ] Adopt the compact Kortexa Control Center-inspired popup silhouette: a native transient menu-bar popover with rounded corners, a menu-bar pointer, approximately 400-point base width, content-driven height, and a distinct footer. Prefer the native `NSStatusItem` plus `NSPopover` behavior (or an equivalent native implementation) over simulated window chrome.
-- [ ] Add **About · Quit** at the right side of the footer, with **About** immediately to the left of **Quit**. About must close the popup and open or foreground one reusable, titled, closable About window.
-- [ ] Give the About window the same visual hierarchy as the Control Center reference: centered 64-point rounded production icon, bold **AI Camera** name, one-line purpose/privacy subtitle, Kortexa website link, version/build and MIT-license information, and compact camera/microphone readiness rows. Return the app to accessory-only behavior when the window closes.
+- [x] Move camera and microphone tests into a dedicated resizable Preview window. Keep the popup
+  free of media, with five quick controls above device setup and Preview in the footer.
+- [x] Show processed frames in Preview with aspect-fit rendering for both local tests and external
+  camera use. Opening the window alone does not request capture; closing it releases local tests.
+- [x] Preserve external-client priority: a client takeover cancels local tests and their stale media
+  before serving the client. Local test controls stay disabled during external use.
+- [x] Keep the bounded 10 Hz microphone meter below the large preview during local microphone tests.
+  Hide and clear it on takeover or test completion.
+- [x] Use a compact product-icon/title header and an accessible status dot: yellow for setup,
+  green for ready, red for active camera/microphone capture. Keep activity text out of the header.
+- [x] Adopt the compact Kortexa Control Center-inspired popup silhouette: a native transient menu-bar popover with rounded corners, a menu-bar pointer, approximately 400-point base width, content-driven height, and a distinct footer. Prefer the native `NSStatusItem` plus `NSPopover` behavior (or an equivalent native implementation) over simulated window chrome.
+- [x] Add **About · Quit** at the right side of the footer, with **About** immediately to the left of **Quit**. About must close the popup and open or foreground one reusable, titled, closable About window.
+- [x] Give the About window the same visual hierarchy as the Control Center reference: centered 80-point production icon, bold **AI Camera** name, one-line purpose subtitle, Kortexa website link, and adjacent version/build and MIT-license rows. Keep device readiness and privacy details in the main controls and Settings. Return the app to accessory-only behavior when the last standalone window closes.
 
 ### Profiles and production packaging
 
