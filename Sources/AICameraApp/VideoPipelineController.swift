@@ -6,12 +6,14 @@ import CoreVideo
 import Foundation
 
 final class VideoPipelineController: NSObject {
-    typealias PreviewHandler = @Sendable (NSImage) -> Void
-    typealias GestureHandler = @Sendable ([GestureObservation], FrameID) -> Void
+    typealias PreviewHandler = @Sendable (NSImage, PrivacyMuteState.Snapshot) -> Void
+    typealias GestureHandler = @Sendable ([GestureObservation], FrameID, TimeInterval) -> Void
     typealias FrameHandler = @Sendable (FrameAnalysisPacket) -> Void
     typealias ErrorHandler = @Sendable (String) -> Void
 
     private let configuration: AICameraConfiguration
+    private let privacyMute: PrivacyMuteState
+    private var snapshotPrivacy = PrivacyMuteState().snapshot
     private let onPreview: PreviewHandler
     private let onGestures: GestureHandler
     private let onFrame: FrameHandler
@@ -46,6 +48,7 @@ final class VideoPipelineController: NSObject {
 
     init(
         configuration: AICameraConfiguration,
+        privacyMute: PrivacyMuteState = PrivacyMuteState(),
         onPreview: @escaping PreviewHandler,
         onGestures: @escaping GestureHandler,
         onFrame: @escaping FrameHandler,
@@ -53,6 +56,7 @@ final class VideoPipelineController: NSObject {
         scriptRenderer: OverlayScriptRenderer? = nil
     ) {
         self.configuration = configuration
+        self.privacyMute = privacyMute
         self.onPreview = onPreview
         self.onGestures = onGestures
         self.onFrame = onFrame
@@ -106,9 +110,10 @@ final class VideoPipelineController: NSObject {
         return feeder.stop()
     }
 
-    func update(snapshot: SceneSnapshot) {
+    func update(snapshot: SceneSnapshot, privacy: PrivacyMuteState.Snapshot) {
         snapshotLock.lock()
         self.snapshot = snapshot
+        self.snapshotPrivacy = privacy
         snapshotLock.unlock()
     }
 
@@ -248,17 +253,18 @@ final class VideoPipelineController: NSObject {
     private func currentSnapshot() -> SceneSnapshot {
         snapshotLock.lock()
         defer { snapshotLock.unlock() }
-        return snapshot
+        return privacyMute.filtered(snapshot, from: snapshotPrivacy)
     }
 
     private func process(_ sampleBuffer: CMSampleBuffer) {
         guard let generation = currentGeneration(),
               let input = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let privacy = privacyMute.snapshot
         frameCounter &+= 1
         let frameID = FrameID(rawValue: frameCounter)
         // The inference path below always uses the clean renderer; only the
         // published frame may carry a script overlay.
-        let scriptOverlay = configuration.overlays.script.enabled
+        let scriptOverlay = !privacy.isMuted && configuration.overlays.script.enabled
             ? scriptRenderer?.latestFreshOverlay()
             : nil
         guard let output = renderer.render(
@@ -269,6 +275,7 @@ final class VideoPipelineController: NSObject {
             scriptOverlay: scriptOverlay
         ) else { return }
 
+        guard privacyMute.isCurrent(privacy) else { return }
         if feeder.isRunning, let outgoing = makeSampleBuffer(pixelBuffer: output, source: sampleBuffer) {
             do { _ = try feeder.enqueue(outgoing) }
             catch { onError("Virtual camera feed: \(error.localizedDescription)") }
@@ -277,7 +284,7 @@ final class VideoPipelineController: NSObject {
         let uptime = ProcessInfo.processInfo.systemUptime
         if uptime - lastPreviewUptime >= 1 / 12, let image = renderer.previewImage(from: output) {
             lastPreviewUptime = uptime
-            onPreview(image)
+            onPreview(image, privacy)
         }
         submitGestureIfNeeded(pixelBuffer: input, frameID: frameID, uptime: uptime, generation: generation)
         submitNetworkFrameIfNeeded(pixelBuffer: input, frameID: frameID, uptime: uptime, generation: generation)
@@ -299,7 +306,7 @@ final class VideoPipelineController: NSObject {
             guard let self, self.isActive(generation: generation) else { return }
             let observations = self.gestureDetector.detect(in: pixelBuffer, mirrored: mirrored)
             guard self.isActive(generation: generation) else { return }
-            self.onGestures(observations, frameID)
+            self.onGestures(observations, frameID, uptime)
             self.captureQueue.async { [weak self] in self?.gestureInFlight = false }
         }
     }

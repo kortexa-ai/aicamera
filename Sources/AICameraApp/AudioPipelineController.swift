@@ -33,6 +33,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
     typealias ErrorHandler = @Sendable (String) -> Void
 
     private let configuration: CaptureConfiguration
+    private let privacyMute: PrivacyMuteState
     private let utteranceSeconds: Double
     private let transcriptionEnabled: Bool
     private let onUtterance: UtteranceHandler
@@ -106,6 +107,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
 
     init(
         configuration: CaptureConfiguration,
+        privacyMute: PrivacyMuteState = PrivacyMuteState(),
         utteranceSeconds: Double,
         transcriptionEnabled: Bool,
         onUtterance: @escaping UtteranceHandler,
@@ -113,6 +115,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         onError: @escaping ErrorHandler
     ) {
         self.configuration = configuration
+        self.privacyMute = privacyMute
         self.utteranceSeconds = min(30, max(0.5, utteranceSeconds.isFinite ? utteranceSeconds : 3))
         self.transcriptionEnabled = transcriptionEnabled
         self.onUtterance = onUtterance
@@ -128,7 +131,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
     }
 
     private func startLocked(publishToVirtualMicrophone: Bool) throws {
-        guard !started else { return }
+        guard !started, !privacyMute.snapshot.isMuted else { return }
         started = true
         do {
             var outputDeviceID: AudioDeviceID?
@@ -259,6 +262,19 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         processingQueue.sync { speechOutputEnabled = true }
     }
 
+    /// Silence scheduled buffers before synchronous capture teardown can wait on AVFoundation.
+    func silenceForPrivacy() {
+        outputEngine.mainMixerNode.outputVolume = 0
+        processingQueue.sync {
+            asrPCM.removeAll(keepingCapacity: false)
+            realtimeAudioHandler = nil
+            resetSpeechPlayback(stopPlayer: true)
+            microphonePlayer.stop()
+            pendingMicrophoneBuffers = 0
+            storeInputLevel(0)
+        }
+    }
+
     func stop() {
         captureControlQueue.sync {
             guard started else { return }
@@ -319,7 +335,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         completion: @escaping @Sendable (Bool) -> Void
     ) {
         processingQueue.async { [weak self] in
-            guard let self, self.processingActive, self.speechOutputEnabled else {
+            guard let self, self.processingActive, self.speechOutputEnabled, !self.privacyMute.snapshot.isMuted else {
                 completion(false)
                 return
             }
@@ -579,7 +595,8 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        guard processingSlots.wait(timeout: .now()) == .success else { return }
+        let privacy = privacyMute.snapshot
+        guard privacyMute.permitsSpeech(privacy), processingSlots.wait(timeout: .now()) == .success else { return }
         guard let buffer = Self.audioBuffer(from: sampleBuffer) else {
             processingSlots.signal()
             return
@@ -589,7 +606,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
         let slots = processingSlots
         processingQueue.async { [weak self, captured, slots] in
             defer { slots.signal() }
-            guard let self, self.processingActive else { return }
+            guard let self, self.processingActive, self.privacyMute.permitsSpeech(privacy) else { return }
             let buffer = captured.value
             if self.microphoneConverter?.inputFormat != buffer.format {
                 self.microphoneConverter = AVAudioConverter(from: buffer.format, to: self.mixFormat)
@@ -599,7 +616,7 @@ final class AudioPipelineController: NSObject, AVCaptureAudioDataOutputSampleBuf
     }
 
     private func processMicrophone(_ input: AVAudioPCMBuffer, capturedAt: TimeInterval) {
-        guard processingActive,
+        guard processingActive, !privacyMute.snapshot.isMuted,
               let microphoneConverter,
               let mixed = Self.convert(input, using: microphoneConverter, to: mixFormat) else { return }
         if publishToVirtualMicrophone, pendingMicrophoneBuffers < 8 {

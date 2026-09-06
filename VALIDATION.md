@@ -1,5 +1,13 @@
 # Validation record
 
+## Build 39: persistent privacy mute
+
+- Full `scripts/validate.sh` passes 161 Swift tests, the unsigned four-target build, metadata/script checks, and the HAL harness.
+- The native caption-privacy harness passes immediate clearing, muted admission, cancellation-insensitive transcription/translation across mute and unmute, fresh recovery, and the real coordinator gesture callback. Existing controlled Realtime caption scheduling, speaker routes, and Talk cancellation/retry checks also pass.
+- Signed Release installation used the protected transaction. Source and installed strict nested signatures pass; both bundle versions and the protected generation marker are 39. No driver or camera extension was changed.
+- Installed menu and Settings inspection confirms Mute/Unmute, the caption privacy status, and disabled Talk/microphone testing while muted. Mute survives Quit and relaunch. Explicit Unmute restores availability. Tests restored the initial unmuted state with both media lanes idle.
+- Held gesture confidence, dwell, latching, direct victory-to-fist changes, neutral release, stale timestamps, and gaps are tested synthetically. No camera/microphone samples were captured or saved for this acceptance. Actual receiving-app audio/gesture acceptance remains manual; this build does not detect another app's internal mute switch.
+
 ## Build 38: consistent model controls and caption placement
 
 - Full `scripts/validate.sh` passes 153 Swift tests, the unsigned four-target build, metadata and

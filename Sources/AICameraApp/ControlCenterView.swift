@@ -24,6 +24,18 @@ struct ControlCenterView: View {
                     .foregroundStyle(.secondary)
             }
 
+            HStack {
+                Button {
+                    model.setPrivacyMuted(!model.privacyMuted)
+                } label: {
+                    Label(model.privacyMuted ? "Unmute" : "Mute", systemImage: model.privacyMuted ? "mic.slash.fill" : "mic.fill")
+                }
+                Text(model.privacyMuted ? "Microphone muted · captions hidden" : "Hold a fist to mute audio and captions")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .help("Protects audio when the call uses AI Camera Microphone. Unmute here explicitly.")
+
             ZStack {
                 Color.black
                 if let image = model.previewImage {

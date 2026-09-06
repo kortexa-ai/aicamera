@@ -105,6 +105,13 @@ struct SettingsView: View {
                 .disabled(!configuration.isConfigurationUsable)
 
                 Section("Microphone") {
+                    Toggle("Mute AI Camera microphone", isOn: Binding(
+                        get: { model.privacyMuted },
+                        set: { model.setPrivacyMuted($0) }
+                    ))
+                    Text("Hold a fist with Gestures enabled to mute audio, stop the agent, and hide captions. Unmute here or in the menu. Select AI Camera Microphone in your call app to protect its audio.")
+                        .font(.caption).foregroundStyle(.secondary)
+
                     Picker("Source", selection: optionalBinding(\.audioDeviceID)) {
                         Text("System Default").tag(String?.none)
                         ForEach(model.audioInputDevices) { device in

@@ -444,3 +444,40 @@ pass publishes synthetic English sentences as Chinese user and AI captions throu
 - In a camera preview, confirm the upper-left label says only AI Camera. Translated/original
   transcript captions occupy the bottom center with an inset from the edge, including long
   captions at smaller frame sizes. Existing single-line truncation remains unchanged. AI-response placement remains separate.
+
+
+## AI Camera privacy mute
+
+With Gestures enabled and the camera active, hold a closed fist for about one second. The menu
+must show **Microphone muted · captions hidden**. The physical microphone capture lane stops,
+AI Camera Microphone output is silenced, Realtime stops, and both speaker captions and the current
+script overlay clear. Camera output and gesture observations continue. Repeated held fists must
+not toggle the state. Use **Unmute** in the menu or the Microphone settings switch to resume;
+restarting the host, changing configuration, or a new client must not unmute it.
+
+Select **AI Camera Microphone** in the receiving app to protect its call audio. Zoom, Teams, Meet,
+Discord, Twitch, and X Spaces can each select another source; AI Camera cannot mute a physical
+microphone used directly by another app. Their internal mute switches are not detected by this
+implementation. Audio/video already delivered to another app cannot be retracted.
+
+Run the deterministic native coordinator harness after `scripts/validate.sh`:
+
+```sh
+xcrun swiftc -parse-as-library -O \
+  -F build/DerivedData-Validation/Build/Products/Debug -framework AICameraCore \
+  -Xlinker -rpath -Xlinker "$PWD/build/DerivedData-Validation/Build/Products/Debug" \
+  Sources/AICameraApp/PipelineCoordinator.swift \
+  Sources/AICameraApp/AudioPipelineController.swift Sources/AICameraApp/PCMBufferConverter.swift \
+  Sources/AICameraApp/DeviceDiscovery.swift Sources/AICameraApp/AudioDriverManager.swift \
+  Sources/AICameraShared/VirtualCameraConstants.swift Sources/AICameraShared/MediaDemandState.swift \
+  scripts/validate-caption-privacy.swift -o /tmp/aicamera-caption-privacy-validation
+/tmp/aicamera-caption-privacy-validation
+```
+
+Fake model completions intentionally ignore cancellation. Tests cover visible/pending speech,
+muted admission, translation and transcription finishing after mute/unmute, fresh-caption recovery,
+and the real coordinator's held-fist control callback. No capture, credentials, model weights,
+network, or component installation is used. Core tests also cover callback-generation filtering,
+late scene writes, restored mute, confidence/dwell, direct victory-to-fist transition, conflicts,
+neutral rearming, and stale/out-of-order frames. A live call audio/gesture check remains manual;
+these synthetic checks do not claim acceptance inside every receiving app.

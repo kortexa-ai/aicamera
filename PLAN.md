@@ -53,7 +53,14 @@ Implementation and acceptance priorities:
 - Live camera publication and near-real-time translated captions are user-confirmed on build 37.
   Follow-ups: [multiple caption languages](https://github.com/kortexa-ai/aicamera/issues/50), with
   original transcription as a language track, and [mute-aware caption privacy](https://github.com/kortexa-ai/aicamera/issues/51).
-  The mute integration is not implemented yet; it must clear visible and pending caption output.
+  AI Camera now owns a persistent privacy mute: held fist or the menu/settings control silences
+  its microphone output, stops the agent, and clears visible/pending speech. Manual unmute starts
+  fresh capture. Receiving apps must use AI Camera Microphone; detecting their own internal mute
+  switches remains future integration.
+- Next: clean native-model shutdown, then deliberate Realtime activation/mute using held victory
+  and fist gestures with a manual fallback, followed by live overlay tools and multilingual captions.
+  Activation must work during external camera/microphone demand and remain separate from enabling
+  Realtime configuration. Synthetic event/media validation is the default acceptance path.
 
 - Build 37 aligns Whisper and translation model controls, adds hardware-gated Whisper Large v3,
   and wraps camera extension recovery guidance. An enabled-but-unpublished camera no longer

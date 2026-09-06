@@ -34,6 +34,10 @@ private final class PipelineRunGate: @unchecked Sendable {
 
 @MainActor
 final class AppModel: ObservableObject {
+    private static let privacyMuteKey = "privacyMicrophoneMuted"
+    private let privacyMute: PrivacyMuteState
+    @Published private(set) var privacyMuted: Bool
+    private var privacyTransitionPending = false
     @Published private(set) var isRunning = false
     @Published private(set) var isStopping = false
     @Published private(set) var cameraIsActive = false
@@ -143,7 +147,7 @@ final class AppModel: ObservableObject {
     }
 
     var canStartMicrophoneTest: Bool {
-        !externalClientIsUsingMedia && !deviceOperationInProgress
+        !privacyMuted && !privacyTransitionPending && !externalClientIsUsingMedia && !deviceOperationInProgress
             && configurationController.isConfigurationUsable
             && microphoneAuthorization == .authorized
             && microphoneSourceAvailable
@@ -171,6 +175,7 @@ final class AppModel: ObservableObject {
 
     var canStartRealtimeConversation: Bool {
         realtimeConversationEnabled
+            && !privacyMuted && !privacyTransitionPending
             && !externalClientIsUsingMedia
             && (microphoneTestActive || canStartMicrophoneTest)
             && realtimeConnectTask == nil
@@ -183,6 +188,9 @@ final class AppModel: ObservableObject {
     }
 
     init() {
+        let muted = UserDefaults.standard.bool(forKey: Self.privacyMuteKey)
+        privacyMuted = muted
+        privacyMute = PrivacyMuteState(isMuted: muted)
         cameraExtensionManager.objectWillChange
             .merge(with: audioDriverManager.objectWillChange)
             .sink { [weak self] _ in
@@ -479,6 +487,36 @@ final class AppModel: ObservableObject {
         reconcileDemand()
     }
 
+    /// Privacy is independent of configuration, client demand, and agent activation.
+    func setPrivacyMuted(_ muted: Bool) {
+        guard muted != privacyMuted else { return }
+        let privacy = privacyMute.setMuted(muted)
+        privacyMuted = muted
+        privacyTransitionPending = true
+        UserDefaults.standard.set(muted, forKey: Self.privacyMuteKey)
+        microphoneRunGate?.cancel()
+        audioController?.silenceForPrivacy()
+        microphoneTestActive = false
+        microphoneInputLevel = 0
+        stopRealtimeConversation()
+        currentSnapshot = privacyMute.filtered(currentSnapshot, from: privacy)
+        // Unmute also starts with an empty speech scene.
+        currentSnapshot.transcript = nil
+        currentSnapshot.agentResponse = nil
+        previewImage = nil
+        videoController?.update(snapshot: currentSnapshot, privacy: privacy)
+        clearOverlayScript()
+        pushSceneData(to: currentSnapshot)
+        reconcileDemand()
+        let coordinator = pipeline
+        Task { [weak self] in
+            await coordinator?.synchronizePrivacy(privacy)
+            guard let self, self.privacyMute.isCurrent(privacy) else { return }
+            self.privacyTransitionPending = false
+            self.reconcileDemand()
+        }
+    }
+
     private func reconcileDemand() {
         let hadActiveTest = cameraTestActive || microphoneTestActive
         let externalDemandArrived = demandMonitor.cameraRequested
@@ -527,7 +565,8 @@ final class AppModel: ObservableObject {
             cameraRequested: demandMonitor.cameraRequested || cameraTestActive,
             cameraAvailable: cameraExtensionManager.status.isInstalled,
             cameraAuthorized: cameraAuthorization == .authorized,
-            microphoneRequested: demandMonitor.microphoneRequested || microphoneTestActive,
+            microphoneRequested: !privacyMuted && !privacyTransitionPending
+                && (demandMonitor.microphoneRequested || microphoneTestActive),
             microphoneAvailable: audioDriverManager.status.isInstalled,
             microphoneAuthorized: microphoneAuthorization == .authorized
         )
@@ -558,21 +597,24 @@ final class AppModel: ObservableObject {
         cameraRunGate = laneGate
         let configuration = configurationController.configuration
         ensureScriptRenderer(for: configuration)
+        let privacyGate = privacyMute
+        Task { await coordinator.resetGestureControls() }
         let video = VideoPipelineController(
             configuration: configuration,
-            onPreview: { [weak self] image in
+            privacyMute: privacyGate,
+            onPreview: { [weak self] image, privacy in
                 guard pipelineGate.isActive, laneGate.isActive else { return }
                 let sendableImage = SendableImage(value: image)
                 Task { @MainActor [weak model = self, sendableImage] in
-                    guard pipelineGate.isActive, laneGate.isActive else { return }
+                    guard pipelineGate.isActive, laneGate.isActive, privacyGate.isCurrent(privacy) else { return }
                     model?.previewImage = sendableImage.value
                 }
             },
-            onGestures: { observations, frameID in
+            onGestures: { observations, frameID, capturedAt in
                 guard pipelineGate.isActive, laneGate.isActive else { return }
                 Task {
                     guard pipelineGate.isActive, laneGate.isActive else { return }
-                    await coordinator.submit(gestures: observations, frameID: frameID)
+                    await coordinator.submit(gestures: observations, frameID: frameID, capturedAt: capturedAt)
                 }
             },
             onFrame: { packet in
@@ -628,6 +670,7 @@ final class AppModel: ObservableObject {
         let configuration = configurationController.configuration
         let controller = AudioPipelineController(
             configuration: configuration.capture,
+            privacyMute: privacyMute,
             utteranceSeconds: configuration.pipeline.conversation.utteranceSeconds,
             transcriptionEnabled: configuration.pipeline.conversation.transcriptionEnabled
                 && (configuration.pipeline.conversation.transcriptionProvider == .whisper
@@ -682,6 +725,13 @@ final class AppModel: ObservableObject {
         let coordinator = PipelineCoordinator(
             configuration: configuration,
             secrets: AppSecretResolver(),
+            privacyMute: privacyMute,
+            onGestureControl: { [weak self] action in
+                Task { @MainActor [weak model = self] in
+                    guard gate.isActive, let model, model.cameraRunGate?.isActive == true else { return }
+                    if action == .mute { model.setPrivacyMuted(true) }
+                }
+            },
             builtinDetectionClient: builtinVisionModelController.makeDetectionClient(
                 modelID: builtinDetectionModelID
             ),
@@ -691,22 +741,22 @@ final class AppModel: ObservableObject {
             builtinTranscriptionClient: configuration.pipeline.conversation.transcriptionProvider == .whisper
                 ? builtinWhisperModelController.makeTranscriptionClient(model: configuration.pipeline.conversation.transcriptionWhisperModel)
                 : nil,
-            onSnapshot: { [weak self] snapshot in
+            onSnapshotWithPrivacy: { [weak self] snapshot, privacy in
                 guard gate.isActive else { return }
                 Task { @MainActor [weak model = self] in
-                    guard gate.isActive, let model else { return }
+                    guard gate.isActive, let model, model.privacyMute.isCurrent(privacy) else { return }
                     model.currentSnapshot = snapshot
                     if model.cameraRunGate?.isActive == true {
-                        model.videoController?.update(snapshot: snapshot)
+                        model.videoController?.update(snapshot: snapshot, privacy: privacy)
                         model.pushSceneData(to: snapshot)
                     }
                 }
             },
-            onSpeech: { [weak self] event in
+            onSpeechWithPrivacy: { [weak self] event, privacy in
                 guard gate.isActive else { return false }
                 return await withCheckedContinuation { continuation in
                     Task { @MainActor [weak model = self] in
-                        guard gate.isActive, let model,
+                        guard gate.isActive, let model, model.privacyMute.permitsSpeech(privacy),
                               model.microphoneRunGate?.isActive == true,
                               let audio = model.audioController else {
                             continuation.resume(returning: false)

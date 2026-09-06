@@ -12,10 +12,19 @@ public actor SceneState {
     private var visionDate: Date?
     private var transcriptDate: Date?
     private var agentResponseDate: Date?
+    private var transcriptPrivacyGeneration: UInt64 = 0
+    private var agentPrivacyGeneration: UInt64 = 0
 
     public init() {}
 
     public func current() -> SceneSnapshot { snapshot }
+
+    public func current(privacyGeneration: UInt64) -> SceneSnapshot {
+        var visible = snapshot
+        if transcriptPrivacyGeneration != privacyGeneration { visible.transcript = nil }
+        if agentPrivacyGeneration != privacyGeneration { visible.agentResponse = nil }
+        return visible
+    }
 
     public func beginFrame(_ frameID: FrameID, at date: Date = Date()) {
         updateFrameMetadata(frameID, at: date)
@@ -87,20 +96,29 @@ public actor SceneState {
         return true
     }
 
-    public func applyTranscript(_ event: TranscriptEvent, at date: Date = Date()) {
+    public func applyTranscript(_ event: TranscriptEvent, at date: Date = Date(), privacyGeneration: UInt64 = 0) {
+        transcriptPrivacyGeneration = privacyGeneration
         var event = event
         event.text = event.text.aicameraLimited(to: AICameraContentLimits.transcriptCharacters)
         snapshot.transcript = event
         transcriptDate = date
     }
 
-    public func applyAgentResponse(_ response: String?, at date: Date = Date()) {
+    public func applyAgentResponse(_ response: String?, at date: Date = Date(), privacyGeneration: UInt64 = 0) {
+        agentPrivacyGeneration = privacyGeneration
         snapshot.agentResponse = response?.aicameraLimited(to: AICameraContentLimits.agentCharacters)
         agentResponseDate = response == nil ? nil : date
     }
 
     public func setStatus(_ status: String?) {
         snapshot.status = status?.aicameraLimited(to: AICameraContentLimits.statusCharacters)
+    }
+
+    public func clearSpeech() {
+        snapshot.transcript = nil
+        transcriptDate = nil
+        snapshot.agentResponse = nil
+        agentResponseDate = nil
     }
 
     /// Removes independently stale observations. Returns true when the snapshot changed.
