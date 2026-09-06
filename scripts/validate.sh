@@ -97,6 +97,10 @@ xcrun --sdk macosx clang \
 
 FRAMEWORKS="$ROOT/build/DerivedData-Validation/Build/Products/Debug"
 xcrun swiftc -parse-as-library -O \
+    Sources/AICameraApp/PCMBufferConverter.swift scripts/validate-audio-conversion.swift \
+    -o "$VALIDATION_TMP/audio-conversion"
+"$VALIDATION_TMP/audio-conversion"
+xcrun swiftc -parse-as-library -O \
     -F "$FRAMEWORKS" -framework AICameraCore -Xlinker -rpath -Xlinker "$FRAMEWORKS" \
     Sources/AICameraApp/AgentNotesController.swift Sources/AICameraApp/OverlayRenderer.swift \
     Sources/AICameraApp/AgentCardRenderer.swift Sources/AICameraApp/AgentStatusRenderer.swift \

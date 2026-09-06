@@ -138,7 +138,9 @@ xcrun swiftc -parse-as-library -O Sources/AICameraApp/PCMBufferConverter.swift \
 The check requires exact duration (within one frame), continuous 997 Hz pitch/waveform, matching
 stereo channels, and complete final draining at 44.1/48 kHz. It includes quarter-second Realtime
 chunks, irregular short chunks, whole responses, and both planar-float and interleaved-integer capture
-conversion. A successful tone check does not replace listening through the selected hardware.
+conversion. Local speech adds 22.05 kHz input converted to 24/44.1/48 kHz, in short, irregular, and
+whole-utterance buffers. The full validation script also runs this native fixture. A successful
+tone check does not replace listening through the selected hardware or test actual translation.
 
 Use the signed `/Applications/AI Camera.app` installed by `scripts/install-app.sh`. Do not use a
 newly compiled credential-reading helper for each test: its changed identity can produce another

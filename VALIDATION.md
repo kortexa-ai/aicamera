@@ -905,3 +905,11 @@ resampling, or local/virtual microphone routing. The spoken-translation design r
 separate acceptance steps and the required source/error/output-ownership changes. Current app
 audio routes and the installed release remain unchanged.
 Full local validation still passes all 236 Swift tests and native fixtures.
+
+The routine full-validation script now includes the production PCM conversion fixture. All 17
+memory-only signal cases pass, including 22.05 kHz local-speech input converted to 24/44.1/48 kHz
+with 256-frame, irregular, and complete-utterance buffers. Every output has exactly five seconds
+of frames; the local-speech waveform RMS errors are below 0.000003. Stereo agreement, continuity,
+and final drain also pass, alongside the existing Realtime and integer-capture cases. The production
+converter itself was unchanged. Full validation retains 236 passing Swift tests and all native
+fixtures, with no audio playback, capture, credential, or installed-component operation.

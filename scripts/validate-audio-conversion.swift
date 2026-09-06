@@ -16,6 +16,16 @@ private enum CheckFailure: Error { case conversion, wrongDuration, wrongSignal, 
             try check(sourceRate: 24_000, destinationRate: destination, channels: 1,
                       interleaved: false, chunks: [120_000], name: "Complete WAV-sized response")
         }
+        // Available macOS system voices can emit 22.05 kHz float PCM. The source rate
+        // must survive chunking and conversion rather than be relabelled as Realtime PCM.
+        for destination in [24_000.0, 44_100.0, 48_000.0] {
+            try check(sourceRate: 22_050, destinationRate: destination, channels: 1,
+                      interleaved: false, chunks: [256], name: "Local speech short buffers")
+            try check(sourceRate: 22_050, destinationRate: destination, channels: 1,
+                      interleaved: false, chunks: [1, 31, 255, 1_024, 4_097, 113], name: "Local speech irregular buffers")
+            try check(sourceRate: 22_050, destinationRate: destination, channels: 1,
+                      interleaved: false, chunks: [110_250], name: "Complete local speech utterance")
+        }
         try check(sourceRate: 48_000, destinationRate: 24_000, channels: 2,
                   interleaved: false, chunks: [1_024, 480, 4_097], name: "Capture to Realtime")
         try check(sourceRate: 44_100, destinationRate: 16_000, channels: 2,
