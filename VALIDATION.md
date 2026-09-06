@@ -932,3 +932,18 @@ Settings-repair, shared validation/privacy errors, and hidden transfer messages 
 validation passes 240 Swift tests and native fixtures after this wording change. Internal profile
 types, saved-file compatibility, migration/repair behavior, and transfer visibility are unchanged;
 no tests that merely repeat the new labels or installed-state changes were added.
+
+## Companion settings compatibility with the public release
+
+The optional native fixture compiles the exact public 0.2.0 core at
+080cf1958c82956df716b65d8f2474eb9c8b4f68 as a separate module and compares its settings store with
+the current validated core. Disposable synthetic files pass old-to-current default upgrade and
+current-to-old defaults/one-question compatibility. The old reader ignores the new listening option.
+
+The 0.2.0 reader rejects the new approximate-location weather grant without changing the file.
+Turning Tools off alone still rejects it; explicitly disabling Weather forecasts removes the grant
+and restores old-reader compatibility while preserving other synthetic preferences. No actual
+settings, defaults domain, notebook, credentials, model, network, device, or installed bundle was
+used. Signed package downgrade and live call acceptance remain separate operator checks.
+The wrapper passes Bash and Zsh syntax checks and completes under both shells. Full local
+validation retains 240 passing Swift tests and all native fixtures.

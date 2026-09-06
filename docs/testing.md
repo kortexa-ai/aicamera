@@ -763,6 +763,16 @@ owns Control–Option–L too, the fixture must fail; do not quit the user's app
 This establishes native registration/event routing, not a live spoken Pause listening/Ask again
 cycle. Keep the latter in the installed-candidate acceptance matrix.
 
+## Release settings compatibility
+
+After full validation, run `scripts/validate-release-settings.sh` to compare the current core with
+the pinned public 0.2.0 source using disposable synthetic files. It verifies both default-reader
+directions, the ignored optional listening field, file-preserving rejection of the new weather
+permission by 0.2.0, and restored compatibility after explicitly disabling Weather forecasts.
+The fixture is optional because it needs the exact local release tag and current validation build;
+it does not fetch code, touch actual settings, or install an app. See the
+[companion acceptance and rollback guide](companion-acceptance.md) before preparing a host update.
+
 ## Local spoken-output feasibility
 
 This optional native probe needs available non-personal English and Spanish system voices. It
