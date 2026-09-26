@@ -17,6 +17,14 @@ even if original-language captions are paused; translated captions take preceden
 caption controls off, independent ASR stops. Pausing gestures disables recognition, labels, and
 gesture actions without stopping a running agent or camera feed.
 
+**Layout** keeps everything AI Camera draws (captions, status, cards, and script overlays) inside a
+centered 4:3 area of the frame, so a call app that crops the camera to 4:3, such as WhatsApp for
+Mac, still shows it; the camera image itself always fills the frame. **Mirror** pre-flips the same
+generated content so text reads correctly in an app that mirrors the camera, as WhatsApp does with
+its self-view. The camera image and detection boxes are never flipped, and the Preview window shows
+the outgoing frame, so mirrored text looks reversed there. Both are quick states remembered across
+launches and are not part of a saved profile.
+
 **Agent** starts or stops the live conversation; it always starts off after launch. **Mute**
 silences AI Camera Microphone, stops the agent, and hides all speech captions. Unmute is explicit
 and never restarts the agent. Mute protects a call's audio when it uses AI Camera Microphone.

@@ -13,6 +13,8 @@ public final class RuntimeFeatureState: @unchecked Sendable {
         public fileprivate(set) var gestureGeneration: UInt64 = 0
         public fileprivate(set) var captionsChangedAt: TimeInterval = -.infinity
         public fileprivate(set) var gesturesChangedAt: TimeInterval = -.infinity
+        /// Layout and mirroring of generated content. Changing it never retires captions or gestures.
+        public fileprivate(set) var presentation = OverlayPresentation.standard
         public var needsTranscription: Bool { transcription || translation }
     }
 
@@ -48,6 +50,13 @@ public final class RuntimeFeatureState: @unchecked Sendable {
         value.gestures = gestures
         value.translationSourceLanguage = translationSourceLanguage
         value.translationTargetLanguage = translationTargetLanguage
+        return value
+    }
+
+    @discardableResult
+    public func setPresentation(_ presentation: OverlayPresentation) -> Snapshot {
+        lock.lock(); defer { lock.unlock() }
+        value.presentation = presentation
         return value
     }
 

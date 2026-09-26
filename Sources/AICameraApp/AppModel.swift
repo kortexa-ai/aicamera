@@ -38,7 +38,11 @@ private final class PipelineRunGate: @unchecked Sendable {
 @MainActor
 final class AppModel: ObservableObject {
     private static let privacyMuteKey = "privacyMicrophoneMuted"
-    private let runtimeFeatures = RuntimeFeatureState()
+    private let runtimeFeatures: RuntimeFeatureState = {
+        let state = RuntimeFeatureState()
+        state.setPresentation(AppModel.storedOverlayPresentation())
+        return state
+    }()
     private let spokenTranslation = SpokenTranslationState()
     @Published private(set) var voiceTranslationActive = false
     @Published private(set) var voiceTranslationError: String?
@@ -61,6 +65,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var transcriptionRequested = UserDefaults.standard.object(forKey: "quickTranscription") as? Bool ?? true
     @Published private(set) var translationRequested = UserDefaults.standard.object(forKey: "quickTranslation") as? Bool ?? true
     @Published private(set) var gesturesRequested = UserDefaults.standard.object(forKey: "quickGestures") as? Bool ?? true
+    @Published private(set) var overlayLayout = AppModel.storedOverlayPresentation().layout
+    @Published private(set) var mirrorOverlays = AppModel.storedOverlayPresentation().mirrorGenerated
     @Published private(set) var shortcutError: String?
     private var globalShortcuts: GlobalShortcuts?
     private let privacyMute: PrivacyMuteState
@@ -337,6 +343,32 @@ final class AppModel: ObservableObject {
         gesturesRequested.toggle()
         UserDefaults.standard.set(gesturesRequested, forKey: "quickGestures")
         synchronizeRuntimeFeatures()
+    }
+
+    /// Keep generated content inside a centered 4:3 area, or use the whole frame.
+    func toggleOverlayLayout() {
+        overlayLayout = overlayLayout == .wide ? .centered4x3 : .wide
+        UserDefaults.standard.set(overlayLayout.rawValue, forKey: "quickOverlayLayout")
+        synchronizeOverlayPresentation()
+    }
+
+    /// Pre-flip generated content for apps that mirror the camera. The camera image is untouched.
+    func toggleMirrorOverlays() {
+        mirrorOverlays.toggle()
+        UserDefaults.standard.set(mirrorOverlays, forKey: "quickMirrorOverlays")
+        synchronizeOverlayPresentation()
+    }
+
+    private func synchronizeOverlayPresentation() {
+        runtimeFeatures.setPresentation(OverlayPresentation(layout: overlayLayout, mirrorGenerated: mirrorOverlays))
+        previewImage = nil
+    }
+
+    private static func storedOverlayPresentation() -> OverlayPresentation {
+        OverlayPresentation(
+            layout: OverlayLayout(rawValue: UserDefaults.standard.string(forKey: "quickOverlayLayout") ?? "") ?? .wide,
+            mirrorGenerated: UserDefaults.standard.bool(forKey: "quickMirrorOverlays")
+        )
     }
 
     private func synchronizeRuntimeFeatures() {

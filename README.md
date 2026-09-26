@@ -20,7 +20,8 @@ people. AI Camera is a native macOS menu-bar app that provides **AI Camera** and
   your outgoing video. Translation currently replaces the original-language caption.
 - **A voice agent on your call:** activate OpenAI Realtime with the Agent button, a held victory
   gesture, or Control–Option–A. Replies play locally and through AI Camera Microphone when selected.
-- **Quick controls:** mute, captions, translation, agent, and gestures in the menu-bar toolbar.
+- **Quick controls:** mute, captions, translation, agent, and gestures in the menu-bar toolbar,
+  plus a 4:3 layout and an overlay mirror for apps that crop or flip the camera, such as WhatsApp.
   Control–Option–M toggles AI Camera mute; holding a fist also mutes audio and speech captions.
 - **Optional vision and overlays:** local object detection, gesture labels, and animated graphics
   created through the agent's overlay tools.

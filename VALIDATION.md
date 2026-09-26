@@ -1,5 +1,22 @@
 # Validation record
 
+## Build 57: call-app layout and mirror quick controls
+
+WhatsApp for Mac crops the outgoing 16:9 frame to 4:3 for its call layout and mirrors its
+self-view, so captions and cards fell outside the visible area and text read backwards. Two
+toolbar quick controls address this without touching the camera image. **Layout** confines
+generated content to a centered 4:3 region; **Mirror** pre-flips generated content about the
+frame's center. Detection boxes and gesture labels stay on the video, and an inset camera keeps
+its scene-relative position when mirrored. Both are UserDefaults quick states delivered through
+the runtime feature snapshot; the saved profile schema is unchanged.
+
+Full local validation passes with 252 Swift test cases, including region math for wide, 4:3, and
+tall frames and a check that presentation changes never retire captions or gestures. An offline
+renderer fixture with a flat synthetic camera frame, status, agent response, and caption confirms
+that 4:3 mode draws 20,356 pixels inside the 160–1120 column band of a 1280x720 frame and none
+outside, and that mirror mode is the exact horizontal reflection of the unmirrored render across
+all 84 drawn rows with the same pixel count. Installed acceptance in WhatsApp belongs to issue 72.
+
 ## Camera extension 46: 420v source formats for Catalyst clients
 
 A live `log stream` capture of WhatsApp for Mac (Catalyst, 26.38.20) selecting AI Camera showed

@@ -36,6 +36,20 @@ struct FeatureToolbar: View {
                 model.toggleGestures()
             }
         }
+        HStack(spacing: 6) {
+            control("Layout", icon: model.overlayLayout == .centered4x3 ? "rectangle.ratio.4.to.3" : "rectangle.ratio.16.to.9",
+                    active: model.overlayLayout == .centered4x3,
+                    help: model.overlayLayout == .centered4x3
+                        ? "Captions, cards, and overlays stay inside a centered 4:3 area, so apps that crop the camera (WhatsApp) keep them visible. Click to use the full 16:9 frame."
+                        : "Captions, cards, and overlays use the full 16:9 frame. Click to keep them inside a centered 4:3 area for apps that crop the camera (WhatsApp).") {
+                model.toggleOverlayLayout()
+            }
+            control("Mirror", icon: model.mirrorOverlays ? "flip.horizontal.fill" : "flip.horizontal",
+                    active: model.mirrorOverlays,
+                    help: "Pre-flip everything AI Camera draws so text reads correctly in apps that mirror the camera (WhatsApp). The camera image is not changed; Preview shows the outgoing frame.") {
+                model.toggleMirrorOverlays()
+            }
+        }
         if model.privacyMuted {
             Label("Microphone muted · captions hidden", systemImage: "mic.slash.fill")
                 .font(.caption).foregroundStyle(.secondary)
@@ -69,7 +83,8 @@ struct FeatureToolbar: View {
         .buttonStyle(.plain).disabled(!available)
         .help(help)
         .accessibilityLabel(title == "Mute" ? (active ? "Unmute microphone" : "Mute microphone") : title)
-        .accessibilityValue(active ? (title == "Translate" ? "On · \(model.translationTargetName)" : "On") : "Off")
+        .accessibilityValue(title == "Layout" ? (active ? "4:3" : "16:9")
+                            : active ? (title == "Translate" ? "On · \(model.translationTargetName)" : "On") : "Off")
         .accessibilityIdentifier("quick-\(title.lowercased())")
     }
 }
