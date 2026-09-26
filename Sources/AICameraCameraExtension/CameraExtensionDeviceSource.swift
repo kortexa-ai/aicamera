@@ -24,11 +24,16 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
         qos: .userInteractive
     )
 
-    private let streamFormats: [CMIOExtensionStreamFormat]
-    private let formatDescriptions: [CMVideoFormatDescription]
+    // The published camera is 420v with a continuous frame-rate range, like a physical camera.
+    // The feeder sink stays BGRA at the host's fixed rates. Each stream negotiates on its own;
+    // the extension converts and scales every outgoing frame to the source's active format.
+    private let sourceFormats: [CMIOExtensionStreamFormat]
+    private let sinkFormats: [CMIOExtensionStreamFormat]
 
-    private var selectedFormatIndex = AICameraVirtualCamera.defaultFormatIndex
-    private var selectedFrameRate = AICameraVirtualCamera.defaultFrameRate
+    private var sourceFormatIndex = AICameraVirtualCamera.defaultFormatIndex
+    private var sourceFrameDuration = CMTime.aicameraFrameDuration(rate: AICameraVirtualCamera.defaultFrameRate)
+    private var sinkFormatIndex = AICameraVirtualCamera.defaultFormatIndex
+    private var sinkFrameDuration = CMTime.aicameraFrameDuration(rate: AICameraVirtualCamera.defaultFrameRate)
     private var sourceStartCount = 0
     private var sourceGeneration: UInt64 = 0
     private var sinkClient: CMIOExtensionClient?
@@ -44,13 +49,14 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
     private var lastBindingValidationUptime: TimeInterval = 0
     private var lastDemandHeartbeatUptime: TimeInterval = 0
     private var placeholderGenerator: PlaceholderFrameGenerator?
-    private var placeholderFormatIndex: Int?
+    private var converter: SourceFrameConverter?
+    private var outputFormatIndex: Int?
+    private var lastSentHostTime: UInt64 = 0
 
     override init() {
         do {
-            let created = try Self.makeFormats()
-            streamFormats = created.formats
-            formatDescriptions = created.descriptions
+            sourceFormats = try Self.makeSourceFormats()
+            sinkFormats = try Self.makeSinkFormats()
         } catch {
             fatalError("Unable to create camera stream formats: \(error.localizedDescription)")
         }
@@ -67,14 +73,14 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
             localizedName: "AI Camera Source",
             streamID: AICameraVirtualCamera.sourceStreamID,
             direction: .source,
-            formats: streamFormats,
+            formats: sourceFormats,
             deviceSource: self
         )
         sinkStreamSource = CameraExtensionStreamSource(
             localizedName: "AI Camera Feeder",
             streamID: AICameraVirtualCamera.sinkStreamID,
             direction: .sink,
-            formats: streamFormats,
+            formats: sinkFormats,
             deviceSource: self
         )
 
@@ -123,16 +129,22 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
         // This virtual device currently has no writable device-level properties.
     }
 
-    var activeFormatIndex: Int {
+    func activeFormatIndex(for direction: CMIOExtensionStream.Direction) -> Int {
         stateLock.lock()
         defer { stateLock.unlock() }
-        return selectedFormatIndex
+        return direction == .sink ? sinkFormatIndex : sourceFormatIndex
     }
 
-    var frameDuration: CMTime {
+    func frameDuration(for direction: CMIOExtensionStream.Direction) -> CMTime {
         stateLock.lock()
         defer { stateLock.unlock() }
-        return .aicameraFrameDuration(rate: selectedFrameRate)
+        return direction == .sink ? sinkFrameDuration : sourceFrameDuration
+    }
+
+    func maxFrameDuration(for direction: CMIOExtensionStream.Direction) -> CMTime {
+        direction == .sink
+            ? .aicameraFrameDuration(rate: AICameraVirtualCamera.supportedFrameRates.min() ?? 15)
+            : AICameraVirtualCamera.sourceMaxFrameDuration
     }
 
     func setActiveFormatIndex(
@@ -147,50 +159,63 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
             )
         }
         stateLock.lock()
-        if direction == .source, sinkIsRunning, selectedFormatIndex != index {
-            stateLock.unlock()
-            throw NSError(
-                domain: cameraExtensionErrorDomain,
-                code: 5,
-                userInfo: [NSLocalizedDescriptionKey: "The active feeder controls the virtual camera format"]
-            )
+        let changed: Bool
+        if direction == .sink {
+            changed = sinkFormatIndex != index
+            sinkFormatIndex = index
+        } else {
+            changed = sourceFormatIndex != index
+            sourceFormatIndex = index
         }
-        let changed = selectedFormatIndex != index
-        selectedFormatIndex = index
         stateLock.unlock()
         guard changed else { return }
-        notifyStreamConfigurationChanged()
-        mediaQueue.async { [weak self] in self?.restartPlaceholderTimerIfNeeded() }
+        notifyStreamConfigurationChanged(for: direction)
+        if direction == .source {
+            mediaQueue.async { [weak self] in self?.restartPlaceholderTimerIfNeeded() }
+        }
     }
 
     func setFrameDuration(
         _ duration: CMTime,
         requestedBy direction: CMIOExtensionStream.Direction
     ) throws {
-        guard let rate = AICameraVirtualCamera.supportedFrameRates.first(where: {
-            CMTimeCompare(duration, .aicameraFrameDuration(rate: $0)) == 0
-        }) else {
-            throw NSError(
-                domain: cameraExtensionErrorDomain,
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "Only 15, 30, and 60 fps are supported"]
-            )
+        let accepted: CMTime
+        if direction == .sink {
+            guard let rate = AICameraVirtualCamera.supportedFrameRates.first(where: {
+                CMTimeCompare(duration, .aicameraFrameDuration(rate: $0)) == 0
+            }) else {
+                throw NSError(
+                    domain: cameraExtensionErrorDomain,
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "The feeder supports only 15, 30, and 60 fps"]
+                )
+            }
+            accepted = .aicameraFrameDuration(rate: rate)
+        } else {
+            guard let clamped = AICameraVirtualCamera.sourceFrameDuration(clamping: duration) else {
+                throw NSError(
+                    domain: cameraExtensionErrorDomain,
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "Unusable camera frame duration"]
+                )
+            }
+            accepted = clamped
         }
         stateLock.lock()
-        if direction == .source, sinkIsRunning, selectedFrameRate != rate {
-            stateLock.unlock()
-            throw NSError(
-                domain: cameraExtensionErrorDomain,
-                code: 6,
-                userInfo: [NSLocalizedDescriptionKey: "The active feeder controls the virtual camera frame rate"]
-            )
+        let changed: Bool
+        if direction == .sink {
+            changed = CMTimeCompare(sinkFrameDuration, accepted) != 0
+            sinkFrameDuration = accepted
+        } else {
+            changed = CMTimeCompare(sourceFrameDuration, accepted) != 0
+            sourceFrameDuration = accepted
         }
-        let changed = selectedFrameRate != rate
-        selectedFrameRate = rate
         stateLock.unlock()
         guard changed else { return }
-        notifyStreamConfigurationChanged()
-        mediaQueue.async { [weak self] in self?.restartPlaceholderTimerIfNeeded() }
+        notifyStreamConfigurationChanged(for: direction)
+        if direction == .source {
+            mediaQueue.async { [weak self] in self?.restartPlaceholderTimerIfNeeded() }
+        }
     }
 
     func authorizeSink(
@@ -445,25 +470,61 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
             )
         }
 
-        guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let index = activeFormatIndex
-        guard AICameraVirtualCamera.formats[index].supports(imageBuffer) else {
-            logger.error("Dropping a feeder frame that does not match the active BGRA format")
+        guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
+              CVPixelBufferGetPixelFormatType(imageBuffer) == AICameraVirtualCamera.pixelFormat else {
+            logger.error("Dropping a feeder frame that is not BGRA")
             return
         }
 
         stateLock.lock()
         lastFeederFrameHostTime = nowNanos
         let hasSourceClient = sourceStartCount > 0
+        let index = sourceFormatIndex
+        let duration = sourceFrameDuration
         stateLock.unlock()
         guard hasSourceClient else { return }
 
+        // Honor a slower client frame rate by skipping feeder frames; never duplicate them.
+        let durationNanos = UInt64(max(0, duration.seconds) * 1_000_000_000)
+        if lastSentHostTime != 0, nowNanos > lastSentHostTime,
+           nowNanos - lastSentHostTime < durationNanos * 9 / 10 {
+            return
+        }
+
         let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        let captureNanos = presentationTime.isValid ? Self.nanoseconds(for: presentationTime) : nowNanos
+        let captureTime = presentationTime.isValid ? presentationTime : now
+        guard let converted = makeSourceSampleBuffer(
+            from: imageBuffer,
+            formatIndex: index,
+            presentationTimeStamp: captureTime,
+            frameDuration: duration
+        ) else { return }
+        lastSentHostTime = nowNanos
         sourceStreamSource.stream.send(
-            sampleBuffer,
+            converted,
             discontinuity: discontinuity,
-            hostTimeInNanoseconds: captureNanos
+            hostTimeInNanoseconds: Self.nanoseconds(for: captureTime)
+        )
+    }
+
+    private func makeSourceSampleBuffer(
+        from pixelBuffer: CVPixelBuffer,
+        formatIndex index: Int,
+        presentationTimeStamp: CMTime,
+        frameDuration: CMTime
+    ) -> CMSampleBuffer? {
+        if converter == nil || outputFormatIndex != index {
+            converter = SourceFrameConverter(format: AICameraVirtualCamera.formats[index])
+            placeholderGenerator = nil
+            outputFormatIndex = index
+            if converter == nil {
+                logger.error("Unable to create the 420v frame converter for format \(index, privacy: .public)")
+            }
+        }
+        return converter?.makeSampleBuffer(
+            from: pixelBuffer,
+            presentationTimeStamp: presentationTimeStamp,
+            frameDuration: frameDuration
         )
     }
 
@@ -477,7 +538,7 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
 
     private func startPlaceholderTimer() {
         guard placeholderTimer == nil else { return }
-        let duration = frameDuration
+        let duration = frameDuration(for: .source)
         let timer = DispatchSource.makeTimerSource(flags: .strict, queue: mediaQueue)
         timer.schedule(
             deadline: .now(),
@@ -501,7 +562,9 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
         placeholderTimer?.cancel()
         placeholderTimer = nil
         placeholderGenerator = nil
-        placeholderFormatIndex = nil
+        converter = nil
+        outputFormatIndex = nil
+        lastSentHostTime = 0
     }
 
     private func restartPlaceholderTimerIfNeeded() {
@@ -521,6 +584,8 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
         stateLock.lock()
         let hasSourceClient = sourceStartCount > 0
         let lastFrame = lastFeederFrameHostTime
+        let index = sourceFormatIndex
+        let duration = sourceFrameDuration
         stateLock.unlock()
         guard hasSourceClient else { return }
 
@@ -534,26 +599,25 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
         let nowNanos = Self.nanoseconds(for: now)
         let staleAfterNanos = max(
             UInt64(250_000_000),
-            UInt64(max(0, frameDuration.seconds) * 3 * 1_000_000_000)
+            UInt64(max(0, duration.seconds) * 3 * 1_000_000_000)
         )
         if lastFrame != 0, nowNanos >= lastFrame, nowNanos - lastFrame < staleAfterNanos {
             return
         }
 
-        let index = activeFormatIndex
-        if placeholderGenerator == nil || placeholderFormatIndex != index {
-            placeholderGenerator = PlaceholderFrameGenerator(
-                format: AICameraVirtualCamera.formats[index],
-                formatDescription: formatDescriptions[index]
-            )
-            placeholderFormatIndex = index
+        if placeholderGenerator == nil || outputFormatIndex != index {
+            placeholderGenerator = PlaceholderFrameGenerator(format: AICameraVirtualCamera.formats[index])
         }
-        guard let sampleBuffer = placeholderGenerator?.makeSampleBuffer(
-            presentationTimeStamp: now,
-            frameDuration: frameDuration
-        ) else {
+        guard let pixelBuffer = placeholderGenerator?.makePixelBuffer(),
+              let sampleBuffer = makeSourceSampleBuffer(
+                  from: pixelBuffer,
+                  formatIndex: index,
+                  presentationTimeStamp: now,
+                  frameDuration: duration
+              ) else {
             return
         }
+        lastSentHostTime = nowNanos
         sourceStreamSource.stream.send(
             sampleBuffer,
             discontinuity: [],
@@ -561,55 +625,72 @@ final class CameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
         )
     }
 
-    private func notifyStreamConfigurationChanged() {
-        let index = activeFormatIndex
-        let duration = frameDuration
+    private func notifyStreamConfigurationChanged(for direction: CMIOExtensionStream.Direction) {
+        let index = activeFormatIndex(for: direction)
+        let duration = frameDuration(for: direction)
         let durationDictionary = CMTimeCopyAsDictionary(duration, allocator: kCFAllocatorDefault)
         let changes: [CMIOExtensionProperty: CMIOExtensionPropertyState<AnyObject>] = [
             .streamActiveFormatIndex: CMIOExtensionPropertyState(value: NSNumber(value: index)),
             .streamFrameDuration: CMIOExtensionPropertyState(value: durationDictionary),
         ]
-        sourceStreamSource.stream.notifyPropertiesChanged(changes)
-        sinkStreamSource.stream.notifyPropertiesChanged(changes)
+        let stream = direction == .sink ? sinkStreamSource.stream : sourceStreamSource.stream
+        stream?.notifyPropertiesChanged(changes)
     }
 
-    private static func makeFormats() throws -> (
-        formats: [CMIOExtensionStreamFormat],
-        descriptions: [CMVideoFormatDescription]
-    ) {
-        var formats: [CMIOExtensionStreamFormat] = []
-        var descriptions: [CMVideoFormatDescription] = []
+    private static func makeSourceFormats() throws -> [CMIOExtensionStreamFormat] {
+        try AICameraVirtualCamera.formats.map { format in
+            let description = try makeFormatDescription(
+                codecType: AICameraVirtualCamera.sourcePixelFormat,
+                format: format
+            )
+            return CMIOExtensionStreamFormat(
+                formatDescription: description,
+                maxFrameDuration: AICameraVirtualCamera.sourceMaxFrameDuration,
+                minFrameDuration: AICameraVirtualCamera.sourceMinFrameDuration,
+                validFrameDurations: nil
+            )
+        }
+    }
+
+    private static func makeSinkFormats() throws -> [CMIOExtensionStreamFormat] {
         let durations = AICameraVirtualCamera.supportedFrameRates.map {
             CMTime.aicameraFrameDuration(rate: $0)
         }
-        for format in AICameraVirtualCamera.formats {
-            var description: CMVideoFormatDescription?
-            let status = CMVideoFormatDescriptionCreate(
-                allocator: kCFAllocatorDefault,
+        return try AICameraVirtualCamera.formats.map { format in
+            let description = try makeFormatDescription(
                 codecType: AICameraVirtualCamera.pixelFormat,
-                width: format.width,
-                height: format.height,
-                extensions: nil,
-                formatDescriptionOut: &description
+                format: format
             )
-            guard status == noErr, let description else {
-                throw NSError(
-                    domain: cameraExtensionErrorDomain,
-                    code: Int(status),
-                    userInfo: [NSLocalizedDescriptionKey: "Unable to create \(format.width)x\(format.height) BGRA format"]
-                )
-            }
-            descriptions.append(description)
-            formats.append(
-                CMIOExtensionStreamFormat(
-                    formatDescription: description,
-                    maxFrameDuration: .aicameraFrameDuration(rate: 15),
-                    minFrameDuration: .aicameraFrameDuration(rate: 60),
-                    validFrameDurations: durations
-                )
+            return CMIOExtensionStreamFormat(
+                formatDescription: description,
+                maxFrameDuration: .aicameraFrameDuration(rate: 15),
+                minFrameDuration: .aicameraFrameDuration(rate: 60),
+                validFrameDurations: durations
             )
         }
-        return (formats, descriptions)
+    }
+
+    private static func makeFormatDescription(
+        codecType: CMVideoCodecType,
+        format: AICameraVirtualCameraFormat
+    ) throws -> CMVideoFormatDescription {
+        var description: CMVideoFormatDescription?
+        let status = CMVideoFormatDescriptionCreate(
+            allocator: kCFAllocatorDefault,
+            codecType: codecType,
+            width: format.width,
+            height: format.height,
+            extensions: nil,
+            formatDescriptionOut: &description
+        )
+        guard status == noErr, let description else {
+            throw NSError(
+                domain: cameraExtensionErrorDomain,
+                code: Int(status),
+                userInfo: [NSLocalizedDescriptionKey: "Unable to create \(format.width)x\(format.height) format"]
+            )
+        }
+        return description
     }
 
     private static func nanoseconds(for time: CMTime) -> UInt64 {
@@ -678,13 +759,13 @@ final class CameraExtensionStreamSource: NSObject, CMIOExtensionStreamSource {
         }
         let result = CMIOExtensionStreamProperties(dictionary: [:])
         if properties.contains(.streamActiveFormatIndex) {
-            result.activeFormatIndex = deviceSource.activeFormatIndex
+            result.activeFormatIndex = deviceSource.activeFormatIndex(for: direction)
         }
         if properties.contains(.streamFrameDuration) {
-            result.frameDuration = deviceSource.frameDuration
+            result.frameDuration = deviceSource.frameDuration(for: direction)
         }
         if properties.contains(.streamMaxFrameDuration) {
-            result.maxFrameDuration = .aicameraFrameDuration(rate: 15)
+            result.maxFrameDuration = deviceSource.maxFrameDuration(for: direction)
         }
         if direction == .sink {
             if properties.contains(.streamSinkBufferQueueSize) {

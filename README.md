@@ -6,7 +6,7 @@ Live captions, translation, gestures, and a voice agent in the camera feed you s
 people. AI Camera is a native macOS menu-bar app that provides **AI Camera** and
 **AI Camera Microphone** as virtual devices for your call or recording app.
 
-[Download 0.2.0 early alpha](https://github.com/kortexa-ai/aicamera/releases/tag/v0.2.0) ·
+[Download 0.2.1 early alpha](https://github.com/kortexa-ai/aicamera/releases/tag/v0.2.1) ·
 [Website](https://kortexa-ai.github.io/aicamera/) ·
 [Install or remove](docs/installation.md) ·
 [Report an issue](https://github.com/kortexa-ai/aicamera/issues)
@@ -29,7 +29,7 @@ people. AI Camera is a native macOS menu-bar app that provides **AI Camera** and
 
 ## Get started
 
-1. Download and open the signed `AICamera-0.2.0.pkg`, then follow macOS Installer.
+1. Download and open the signed `AICamera-0.2.1.pkg`, then follow macOS Installer.
 2. Open **AI Camera** from Applications and click its icon in the menu bar.
 3. Install the virtual camera and, optionally, virtual microphone from the app. Follow the
    macOS permission and Media Extension prompts. A system-component change can require a restart.
@@ -56,7 +56,8 @@ The installer upgrades the host in place and preserves settings, models, login, 
 - Translation may occasionally return no text. There is one caption language at a time. Gestures
   depend on lighting and hand position; the toolbar provides a direct alternative.
 - Camera compatibility and system-extension approval vary between apps/macOS versions. QuickTime
-  has been exercised; broad conferencing-app and clean-machine coverage remains alpha follow-up work.
+  and WhatsApp for Mac have been exercised; broad conferencing-app and clean-machine coverage
+  remains alpha follow-up work.
 
 ## Privacy
 
@@ -70,7 +71,7 @@ and [the privacy documentation](SECURITY.md) for active data routes.
 
 Development on `main` adds independent agent listening pause (Control–Option–Space), an opt-in
 one-question mode, a local Notes window, and readable information-card tools. These additions
-are not in the downloadable 0.2.0 package. Notes are saved only on request; an explicit note lookup
+are not in the downloadable 0.2.1 package. Notes are saved only on request; an explicit note lookup
 can return their text to the active agent. See [agent behavior and tools](docs/realtime-conversation.md)
 and [the product direction](docs/agent-roadmap.md).
 
@@ -94,7 +95,7 @@ profiles in the ignored `Config/Local.xcconfig`; see [contributing](CONTRIBUTING
 - [Codex authentication boundaries](docs/codex-login.md)
 - [Architecture](docs/architecture.md) and [security/privacy](SECURITY.md)
 - [Tests and diagnostics](docs/testing.md) and [validation evidence](VALIDATION.md)
-- [Release process](docs/release.md) and [0.2.0 release notes](docs/releases/0.2.0.md)
+- [Release process](docs/release.md) and [0.2.1 release notes](docs/releases/0.2.1.md)
 
 ## License
 

@@ -137,8 +137,9 @@ final class VirtualCameraFeeder {
         activeConfiguration = configuration
 
         do {
-            // A source client can negotiate between the initial property write and sink start.
-            // Reassert the feeder format once the extension has locked source changes.
+            // The sink negotiates independently of source clients, which the extension converts
+            // to on the way out. Reassert the feeder format after the stream starts so a write
+            // raced by stream setup cannot leave the sink at a stale format.
             try Self.setFormatDescription(description, on: foundSink)
             try Self.setFrameRate(configuration.framesPerSecond, on: foundSink)
         } catch {

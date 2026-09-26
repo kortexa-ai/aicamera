@@ -91,7 +91,7 @@ pkgutil --check-signature "$RELEASE_PACKAGE"
 spctl --assess --type install --verbose=2 "$RELEASE_PACKAGE"
 python3 scripts/verify-release.py "$RELEASE_APP" --version "$RELEASE_VERSION" --build "$RELEASE_BUILD" \
     > "$RELEASE_OUTPUT/app-verification.json"
-cp docs/releases/0.2.0.md "$RELEASE_OUTPUT/RELEASE-NOTES.md"
+cp "docs/releases/$RELEASE_VERSION.md" "$RELEASE_OUTPUT/RELEASE-NOTES.md"
 cp NOTICE "$RELEASE_OUTPUT/NOTICE"
 (cd "$RELEASE_OUTPUT" && shasum -a 256 "AICamera-$RELEASE_VERSION.pkg" > SHA256SUMS)
 echo "Verified and notarized: $RELEASE_PACKAGE"

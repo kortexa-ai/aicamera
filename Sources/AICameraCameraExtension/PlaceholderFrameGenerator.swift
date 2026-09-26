@@ -1,23 +1,17 @@
-import CoreMedia
 import CoreVideo
 import Foundation
 
-/// Produces a cheap animated frame when the host feeder is not connected.
-/// This object is confined to the device source's media queue.
+/// Produces a cheap animated BGRA frame when the host feeder is not connected. The device
+/// source converts it to the published source format. Confined to the media queue.
 final class PlaceholderFrameGenerator {
     private let format: AICameraVirtualCameraFormat
-    private let formatDescription: CMVideoFormatDescription
     private let pool: CVPixelBufferPool
     private let allocationAttributes: CFDictionary
     private var rowPixels: [UInt32]
     private var frameNumber: UInt64 = 0
 
-    init?(
-        format: AICameraVirtualCameraFormat,
-        formatDescription: CMVideoFormatDescription
-    ) {
+    init?(format: AICameraVirtualCameraFormat) {
         self.format = format
-        self.formatDescription = formatDescription
 
         let attributes: [CFString: Any] = [
             kCVPixelBufferWidthKey: Int(format.width),
@@ -49,10 +43,7 @@ final class PlaceholderFrameGenerator {
         rowPixels = generatedRow
     }
 
-    func makeSampleBuffer(
-        presentationTimeStamp: CMTime,
-        frameDuration: CMTime
-    ) -> CMSampleBuffer? {
+    func makePixelBuffer() -> CVPixelBuffer? {
         var pixelBuffer: CVPixelBuffer?
         guard CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
             kCFAllocatorDefault,
@@ -68,27 +59,8 @@ final class PlaceholderFrameGenerator {
         }
         draw(into: pixelBuffer)
         CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
-
-        var timing = CMSampleTimingInfo(
-            duration: frameDuration,
-            presentationTimeStamp: presentationTimeStamp,
-            decodeTimeStamp: .invalid
-        )
-        var sampleBuffer: CMSampleBuffer?
-        guard CMSampleBufferCreateForImageBuffer(
-            allocator: kCFAllocatorDefault,
-            imageBuffer: pixelBuffer,
-            dataReady: true,
-            makeDataReadyCallback: nil,
-            refcon: nil,
-            formatDescription: formatDescription,
-            sampleTiming: &timing,
-            sampleBufferOut: &sampleBuffer
-        ) == noErr else {
-            return nil
-        }
         frameNumber &+= 1
-        return sampleBuffer
+        return pixelBuffer
     }
 
     private func draw(into pixelBuffer: CVPixelBuffer) {

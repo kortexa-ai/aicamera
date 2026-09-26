@@ -1,11 +1,11 @@
 # Install, repair, and remove AI Camera
 
-AI Camera 0.2.0 is an **early alpha**. The installer installs the host app; camera and microphone
+AI Camera 0.2.1 is an **early alpha**. The installer installs the host app; camera and microphone
 system components are set up separately, with your permission, inside the app.
 
 ## Install or upgrade
 
-1. Download `AICamera-0.2.0.pkg` from the [GitHub release](https://github.com/kortexa-ai/aicamera/releases/tag/v0.2.0).
+1. Download `AICamera-0.2.1.pkg` from the [GitHub release](https://github.com/kortexa-ai/aicamera/releases/tag/v0.2.1).
 2. Close calls and AI Camera Preview tests, then open the package and follow macOS Installer.
    The package requires administrator authorization and installs on your startup volume.
 3. Open **AI Camera** in Applications. Its camera icon appears in the menu bar.

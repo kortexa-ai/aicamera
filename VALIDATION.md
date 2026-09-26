@@ -1,5 +1,24 @@
 # Validation record
 
+## Camera extension 46: 420v source formats for Catalyst clients
+
+A live `log stream` capture of WhatsApp for Mac (Catalyst, 26.38.20) selecting AI Camera showed
+its iOS-style capture graph fail at `BWMultiStreamCameraSourceNode` with `-12780` immediately after
+applying our `32BGRA` stream format, without ever issuing `StartStream`; the view stayed black.
+OBS Virtual Camera (also `32BGRA`) failed identically, while the UVC webcam and the iPhone
+Continuity Camera (`420v`) proceeded to `StartStream` and a first preview frame. Native macOS
+clients accepted `32BGRA` throughout. A native client probe also showed that requesting any frame
+rate other than the three advertised single-point ranges raised `NSInvalidArgumentException` in
+the client, and that the demand-driven feeder forced 1280x720 onto the device after a client had
+chosen another format.
+
+The extension now publishes `420v` source formats with one continuous 1/60–1 s frame-duration
+range, negotiates source and sink independently, and converts BGRA feeder and placeholder frames
+to the active source format with a VideoToolbox pixel-transfer session that also scales. The feeder
+sink contract (BGRA, 15/30/60 fps) and the host are unchanged apart from a comment. Full local
+validation passes with the new shared-constant tests; the extension target compiles without new
+warnings. Installed acceptance evidence (native probe, QuickTime, WhatsApp) belongs to issue 71.
+
 ## Local spoken translation fixtures
 
 The native spoken-translation fixture exercises the production output graph in offline mode with
